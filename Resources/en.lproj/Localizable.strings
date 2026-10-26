@@ -161,3 +161,10 @@
 "首次使用需要安装控制组件" = "Install the control component to begin";
 "高于上限时停止充电，保持适配器供电。" = "Stop charging above the limit and keep using adapter power.";
 "高电量处理策略" = "Above-limit strategy";
+"登录时自动启动" = "Launch at login";
+"登录 Mac 后自动启动 MauLeaf；关闭后不会在下次登录时启动。" = "Open MauLeaf when you log in to your Mac. Turn this off to stop launching at the next login.";
+"等待系统允许，请在登录项设置中开启 MauLeaf 后生效。" = "Waiting for system approval. Allow MauLeaf in Login Items before it can launch automatically.";
+"管理登录项" = "Manage Login Items";
+"无法更新登录项" = "Could not update login item";
+"系统尚未确认登录项更改，请检查系统设置后重试。" = "The system has not confirmed the change. Check Login Items in System Settings and retry.";
+"登录项设置失败：%@" = "Could not change login item: %@";

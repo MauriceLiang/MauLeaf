@@ -3,8 +3,8 @@ set -Eeuo pipefail
 
 ROOT="$(cd "$(dirname "$0")" && pwd)"
 BUILD_DIR="$ROOT/build"
-APP_VERSION="0.7.1"
-APP_BUILD="21"
+APP_VERSION="0.7.2"
+APP_BUILD="22"
 # Publish bundles only after their icons, metadata and signatures are complete.
 APP_STAGE="$BUILD_DIR/.app-staging"
 MAULEAF_APP="$APP_STAGE/MauLeaf.app"
@@ -237,10 +237,10 @@ cat > "$UNINSTALLER_APP/Contents/Info.plist" <<PLIST
 PLIST
 
 xcrun swiftc -parse-as-library -O -target arm64-apple-macos13.0 \
-  -framework SwiftUI -framework AppKit -framework Combine -framework Foundation -framework IOKit \
+  -framework SwiftUI -framework AppKit -framework Combine -framework Foundation -framework IOKit -framework ServiceManagement \
   "$ROOT/Sources/MauLeaf.swift" "$ROOT/Sources/ChargeModeCore.swift" "$ROOT/Sources/AppLocalization.swift" "$ROOT/Sources/OnceChargeAgent.swift" \
   "$ROOT/Sources/DischargeControl.swift" "$ROOT/Sources/DischargeAgent.swift" \
-  "$ROOT/Sources/PowerRefreshController.swift" -o "$MAULEAF_APP/Contents/MacOS/MauLeaf"
+  "$ROOT/Sources/PowerRefreshController.swift" "$ROOT/Sources/LoginItemSettings.swift" -o "$MAULEAF_APP/Contents/MacOS/MauLeaf"
 
 xcrun swiftc -parse-as-library -O -target arm64-apple-macos13.0 \
   -framework SwiftUI -framework AppKit -framework Combine -framework Foundation \

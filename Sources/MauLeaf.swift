@@ -382,6 +382,7 @@ private struct MenuBarBatteryIcon: View {
 struct ContentView: View {
     @ObservedObject var manager: ChargeManager
     @State private var confirmation: Confirmation?
+    @StateObject private var loginItem = LoginItemSettings()
 
     private let presets = [70, 75, 80, 85, 90, 95]
 
@@ -396,6 +397,7 @@ struct ContentView: View {
             batteryCard
             powerSection
             menuBarIconStyleSection
+            loginItemSection
             Divider()
             chargeModeSection
                 .disabled(manager.isPreparingToQuit)
@@ -545,6 +547,37 @@ struct ContentView: View {
                 .font(.caption2)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private var loginItemSection: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Toggle(manager.text("登录时自动启动"), isOn: Binding(
+                get: { loginItem.isRequested },
+                set: { loginItem.setEnabled($0) }
+            ))
+            .toggleStyle(.switch)
+            .font(.subheadline)
+            .disabled(manager.isPreparingToQuit)
+
+            Text(manager.text(loginItem.explanation))
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            Button(manager.text("管理登录项")) { LoginItemSettings.openSystemSettings() }
+                .buttonStyle(.link)
+                .font(.caption2)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            loginItem.refresh()
+        }
+        .alert(manager.text("无法更新登录项"), isPresented: Binding(
+            get: { loginItem.errorMessage != nil },
+            set: { if !$0 { loginItem.errorMessage = nil } }
+        )) {
+            Button(manager.text("关闭"), role: .cancel) { }
+        } message: {
+            Text(manager.text(loginItem.errorMessage ?? ""))
         }
     }
 

@@ -26,6 +26,7 @@ Built with SwiftUI + AppKit, MauLeaf uses the bundled open-source utility [batt]
 | Full charging on demand | Charge fully once, then restore your previous limit, or continuously allow charging to 100%. |
 | Above-limit handling | Keep using the power adapter, or actively use the battery until it reaches your limit. The latter requires device support. |
 | Battery power readings | View charging and discharging power with adaptive refresh while the panel is open. Extra power sampling stops when the panel closes. |
+| Launch at login | Opt in or out yourself. No login item is registered by default; the switch reflects system registration. |
 | One-click language switching | Click “English” or “中文” at the bottom of the panel to switch immediately. Your choice is saved. |
 | Compact menu bar interface | Choose a monochrome or green leaf, click outside to dismiss the panel, and see operation feedback at the bottom without shifting controls. |
 | Release control on normal quit | Restore adapter power and remove the charging limit before quitting, with verification. Saved settings are reapplied on the next launch. |
@@ -68,9 +69,17 @@ With the panel open, power readings update about every 2 seconds while charging 
 
 **Closing the panel and quitting the app are different actions.** A normal quit waits for ongoing operations, stops tasks, and verifies that charging control has been released. If cleanup fails, the app keeps the error visible and lets you try quitting again. The batt service stays installed with no charging limit.
 
+### Launch at login
+
+Turn “Launch at login” on or off below the menu bar icon settings. The app does not register itself by default; if a registration already exists, its system state is shown. Install MauLeaf in `Applications` before enabling this option.
+
+This launches the app after you log in to your Mac. Quitting normally preserves your choice. If approval is pending, click “Manage Login Items” and allow MauLeaf in System Settings before it can launch automatically. Turn the switch off at any time to unregister it. The app refreshes the status when you return from System Settings.
+
+This uses the native macOS [SMAppService login item API](https://developer.apple.com/documentation/servicemanagement/smappservice).
+
 ## Uninstallation
 
-Quit MauLeaf normally, then run `Uninstall MauLeaf.app` from the installation image. The uninstaller first attempts to restore default charging control, then removes the app-managed component, tasks, settings, and both old and new main app names from `/Applications`. You can delete the uninstaller afterward. Externally installed copies of batt are preserved.
+If launch at login is enabled, turn it off first. Quit MauLeaf normally, then run `Uninstall MauLeaf.app` from the installation image. The uninstaller first attempts to restore default charging control, then removes the app-managed component, tasks, settings, and both old and new main app names from `/Applications`. You can delete the uninstaller afterward. Externally installed copies of batt are preserved.
 
 To remove only the control component while keeping MauLeaf, use the component removal action (`卸载组件`) in the main panel.
 

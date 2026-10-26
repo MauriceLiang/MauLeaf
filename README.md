@@ -1,3 +1,5 @@
+[简体中文](README.md) | [English](README.en.md)
+
 <p align="center">
   <img src="Assets/MauLeafIcon-1024.png" width="128" alt="MauLeaf 叶子图标">
 </p>

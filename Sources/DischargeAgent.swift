@@ -42,7 +42,7 @@ enum DischargeAgent {
             let launched = await Task.detached(priority: .utility) {
                 ChargeProcess.run("/bin/launchctl", ["bootstrap", "gui/\(getuid())", path])
             }.value
-            guard launched.status == 0 else { throw ChargingError.helper(launched.output) }
+            guard launched.status == 0 else { throw ChargingError.helper(AppText(verbatim: launched.output)) }
         } catch {
             try await stop()
             throw error

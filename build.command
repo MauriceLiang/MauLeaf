@@ -3,8 +3,8 @@ set -Eeuo pipefail
 
 ROOT="$(cd "$(dirname "$0")" && pwd)"
 BUILD_DIR="$ROOT/build"
-APP_VERSION="0.7.0"
-APP_BUILD="20"
+APP_VERSION="0.7.1"
+APP_BUILD="21"
 # Publish bundles only after their icons, metadata and signatures are complete.
 APP_STAGE="$BUILD_DIR/.app-staging"
 MAULEAF_APP="$APP_STAGE/MauLeaf.app"
@@ -202,6 +202,7 @@ cat > "$MAULEAF_APP/Contents/Info.plist" <<PLIST
   <!-- Preserve the ChargeCap identifier to keep existing preferences. -->
   <key>CFBundleIdentifier</key><string>com.local.chargecap</string>
   <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
+  <key>CFBundleLocalizations</key><array><string>zh-Hans</string><string>en</string></array>
   <key>CFBundleName</key><string>MauLeaf</string>
   <key>CFBundleDisplayName</key><string>MauLeaf</string>
   <key>CFBundleIconFile</key><string>MauLeaf.icns</string>
@@ -237,20 +238,20 @@ PLIST
 
 xcrun swiftc -parse-as-library -O -target arm64-apple-macos13.0 \
   -framework SwiftUI -framework AppKit -framework Combine -framework Foundation -framework IOKit \
-  "$ROOT/Sources/MauLeaf.swift" "$ROOT/Sources/ChargeModeCore.swift" "$ROOT/Sources/OnceChargeAgent.swift" \
+  "$ROOT/Sources/MauLeaf.swift" "$ROOT/Sources/ChargeModeCore.swift" "$ROOT/Sources/AppLocalization.swift" "$ROOT/Sources/OnceChargeAgent.swift" \
   "$ROOT/Sources/DischargeControl.swift" "$ROOT/Sources/DischargeAgent.swift" \
   "$ROOT/Sources/PowerRefreshController.swift" -o "$MAULEAF_APP/Contents/MacOS/MauLeaf"
 
 xcrun swiftc -parse-as-library -O -target arm64-apple-macos13.0 \
   -framework SwiftUI -framework AppKit -framework Combine -framework Foundation \
-  "$ROOT/Sources/UninstallMauLeaf.swift" "$ROOT/Sources/ChargeModeCore.swift" \
+  "$ROOT/Sources/UninstallMauLeaf.swift" "$ROOT/Sources/ChargeModeCore.swift" "$ROOT/Sources/AppLocalization.swift" \
   "$ROOT/Sources/DischargeControl.swift" "$ROOT/Sources/DischargeAgent.swift" -o "$UNINSTALLER_APP/Contents/MacOS/UninstallMauLeaf"
 
 # Standalone user LaunchAgent helper, independent of UI refreshes. Normal
 # application quit cancels its tasks before restoring system charging.
 xcrun swiftc -parse-as-library -O -target arm64-apple-macos13.0 \
   -framework Foundation \
-  "$ROOT/Sources/MauLeafOnceHelper.swift" "$ROOT/Sources/ChargeModeCore.swift" "$ROOT/Sources/DischargeControl.swift" \
+  "$ROOT/Sources/MauLeafOnceHelper.swift" "$ROOT/Sources/ChargeModeCore.swift" "$ROOT/Sources/AppLocalization.swift" "$ROOT/Sources/DischargeControl.swift" \
   -o "$MAULEAF_APP/Contents/Resources/MauLeafOnceHelper"
 chmod 755 "$MAULEAF_APP/Contents/Resources/MauLeafOnceHelper"
 
@@ -271,6 +272,8 @@ for app_dir in "$MAULEAF_APP" "$UNINSTALLER_APP"; do
   cp "$ICON_SOURCE" "$app_dir/Contents/Resources/MauLeafIcon.png"
   cp "$ROOT/Assets/MenuBarLeafTemplate.png" "$app_dir/Contents/Resources/MenuBarLeafTemplate.png"
 done
+
+cp -R "$ROOT/Resources/en.lproj" "$ROOT/Resources/zh-Hans.lproj" "$MAULEAF_APP/Contents/Resources/"
 
 for app_dir in "$MAULEAF_APP" "$UNINSTALLER_APP"; do
   cp "$ROOT/LICENSE" "$app_dir/Contents/Resources/MauLeaf-LICENSE.txt"

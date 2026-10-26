@@ -146,15 +146,15 @@ struct BatteryPowerSample: Equatable, Sendable {
 enum ChargingError: LocalizedError {
     case notInstalled
     case command(String)
-    case verification(String)
-    case helper(String)
+    case verification(AppText)
+    case helper(AppText)
 
     var errorDescription: String? {
         switch self {
         case .notInstalled: return "找不到 batt 控制程序"
         case .command(let detail): return "batt 执行失败：\(detail.trimmingCharacters(in: .whitespacesAndNewlines))"
-        case .verification(let detail): return "状态校验失败：\(detail)"
-        case .helper(let detail): return "后台恢复服务不可用：\(detail)"
+        case .verification(let detail): return "状态校验失败：\(detail.source)"
+        case .helper(let detail): return "后台恢复服务不可用：\(detail.source)"
         }
     }
 }

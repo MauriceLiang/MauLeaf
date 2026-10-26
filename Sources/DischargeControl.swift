@@ -142,7 +142,7 @@ struct DischargeMonitor {
                     return
                 }
                 try writeResult(reason)
-                throw ChargingError.verification(reason.message)
+                throw ChargingError.verification(AppText(key: reason.message))
             }
             if sample.externalConnected == false {
                 try writeResult(DischargeResult(paused: false, message: "当前未接适配器，正常使用电池；接入适配器后处理高电量"))
@@ -151,7 +151,7 @@ struct DischargeMonitor {
             guard sample.externalConnected == true else {
                 let reason = DischargeResult(paused: true, message: "无法确认适配器连接状态，主动降电量已暂停")
                 try writeResult(reason)
-                throw ChargingError.verification(reason.message)
+                throw ChargingError.verification(AppText(key: reason.message))
             }
             if FileManager.default.fileExists(atPath: resultURL.path) { try FileManager.default.removeItem(at: resultURL) }
             let job = DischargeJob(limit: limit, battPath: battPath,
@@ -211,7 +211,7 @@ struct DischargeMonitor {
             // followed by another adapter-disable lease on the next tick.
             try writeResult(failure)
             do { try restore(job, result: failure) } catch {
-                throw ChargingError.helper("恢复适配器供电尚未确认，将重试；\(error.localizedDescription)")
+                throw ChargingError.helper("恢复适配器供电尚未确认，将重试；\(AppText(error: error))")
             }
             throw error
         }

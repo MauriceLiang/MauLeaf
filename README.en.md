@@ -26,6 +26,7 @@ Built with SwiftUI + AppKit, MauLeaf uses the bundled open-source utility [batt]
 | Full charging on demand | Charge fully once, then restore your previous limit, or continuously allow charging to 100%. |
 | Above-limit handling | Keep using the power adapter, or actively use the battery until it reaches your limit. The latter requires device support. |
 | Battery power readings | View charging and discharging power with adaptive refresh while the panel is open. Extra power sampling stops when the panel closes. |
+| One-click language switching | Click “English” or “中文” at the bottom of the panel to switch immediately. Your choice is saved. |
 | Compact menu bar interface | Choose a monochrome or green leaf, click outside to dismiss the panel, and see operation feedback at the bottom without shifting controls. |
 | Release control on normal quit | Restore adapter power and remove the charging limit before quitting, with verification. Saved settings are reapplied on the next launch. |
 | Graphical installation and removal | Install the bundled, pinned control component through macOS authorization. A separate uninstaller is included. |
@@ -44,6 +45,7 @@ Active battery discharge has protection for a closed lid, abnormal temperature, 
 2. Open the DMG, drag `MauLeaf.app` into `Applications`, and launch it. The image also includes `Uninstall MauLeaf.app`.
 3. Click the menu bar leaf to open the panel. If the control component is missing, click the built-in component installation button (`一键安装内置组件`) and complete macOS administrator authorization. No separate batt download is needed at runtime.
 4. Select a charging mode and limit. Results appear at the bottom of the panel. Status updates automatically on launch and whenever you open the panel.
+5. The interface defaults to Chinese. Click “English” at the bottom of the panel to switch to English, or “中文” to switch back. Your language choice is remembered on the next launch.
 
 The current package is locally ad-hoc signed and has not been notarized by Apple, so macOS may block its first launch. After confirming the download source, follow the system prompts in System Settings → Privacy & Security to allow it to open.
 

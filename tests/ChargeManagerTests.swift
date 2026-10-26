@@ -86,6 +86,24 @@ struct ChargeManagerTests {
         let manager = ChargeManager(battPath: binary.path)
         manager.refresh()
         try check(manager.backendReady, "fixture backend must be ready")
+        let beforeLanguageChange = try String(contentsOf: directory.appendingPathComponent("commands"), encoding: .utf8)
+        let originalModeText = manager.modeText
+        manager.language = .english
+        try check(manager.text(manager.modeText) == "Charge limit: 75%", "existing status switches to English immediately")
+        try check(manager.text("充电模式") == "Charging mode", "static controls use selected language")
+        try check(AppLanguage.saved() == .english && ChargeManager(battPath: binary.path).language == .english,
+                  "selected language persists across manager launches")
+        manager.isBusy = true
+        manager.statusMessage = "正在应用充电上限 \(75)%…"
+        try check(manager.text(manager.statusMessage) == "Applying charging limit: 75%…", "in-flight feedback uses English")
+        manager.language = .simplifiedChinese
+        try check(manager.text(manager.statusMessage) == "正在应用充电上限 75%…", "in-flight feedback can switch back without restarting the operation")
+        manager.isBusy = false
+        try check(manager.modeText == originalModeText && manager.limit == 75 && manager.chargeMode == .limited,
+                  "language selection preserves charging state")
+        let afterLanguageChange = try String(contentsOf: directory.appendingPathComponent("commands"), encoding: .utf8)
+        try check(afterLanguageChange == beforeLanguageChange,
+                  "language changes execute no control or refresh commands")
         manager.batteryPercent = 100
         manager.selectChargeMode(.full)
         try await finish(manager)
@@ -213,7 +231,7 @@ struct ChargeManagerTests {
         try FileManager.default.removeItem(at: directory.appendingPathComponent("fail-limit"))
         manager.retryChargeRequest()
         try await finish(manager)
-        try check(!manager.isError && manager.limit == 85 && manager.modeText == "限充至 85%",
+        try check(!manager.isError && manager.limit == 85 && manager.modeText.source == "限充至 85%",
                   "retry must apply and verify the requested limit")
         func freshForQuit() throws -> ChargeManager {
             for name in ["fail-limit", "fail-full", "fail-status", "fail-adapter", "slow-limit", "keep-restore", "ignore-disable", "restore"] {

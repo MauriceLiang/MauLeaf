@@ -52,7 +52,7 @@ enum OnceChargeAgent {
         guard launched.0 == 0 else {
             try? FileManager.default.removeItem(at: jobFile)
             try? FileManager.default.removeItem(at: plistURL)
-            throw ChargingError.helper(launched.1)
+            throw ChargingError.helper(AppText(verbatim: launched.1))
         }
     }
 

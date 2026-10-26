@@ -3,24 +3,28 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
+cp -R "$ROOT/Resources/en.lproj" "$ROOT/Resources/zh-Hans.lproj" "$TMP/"
 export CLANG_MODULE_CACHE_PATH="${CLANG_MODULE_CACHE_PATH:-$TMP/ModuleCache}"
 export SWIFT_MODULECACHE_PATH="${SWIFT_MODULECACHE_PATH:-$TMP/ModuleCache}"
-swiftc "$ROOT/Sources/ChargeModeCore.swift" "$ROOT/Sources/ChargeModeCoreTests.swift" -o "$TMP/coretests"
+swiftc "$ROOT/Sources/ChargeModeCore.swift" "$ROOT/Sources/AppLocalization.swift" "$ROOT/Sources/ChargeModeCoreTests.swift" -o "$TMP/coretests"
 "$TMP/coretests"
-swiftc "$ROOT/Sources/ChargeModeCore.swift" "$ROOT/Sources/DischargeControl.swift" \
+swiftc -parse-as-library "$ROOT/Sources/ChargeModeCore.swift" "$ROOT/Sources/AppLocalization.swift" \
+    "$ROOT/tests/LocalizationTests.swift" -o "$TMP/localizationtests"
+"$TMP/localizationtests"
+swiftc "$ROOT/Sources/ChargeModeCore.swift" "$ROOT/Sources/AppLocalization.swift" "$ROOT/Sources/DischargeControl.swift" \
     "$ROOT/tests/DischargeControlTests.swift" -o "$TMP/dischargetests"
 "$TMP/dischargetests"
 if [[ "$(uname -s)" == Darwin ]]; then
     swiftc -parse-as-library -D MAULEAF_TESTING \
-        "$ROOT/Sources/MauLeaf.swift" "$ROOT/Sources/ChargeModeCore.swift" \
+        "$ROOT/Sources/MauLeaf.swift" "$ROOT/Sources/ChargeModeCore.swift" "$ROOT/Sources/AppLocalization.swift" \
         "$ROOT/Sources/DischargeControl.swift" "$ROOT/Sources/PowerRefreshController.swift" \
         "$ROOT/tests/ChargeManagerTests.swift" -o "$TMP/managertests"
     "$TMP/managertests"
-    swiftc -parse-as-library "$ROOT/Sources/ChargeModeCore.swift" "$ROOT/Sources/PowerRefreshController.swift" \
+    swiftc -parse-as-library "$ROOT/Sources/ChargeModeCore.swift" "$ROOT/Sources/AppLocalization.swift" "$ROOT/Sources/PowerRefreshController.swift" \
         "$ROOT/tests/PowerRefreshTests.swift" -o "$TMP/powertests"
     "$TMP/powertests"
     swiftc -parse-as-library -D MAULEAF_TESTING -D MAULEAF_LAYOUT_TESTING \
-        "$ROOT/Sources/MauLeaf.swift" "$ROOT/Sources/ChargeModeCore.swift" \
+        "$ROOT/Sources/MauLeaf.swift" "$ROOT/Sources/ChargeModeCore.swift" "$ROOT/Sources/AppLocalization.swift" \
         "$ROOT/Sources/DischargeControl.swift" "$ROOT/Sources/PowerRefreshController.swift" \
         "$ROOT/tests/ChargeManagerTests.swift" "$ROOT/tests/FeedbackLayoutTests.swift" -o "$TMP/layouttests"
     "$TMP/layouttests"

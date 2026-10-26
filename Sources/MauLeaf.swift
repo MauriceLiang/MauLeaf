@@ -122,7 +122,7 @@ private final class MauLeafMenuController: NSObject {
             button.action = #selector(togglePanel)
             button.imageScaling = .scaleProportionallyDown
             button.imagePosition = .imageOnly
-            button.toolTip = "MauLeaf · 充电控制"
+            button.toolTip = manager.text("MauLeaf · 充电控制")
         }
 
         refreshSubscription = manager.objectWillChange.sink { [weak self] _ in
@@ -143,10 +143,10 @@ private final class MauLeafMenuController: NSObject {
             button.imagePosition = .imageOnly
             button.imageScaling = .scaleProportionallyDown
             button.image = LeafAssets.menuBarImage(style: manager.menuBarLeafStyle)
-            button.setAccessibilityLabel("MauLeaf · 电池养护")
             renderedLeafStyle = manager.menuBarLeafStyle
         }
-        let tooltip = manager.menuBarAccessibilityText
+        button.setAccessibilityLabel(manager.text("MauLeaf · 电池养护"))
+        let tooltip = manager.text(manager.menuBarAccessibilityText)
         if button.toolTip != tooltip { button.toolTip = tooltip }
     }
 
@@ -415,17 +415,17 @@ struct ContentView: View {
             switch item {
             case .install:
                 return Alert(
-                    title: Text("安装官方充电控制组件？"),
-                    message: Text("MauLeaf 已内置经过版本固定和构建时校验的 batt 控制程序。安装时会将其部署为系统服务并请求 macOS 管理员授权，不会在运行时下载组件，也不会覆盖其他来源的安装。"),
-                    primaryButton: .default(Text("继续安装"), action: { manager.installBackend() }),
-                    secondaryButton: .cancel(Text("取消"))
+                    title: Text(manager.text("安装官方充电控制组件？")),
+                    message: Text(manager.text("MauLeaf 已内置经过版本固定和构建时校验的 batt 控制程序。安装时会将其部署为系统服务并请求 macOS 管理员授权，不会在运行时下载组件，也不会覆盖其他来源的安装。")),
+                    primaryButton: .default(Text(manager.text("继续安装")), action: { manager.installBackend() }),
+                    secondaryButton: .cancel(Text(manager.text("取消")))
                 )
             case .uninstall:
                 return Alert(
-                    title: Text("卸载充电控制组件？"),
-                    message: Text("将先恢复默认充电控制，再移除 MauLeaf 安装的 batt 程序、系统服务和 batt 配置。MauLeaf 应用本身不会被删除。此操作需要管理员授权。"),
-                    primaryButton: .destructive(Text("卸载组件"), action: { manager.uninstallBackend() }),
-                    secondaryButton: .cancel(Text("取消"))
+                    title: Text(manager.text("卸载充电控制组件？")),
+                    message: Text(manager.text("将先恢复默认充电控制，再移除 MauLeaf 安装的 batt 程序、系统服务和 batt 配置。MauLeaf 应用本身不会被删除。此操作需要管理员授权。")),
+                    primaryButton: .destructive(Text(manager.text("卸载组件")), action: { manager.uninstallBackend() }),
+                    secondaryButton: .cancel(Text(manager.text("取消")))
                 )
             }
         }
@@ -436,13 +436,13 @@ struct ContentView: View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(alignment: .center, spacing: 12) {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("当前电量")
+                    Text(manager.text("当前电量"))
                         .font(.caption)
                         .foregroundStyle(.secondary)
                     Text(manager.batteryPercent.map { "\($0)%" } ?? "--")
                         .font(.system(size: 34, weight: .semibold, design: .rounded))
                         .monospacedDigit()
-                    Label(manager.batteryStateText, systemImage: manager.batteryStateSymbol)
+                    Label(manager.text(AppText(key: manager.batteryStateText)), systemImage: manager.batteryStateSymbol)
                         .font(.caption)
                         .foregroundStyle(manager.batteryTint)
                 }
@@ -465,9 +465,9 @@ struct ContentView: View {
                 Image(systemName: manager.backendReady ? "shield.checkered" : "shield.lefthalf.filled")
                     .foregroundStyle(manager.backendReady ? Color.green : Color.secondary)
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(manager.modeText)
+                    Text(manager.text(manager.modeText))
                         .font(.subheadline.weight(.medium))
-                    Text(manager.backendReady ? "控制服务已连接" : "充电控制尚未生效")
+                    Text(manager.backendReady ? manager.text("控制服务已连接") : manager.text("充电控制尚未生效"))
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                 }
@@ -484,25 +484,25 @@ struct ContentView: View {
     private var powerSection: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
-                Text("实时电池功率")
+                Text(manager.text("实时电池功率"))
                     .font(.subheadline.weight(.medium))
                 Spacer()
-                Text("非充电器输入功率")
+                Text(manager.text("非充电器输入功率"))
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
             }
             HStack(spacing: 9) {
                 powerCard(
-                    title: "充电功率",
+                    title: manager.text("充电功率"),
                     value: manager.chargePowerWatts.map { String(format: "%.1f W", $0) } ?? "—",
-                    subtitle: manager.chargePowerSubtitle,
+                    subtitle: manager.text(AppText(key: manager.chargePowerSubtitle)),
                     symbol: "arrow.down.circle.fill",
                     tint: .green
                 )
                 powerCard(
-                    title: "放电功率",
+                    title: manager.text("放电功率"),
                     value: manager.dischargePowerWatts.map { String(format: "%.1f W", $0) } ?? "—",
-                    subtitle: manager.dischargePowerSubtitle,
+                    subtitle: manager.text(AppText(key: manager.dischargePowerSubtitle)),
                     symbol: "arrow.up.circle.fill",
                     tint: .secondary
                 )
@@ -532,16 +532,16 @@ struct ContentView: View {
 
     private var menuBarIconStyleSection: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("菜单栏图标样式")
+            Text(manager.text("菜单栏图标样式"))
                 .font(.subheadline.weight(.medium))
-            Picker("菜单栏图标样式", selection: $manager.menuBarLeafStyle) {
+            Picker(manager.text("菜单栏图标样式"), selection: $manager.menuBarLeafStyle) {
                 ForEach(MenuBarLeafStyle.allCases) { style in
-                    Text(style.title).tag(style)
+                    Text(manager.text(AppText(key: style.title))).tag(style)
                 }
             }
             .pickerStyle(.segmented)
             .labelsHidden()
-            Text("菜单栏仅显示叶子图标；可选择跟随系统外观的单色叶子，或固定绿色叶子。")
+            Text(manager.text("菜单栏仅显示叶子图标；可选择跟随系统外观的单色叶子，或固定绿色叶子。"))
                 .font(.caption2)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -550,15 +550,15 @@ struct ContentView: View {
 
     private var chargeModeSection: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("充电模式")
+            Text(manager.text("充电模式"))
                 .font(.subheadline.weight(.medium))
 
-            Picker("充电模式", selection: Binding(
+            Picker(manager.text("充电模式"), selection: Binding(
                 get: { manager.chargeMode },
                 set: { manager.selectChargeMode($0) }
             )) {
-                Text("控制模式").tag(ChargeMode.limited)
-                Text("直接充满").tag(ChargeMode.full)
+                Text(manager.text("控制模式")).tag(ChargeMode.limited)
+                Text(manager.text("直接充满")).tag(ChargeMode.full)
             }
             .pickerStyle(.segmented)
             .labelsHidden()
@@ -568,38 +568,38 @@ struct ContentView: View {
                 limitSection
                 highChargeSection
             } else {
-                Picker("充满方式", selection: Binding(
+                Picker(manager.text("充满方式"), selection: Binding(
                     get: { manager.fullBehavior },
                     set: { manager.selectFullBehavior($0) }
                 )) {
-                    Text("仅充满一次").tag(FullBehavior.once)
-                    Text("持续允许充满").tag(FullBehavior.always)
+                    Text(manager.text("仅充满一次")).tag(FullBehavior.once)
+                    Text(manager.text("持续允许充满")).tag(FullBehavior.always)
                 }
                 .pickerStyle(.radioGroup)
                 .disabled(manager.isBusy || !manager.backendReady)
                 .padding(.vertical, 2)
 
                 if manager.fullBehavior == .once {
-                    Text("限时解除限充；到达 100% 时后台恢复原上限，最长 10 小时后自动恢复。")
+                    Text(manager.text("限时解除限充；到达 100% 时后台恢复原上限，最长 10 小时后自动恢复。"))
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                     if manager.fullOncePending {
-                        Button("取消本次充满，恢复上限") { manager.cancelFullOnce() }
+                        Button(manager.text("取消本次充满，恢复上限")) { manager.cancelFullOnce() }
                             .buttonStyle(.bordered)
                             .disabled(manager.isBusy)
                     } else {
                         Text((manager.batteryPercent ?? 0) >= 100
-                             ? "当前已充满，原限充上限保持生效；可选择持续允许充满。"
-                             : "本次充满尚未启动，原限充上限保持生效。")
+                             ? manager.text("当前已充满，原限充上限保持生效；可选择持续允许充满。")
+                             : manager.text("本次充满尚未启动，原限充上限保持生效。"))
                             .font(.caption2)
                             .foregroundStyle(.secondary)
-                        Button("启动仅充满一次") { manager.selectFullBehavior(.once) }
+                        Button(manager.text("启动仅充满一次")) { manager.selectFullBehavior(.once) }
                             .buttonStyle(.bordered)
                             .disabled(manager.isBusy || !manager.backendReady || (manager.batteryPercent ?? 0) >= 100)
                     }
                 } else {
-                    Text("持续解除充电上限，直到切回控制模式；原先的上限值会保留。")
+                    Text(manager.text("持续解除充电上限，直到切回控制模式；原先的上限值会保留。"))
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                 }
@@ -609,32 +609,32 @@ struct ContentView: View {
 
     private var highChargeSection: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text("超过上限时").font(.subheadline.weight(.medium))
-            Picker("高电量处理策略", selection: Binding(
+            Text(manager.text("超过上限时")).font(.subheadline.weight(.medium))
+            Picker(manager.text("高电量处理策略"), selection: Binding(
                 get: { manager.highChargePolicy },
                 set: { manager.selectHighChargePolicy($0) }
             )) {
-                Text("保持适配器供电").tag(HighChargePolicy.adapter)
-                Text("主动使用电池，降至上限").tag(HighChargePolicy.discharge)
+                Text(manager.text("保持适配器供电")).tag(HighChargePolicy.adapter)
+                Text(manager.text("主动使用电池，降至上限")).tag(HighChargePolicy.discharge)
                     .disabled(manager.supportsAdapterControl != true)
             }
             .pickerStyle(.radioGroup)
             .disabled(manager.isBusy || !manager.backendReady)
-            Text(manager.dischargeMessage)
+            Text(manager.text(manager.dischargeMessage))
                 .font(.caption2)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
             if manager.supportsAdapterControl != true {
-                Text("尚未确认设备支持适配器控制，主动降电量不可用。")
+                Text(manager.text("尚未确认设备支持适配器控制，主动降电量不可用。"))
                     .font(.caption2).foregroundStyle(.secondary)
             }
             if manager.highChargePolicy == .discharge && manager.dischargePaused {
-                Button("恢复主动降电量") { manager.selectHighChargePolicy(.discharge) }
+                Button(manager.text("恢复主动降电量")) { manager.selectHighChargePolicy(.discharge) }
                     .buttonStyle(.bordered)
                     .disabled(manager.isBusy || !manager.backendReady || manager.supportsAdapterControl != true)
             }
             if manager.highChargePolicy == .discharge {
-                Text("到达上限或触发保护即恢复适配器供电。合盖会停止主动降电量；可能导致合盖外接屏模式进入睡眠。")
+                Text(manager.text("到达上限或触发保护即恢复适配器供电。合盖会停止主动降电量；可能导致合盖外接屏模式进入睡眠。"))
                     .font(.caption2).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -644,7 +644,7 @@ struct ContentView: View {
     private var limitSection: some View {
         VStack(alignment: .leading, spacing: 9) {
             HStack {
-                Text("充电上限")
+                Text(manager.text("充电上限"))
                     .font(.subheadline.weight(.medium))
                 Spacer()
                 Text("\(manager.limit)%")
@@ -675,7 +675,7 @@ struct ContentView: View {
                     .disabled(!manager.backendReady)
                 }
             }
-            Text("调整后自动应用，点击预设值立即生效。")
+            Text(manager.text("调整后自动应用，点击预设值立即生效。"))
                 .font(.caption2)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -684,11 +684,11 @@ struct ContentView: View {
 
     private var componentSetupSection: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text(manager.componentPresent ? "检测到已有控制组件" : "首次使用需要安装控制组件")
+            Text(manager.componentPresent ? manager.text("检测到已有控制组件") : manager.text("首次使用需要安装控制组件"))
                 .font(.subheadline.weight(.medium))
             Text(manager.componentPresent
-                 ? "已找到 \(manager.detectedBattPath ?? "batt")，但服务不可用。为避免覆盖其他安装方式，请先检查现有服务。"
-                 : "MauLeaf 已内置 batt 控制程序。点击后会直接安装内置组件并注册系统服务，无需联网下载；首次安装需要管理员授权。")
+                 ? manager.text("已找到 \(manager.detectedBattPath ?? "batt")，但服务不可用。为避免覆盖其他安装方式，请先检查现有服务。")
+                 : manager.text("MauLeaf 已内置 batt 控制程序。点击后会直接安装内置组件并注册系统服务，无需联网下载；首次安装需要管理员授权。"))
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -697,7 +697,7 @@ struct ContentView: View {
                 Button {
                     confirmation = .install
                 } label: {
-                    Label(manager.isBusy ? "正在安装…" : "一键安装内置组件", systemImage: "shippingbox.fill")
+                    Label(manager.isBusy ? manager.text("正在安装…") : manager.text("一键安装内置组件"), systemImage: "shippingbox.fill")
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.borderedProminent)
@@ -706,13 +706,13 @@ struct ContentView: View {
                 Button {
                     manager.refresh()
                 } label: {
-                    Label("重新检查服务", systemImage: "arrow.clockwise")
+                    Label(manager.text("重新检查服务"), systemImage: "arrow.clockwise")
                 }
                 .buttonStyle(.bordered)
                 .disabled(manager.isBusy)
             }
 
-            Button("查看官方项目与安装说明") {
+            Button(manager.text("查看官方项目与安装说明")) {
                 if let url = URL(string: "https://github.com/charlie0129/batt") {
                     NSWorkspace.shared.open(url)
                 }
@@ -731,7 +731,7 @@ struct ContentView: View {
                 Button {
                     confirmation = .uninstall
                 } label: {
-                    Label("卸载组件", systemImage: "trash")
+                    Label(manager.text("卸载组件"), systemImage: "trash")
                 }
                 .buttonStyle(.plain)
                 .font(.caption)
@@ -741,12 +741,22 @@ struct ContentView: View {
 
             Spacer()
 
-            Button("退出") { NSApp.terminate(nil) }
+            Button {
+                manager.language = manager.language.other
+            } label: {
+                Label(manager.language.switchTitle, systemImage: "globe")
+            }
+            .buttonStyle(.plain)
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .help(manager.text("切换界面语言"))
+
+            Button(manager.text("退出")) { NSApp.terminate(nil) }
                 .buttonStyle(.plain)
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .disabled(manager.isPreparingToQuit)
-                .help("停止后台充电任务、解除充电限制并恢复适配器供电后退出")
+                .help(manager.text("停止后台充电任务、解除充电限制并恢复适配器供电后退出"))
         }
     }
 }
@@ -755,10 +765,10 @@ struct ContentView: View {
 /// to the content-height preference or move the controls being operated.
 struct OperationFeedbackView: View {
     @ObservedObject var manager: ChargeManager
-    @State private var successMessage: String?
-    @State private var dismissedError: String?
+    @State private var successMessage: AppText?
+    @State private var dismissedError: AppText?
     @State private var showDetails = false
-    @State private var errorDetails = ""
+    @State private var errorDetails: AppText = ""
 
     private var errorVisible: Bool {
         !manager.isBusy && manager.isError && dismissedError != manager.statusMessage
@@ -775,7 +785,7 @@ struct OperationFeedbackView: View {
                             Image(systemName: errorVisible ? "exclamationmark.triangle.fill" : "checkmark.circle.fill")
                                 .foregroundStyle(errorVisible ? Color.orange : Color.green)
                         }
-                        Text(manager.isBusy || errorVisible ? manager.statusMessage : successMessage ?? "")
+                        Text(manager.text(manager.isBusy || errorVisible ? manager.statusMessage : successMessage ?? ""))
                             .font(.caption)
                             .lineLimit(2)
                             .frame(maxWidth: .infinity, alignment: .leading)
@@ -784,17 +794,17 @@ struct OperationFeedbackView: View {
                                 dismissedError = manager.statusMessage
                             } label: { Image(systemName: "xmark") }
                             .buttonStyle(.plain)
-                            .accessibilityLabel("关闭提示")
+                            .accessibilityLabel(manager.text("关闭提示"))
                         }
                     }
                     if errorVisible {
                         HStack(spacing: 12) {
-                            Button("查看详情") {
+                            Button(manager.text("查看详情")) {
                                 errorDetails = manager.statusMessage
                                 showDetails = true
                             }
                             if manager.canRetryChargeRequest {
-                                Button("重试") { manager.retryChargeRequest() }
+                                Button(manager.text("重试")) { manager.retryChargeRequest() }
                             }
                         }
                         .font(.caption)
@@ -824,9 +834,9 @@ struct OperationFeedbackView: View {
             catch { return }
             successMessage = nil
         }
-        .alert("操作未完成", isPresented: $showDetails) {
-            Button("关闭", role: .cancel) { }
-        } message: { Text(errorDetails) }
+        .alert(manager.text("操作未完成"), isPresented: $showDetails) {
+            Button(manager.text("关闭"), role: .cancel) { }
+        } message: { Text(manager.text(errorDetails)) }
     }
 }
 
@@ -838,6 +848,9 @@ final class ChargeManager: ObservableObject {
     @Published var limit: Int {
         didSet { UserDefaults.standard.set(limit, forKey: "chargeLimit") }
     }
+    @Published var language = AppLanguage.saved() {
+        didSet { UserDefaults.standard.set(language.rawValue, forKey: AppLanguage.preferenceKey) }
+    }
     @Published var menuBarLeafStyle: MenuBarLeafStyle {
         didSet { UserDefaults.standard.set(menuBarLeafStyle.rawValue, forKey: "menuBarLeafStyle") }
     }
@@ -847,8 +860,8 @@ final class ChargeManager: ObservableObject {
     @Published private(set) var highChargePolicy: HighChargePolicy = .adapter
     @Published private(set) var supportsAdapterControl: Bool?
     @Published private(set) var dischargePaused = false
-    @Published private(set) var dischargeMessage = "高于上限时停止充电，保持适配器供电。"
-    @Published var autoApplyFeedback = "调整后自动应用"
+    @Published private(set) var dischargeMessage: AppText = "高于上限时停止充电，保持适配器供电。"
+    @Published var autoApplyFeedback: AppText = "调整后自动应用"
     private var limitDebounce: Task<Void, Never>?
     private var lastVerifiedLimit: Int?
     private var queuedLimit: Int?
@@ -858,8 +871,8 @@ final class ChargeManager: ObservableObject {
         case full(FullBehavior)
     }
     private var lastChargeRequest: ChargeRequest?
-    @Published var modeText = "正在读取状态…"
-    @Published var statusMessage = "正在检查充电控制组件…"
+    @Published var modeText: AppText = "正在读取状态…"
+    @Published var statusMessage: AppText = "正在检查充电控制组件…"
     @Published var backendReady = false
     @Published var componentPresent = false
     @Published var detectedBattPath: String?
@@ -896,6 +909,8 @@ final class ChargeManager: ObservableObject {
         self.highChargePolicy = HighChargePolicy(rawValue: UserDefaults.standard.string(forKey: "highChargePolicy") ?? "adapter") ?? .adapter
     }
 
+    func text(_ message: AppText) -> String { message.localized(in: language) }
+
     var batteryTint: Color {
         if let batteryPercent, batteryPercent < 20 { return .red }
         if batteryStateText == "正在充电" { return .green }
@@ -910,8 +925,8 @@ final class ChargeManager: ObservableObject {
         return menuBarSymbol
     }
 
-    var menuBarAccessibilityText: String {
-        let level = batteryPercent.map { "电量 \($0)%" } ?? "电量未知"
+    var menuBarAccessibilityText: AppText {
+        let level: AppText = batteryPercent.map { value -> AppText in "电量 \(value)%" } ?? "电量未知"
         if let batteryPercent, batteryPercent < 20 { return "\(level)，电量低" }
         if batteryStateText == "正在充电" { return "\(level)，正在充电" }
         if isAdapterConnected { return "\(level)，已接入电源但未充电" }
@@ -1135,10 +1150,10 @@ final class ChargeManager: ObservableObject {
         let result = DischargeAgent.result
         dischargePaused = result?.paused == true
         if DischargeAgent.hasPendingJob {
-            if let result, result.paused { dischargeMessage = result.message }
+            if let result, result.paused { dischargeMessage = AppText(key: result.message) }
             else { dischargeMessage = "正在使用电池，降至 \(limit)% 后自动恢复适配器供电。" }
         } else if highChargePolicy == .discharge {
-            dischargeMessage = result?.message ?? "当前未主动放电；高于上限时按所选策略处理。"
+            dischargeMessage = result.map { AppText(key: $0.message) } ?? "当前未主动放电；高于上限时按所选策略处理。"
         } else {
             dischargeMessage = "高于上限时停止充电，保持适配器供电。"
         }
@@ -1174,7 +1189,7 @@ final class ChargeManager: ObservableObject {
             guard result.status == 0 else { throw ChargingError.command(result.output) }
             let current = try await checkedStatus()
             guard current.upperLimit == value else {
-                throw ChargingError.verification("设备报告上限 \(current.upperLimit.map(String.init) ?? "未知")%，预期 \(value)%")
+                throw ChargingError.verification("设备报告上限 \(AppText(key: current.upperLimit.map(String.init) ?? "未知"))%，预期 \(value)%")
             }
             limitApplied = true
             UserDefaults.standard.set(false, forKey: "chargeControlReleasedOnQuit")
@@ -1197,8 +1212,8 @@ final class ChargeManager: ObservableObject {
             isError = false
         } catch {
             updateDischargeState()
-            autoApplyFeedback = limitApplied ? "上限已应用，但高电量策略失败：\(error.localizedDescription)"
-                : "应用失败：\(error.localizedDescription)"
+            autoApplyFeedback = limitApplied ? "上限已应用，但高电量策略失败：\(AppText(error: error))"
+                : "应用失败：\(AppText(error: error))"
             statusMessage = autoApplyFeedback
             isError = true
         }
@@ -1289,7 +1304,7 @@ final class ChargeManager: ObservableObject {
                     _ = try? await invokeBatt(BattCommand.setLimit(limit).arguments)
                 }
             }
-            statusMessage = "切换失败：\(error.localizedDescription)。已尝试恢复上一充电模式，请检查实际状态。"
+            statusMessage = "切换失败：\(AppText(error: error))。已尝试恢复上一充电模式，请检查实际状态。"
             isError = true
         }
     }
@@ -1387,7 +1402,7 @@ final class ChargeManager: ObservableObject {
             statusMessage = "已解除充电控制，正在退出。"
             return true
         } catch {
-            statusMessage = "退出已取消：\(error.localizedDescription)。未确认恢复系统充电，请检查后重试退出。"
+            statusMessage = "退出已取消：\(AppText(error: error))。未确认恢复系统充电，请检查后重试退出。"
             isError = true
             return false
         }
@@ -1478,7 +1493,7 @@ final class ChargeManager: ObservableObject {
                 UserDefaults.standard.set(receiptExists, forKey: "chargeCapManagedBattInstall")
                 isManagedInstall = receiptExists && FileManager.default.isExecutableFile(atPath: managedBinaryPath)
                 refresh()
-                statusMessage = "安装未完成：\(error.localizedDescription)"
+                statusMessage = "安装未完成：\(AppText(error: error))"
                 isError = true
             }
         }
@@ -1584,7 +1599,7 @@ final class ChargeManager: ObservableObject {
                 // Refresh actual state first; refresh() also updates statusMessage.
                 // Preserve the actionable error after refreshing so it is not hidden.
                 refresh()
-                statusMessage = "卸载未完成：\(error.localizedDescription)。组件未被强制删除，请检查提示后重试。"
+                statusMessage = "卸载未完成：\(AppText(error: error))。组件未被强制删除，请检查提示后重试。"
                 isError = true
             }
         }

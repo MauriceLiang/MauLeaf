@@ -15,6 +15,9 @@ swiftc "$ROOT/Sources/ChargeModeCore.swift" "$ROOT/Sources/AppLocalization.swift
     "$ROOT/tests/DischargeControlTests.swift" -o "$TMP/dischargetests"
 "$TMP/dischargetests"
 if [[ "$(uname -s)" == Darwin ]]; then
+    swift "$ROOT/Scripts/GenerateAppIcon.swift" "$ROOT/Assets/MauLeafIcon-1024.png" "$TMP/AppIcon.iconset"
+    swiftc -parse-as-library "$ROOT/tests/AppIconTests.swift" -o "$TMP/appicontests"
+    "$TMP/appicontests" "$TMP/AppIcon.iconset"
     swiftc -parse-as-library -framework ServiceManagement "$ROOT/Sources/ChargeModeCore.swift" "$ROOT/Sources/AppLocalization.swift" \
         "$ROOT/Sources/LoginItemSettings.swift" "$ROOT/tests/LoginItemSettingsTests.swift" -o "$TMP/loginitemtests"
     "$TMP/loginitemtests"

@@ -1,25 +1,26 @@
 import Foundation
 import AppKit
 
-/// Installs a per-user launchd checker. No root is needed because ChargeCap's
+/// Installs a per-user launchd checker. No root is needed because MauLeaf's
 /// batt installation enables the socket's non-root access. If a preexisting
 /// service does not allow writes, we report a real error and do not start the
 /// one-time mode.
 @MainActor
 enum OnceChargeAgent {
+    // Keep the legacy identity/path so ChargeCap settings and tasks remain compatible.
     private static let label = "dev.mauriceliang.chargecap.once"
     private static let home = FileManager.default.homeDirectoryForCurrentUser
     private static let support = home.appendingPathComponent("Library/Application Support/ChargeCap", isDirectory: true)
     private static let jobFile = support.appendingPathComponent("once-task.json")
-    private static let executable = support.appendingPathComponent("ChargeCapOnceHelper")
+    private static let executable = support.appendingPathComponent("MauLeafOnceHelper")
     private static let plistURL = home.appendingPathComponent("Library/LaunchAgents/\(label).plist")
 
     static var hasPendingJob: Bool { FileManager.default.fileExists(atPath: jobFile.path) }
 
     static func prepare(battPath: String, limit: Int) async throws {
-        guard let helper = Bundle.main.url(forResource: "ChargeCapOnceHelper", withExtension: nil),
+        guard let helper = Bundle.main.url(forResource: "MauLeafOnceHelper", withExtension: nil),
               FileManager.default.isExecutableFile(atPath: helper.path) else {
-            throw ChargingError.helper("应用包内缺少 ChargeCapOnceHelper，请重新构建")
+            throw ChargingError.helper("应用包内缺少 MauLeafOnceHelper，请重新构建")
         }
         guard (50...95).contains(limit), FileManager.default.isExecutableFile(atPath: battPath) else {
             throw ChargingError.helper("控制组件或上限值不正确")

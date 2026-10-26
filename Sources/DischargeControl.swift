@@ -107,6 +107,7 @@ struct DischargeResult: Codable {
 // Shared by the UI and the independent helper. Every hardware transition is
 // serialized across processes; cancellation cannot race a lease renewal.
 struct DischargeMonitor {
+    // Keep the legacy identity/path so ChargeCap settings and tasks remain compatible.
     static let directory = FileManager.default.homeDirectoryForCurrentUser
         .appendingPathComponent("Library/Application Support/ChargeCap", isDirectory: true)
     let directory: URL

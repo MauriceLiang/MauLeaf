@@ -217,7 +217,7 @@ struct DischargeControlTests {
     }
 
     static func fixture(_ body: (DischargeMonitor, Fixture) throws -> Void) throws {
-        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("chargecap-discharge-tests-\(UUID().uuidString)")
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("mauleaf-discharge-tests-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: directory) }
         let state = Fixture()
         let monitor = DischargeMonitor(directory: directory, run: state.run,

@@ -8,7 +8,8 @@ import Foundation
 /// With --discharge it instead monitors a bounded adapter-disable lease until
 /// completion; launchd restarts failures, but leaves completed tasks stopped.
 @main
-struct ChargeCapOnceHelper {
+struct MauLeafOnceHelper {
+    // Keep the legacy identity/path so ChargeCap settings and tasks remain compatible.
     static let label = "dev.mauriceliang.chargecap.once"
 
     static func main() {

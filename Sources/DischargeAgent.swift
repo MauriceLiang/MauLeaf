@@ -2,6 +2,7 @@ import Foundation
 
 @MainActor
 enum DischargeAgent {
+    // Keep the legacy identity/path so ChargeCap settings and tasks remain compatible.
     static let label = "dev.mauriceliang.chargecap.discharge"
     private static let monitor = DischargeMonitor(directory: DischargeMonitor.directory)
     private static let plistURL = FileManager.default.homeDirectoryForCurrentUser
@@ -12,11 +13,11 @@ enum DischargeAgent {
 
     static func start(battPath: String, limit: Int) async throws {
         try await stop()
-        guard let helper = Bundle.main.url(forResource: "ChargeCapOnceHelper", withExtension: nil),
+        guard let helper = Bundle.main.url(forResource: "MauLeafOnceHelper", withExtension: nil),
               FileManager.default.isExecutableFile(atPath: helper.path) else {
             throw ChargingError.helper("应用包内缺少充电监控程序，请重新构建")
         }
-        let executable = monitor.directory.appendingPathComponent("ChargeCapDischargeHelper")
+        let executable = monitor.directory.appendingPathComponent("MauLeafDischargeHelper")
         try FileManager.default.createDirectory(at: monitor.directory, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
         if FileManager.default.fileExists(atPath: executable.path) { try FileManager.default.removeItem(at: executable) }
         try FileManager.default.copyItem(at: helper, to: executable)

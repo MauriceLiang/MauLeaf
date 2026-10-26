@@ -3,7 +3,7 @@ import AppKit
 import Foundation
 
 @main
-struct ChargeCapUninstallerApp: App {
+struct MauLeafUninstallerApp: App {
     @StateObject private var model = UninstallerModel()
 
     var body: some Scene {
@@ -23,7 +23,7 @@ struct UninstallerView: View {
         VStack(alignment: .leading, spacing: 16) {
             HStack(spacing: 12) {
                 Group {
-                    if let url = Bundle.main.url(forResource: "ChargeCapIcon", withExtension: "png"),
+                    if let url = Bundle.main.url(forResource: "MauLeafIcon", withExtension: "png"),
                        let icon = NSImage(contentsOf: url) {
                         Image(nsImage: icon).resizable().interpolation(.high)
                     } else {
@@ -33,7 +33,7 @@ struct UninstallerView: View {
                 .frame(width: 54, height: 54)
                 .clipShape(RoundedRectangle(cornerRadius: 13))
                 VStack(alignment: .leading, spacing: 3) {
-                    Text("卸载 ChargeCap")
+                    Text("卸载 MauLeaf")
                         .font(.title2.weight(.semibold))
                     Text("移除应用及其管理的充电控制组件")
                         .font(.subheadline)
@@ -44,9 +44,9 @@ struct UninstallerView: View {
             Divider()
 
             VStack(alignment: .leading, spacing: 10) {
-                Label("停止并卸载 ChargeCap 管理的 batt 服务", systemImage: "server.rack")
+                Label("停止并卸载 MauLeaf 管理的 batt 服务", systemImage: "server.rack")
                 Label("清理组件文件、系统服务和组件配置", systemImage: "trash")
-                Label("移除 /Applications 中的 ChargeCap.app", systemImage: "app.badge.minus")
+                Label("移除 /Applications 中的 MauLeaf.app", systemImage: "app.badge.minus")
                 Label("保留 Homebrew 或其他来源安装的 batt", systemImage: "checkmark.shield")
             }
             .font(.callout)
@@ -66,7 +66,7 @@ struct UninstallerView: View {
                 Button(role: .destructive) {
                     showConfirmation = true
                 } label: {
-                    Label(model.isBusy ? "正在卸载…" : "卸载 ChargeCap", systemImage: "trash")
+                    Label(model.isBusy ? "正在卸载…" : "卸载 MauLeaf", systemImage: "trash")
                 }
                 .buttonStyle(.borderedProminent)
                 .disabled(model.isBusy)
@@ -78,17 +78,18 @@ struct UninstallerView: View {
             Button("取消", role: .cancel) { }
             Button("完整卸载", role: .destructive) { model.uninstallEverything() }
         } message: {
-            Text("将先尝试恢复默认充电控制，再卸载由 ChargeCap 管理的服务和配置。此操作需要管理员授权。外部安装的 batt 不会被删除。")
+            Text("将先尝试恢复默认充电控制，再卸载由 MauLeaf 管理的服务和配置。此操作需要管理员授权。外部安装的 batt 不会被删除。")
         }
     }
 }
 
 @MainActor
 final class UninstallerModel: ObservableObject {
-    @Published var status = "准备就绪。建议先退出 ChargeCap 主应用。"
+    @Published var status = "准备就绪。建议先退出 MauLeaf 主应用。"
     @Published var isBusy = false
     @Published var isError = false
 
+    // Keep the legacy identity/path so ChargeCap settings and tasks remain compatible.
     private let receiptPath = "/Library/Application Support/ChargeCap/managed-install"
     private let daemonPlistPath = "/Library/LaunchDaemons/cc.chlc.batt.plist"
     private let managedBinaryPath = "/usr/local/bin/batt"
@@ -102,11 +103,11 @@ final class UninstallerModel: ObservableObject {
         Task {
             do {
                 try await DischargeAgent.stop()
-                let directory = FileManager.default.temporaryDirectory.appendingPathComponent("ChargeCapFullUninstall-\(UUID().uuidString)", isDirectory: true)
+                let directory = FileManager.default.temporaryDirectory.appendingPathComponent("MauLeafFullUninstall-\(UUID().uuidString)", isDirectory: true)
                 try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
                 defer { try? FileManager.default.removeItem(at: directory) }
 
-                let scriptURL = directory.appendingPathComponent("uninstall-chargecap.sh")
+                let scriptURL = directory.appendingPathComponent("uninstall-mauleaf.sh")
                 let receipt = shellQuote(receiptPath)
                 let daemonPlist = shellQuote(daemonPlistPath)
                 let target = shellQuote(managedBinaryPath)
@@ -121,8 +122,8 @@ final class UninstallerModel: ObservableObject {
                 USER_HOME=\(userHome)
                 BUNDLED_BATT=\(bundledBatt)
 
-                if /usr/bin/pgrep -x ChargeCap >/dev/null 2>&1; then
-                  echo '请先完全退出 ChargeCap 主应用，再运行卸载器。' >&2
+                if /usr/bin/pgrep -x MauLeaf >/dev/null 2>&1 || /usr/bin/pgrep -x ChargeCap >/dev/null 2>&1; then
+                  echo '请先完全退出 MauLeaf（以及旧版 ChargeCap）主应用，再运行卸载器。' >&2
                   exit 51
                 fi
 
@@ -171,10 +172,10 @@ final class UninstallerModel: ObservableObject {
                   /bin/rm -f "$RECEIPT"
                   /bin/rmdir "$(/usr/bin/dirname "$RECEIPT")" >/dev/null 2>&1 || true
                 else
-                  echo '未找到 ChargeCap 管理凭据；未触碰任何现有 batt 安装。'
+                  echo '未找到 MauLeaf 管理凭据；未触碰任何现有 batt 安装。'
                 fi
 
-                # Unregister only ChargeCap's own one-time-charge LaunchAgent.
+                # Unregister only MauLeaf's own one-time-charge LaunchAgent.
                 USER_UID=$(/usr/bin/stat -f %u "$USER_HOME" 2>/dev/null || true)
                 if [[ "$USER_UID" =~ ^[0-9]+$ ]]; then
                   /bin/launchctl bootout "gui/$USER_UID/dev.mauriceliang.chargecap.once" >/dev/null 2>&1 || true
@@ -184,14 +185,14 @@ final class UninstallerModel: ObservableObject {
                 /bin/rm -f "$USER_HOME/Library/LaunchAgents/dev.mauriceliang.chargecap.discharge.plist"
                 /bin/rm -f "$USER_HOME/Library/Preferences/com.local.chargecap.plist"
                 /bin/rm -rf "$USER_HOME/Library/Application Support/ChargeCap"
-                /bin/rm -rf /Applications/ChargeCap.app
-                echo 'ChargeCap 主应用及其管理的组件已清理。请将独立卸载器移入废纸篓。'
+                /bin/rm -rf /Applications/MauLeaf.app /Applications/ChargeCap.app
+                echo 'MauLeaf 主应用及其管理的组件已清理。请将独立卸载器移入废纸篓。'
                 """
                 try script.write(to: scriptURL, atomically: true, encoding: .utf8)
                 try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: scriptURL.path)
                 _ = try await runPrivileged(command: "/bin/bash \(shellQuote(scriptURL.path))")
                 isBusy = false
-                status = "卸载完成。若 ChargeCap.app 不在 /Applications 中，请手动将其移入废纸篓；最后也可删除此卸载器。"
+                status = "卸载完成。若 MauLeaf.app 不在 /Applications 中，请手动将其移入废纸篓；最后也可删除此卸载器。"
                 isError = false
             } catch {
                 isBusy = false

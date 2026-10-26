@@ -7,7 +7,7 @@ struct FeedbackLayoutTests {
     static func main() throws {
         _ = NSApplication.shared
         NSApp.setActivationPolicy(.prohibited)
-        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("chargecap-layout-\(UUID().uuidString)")
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("mauleaf-layout-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: directory) }
         let binary = directory.appendingPathComponent("batt")

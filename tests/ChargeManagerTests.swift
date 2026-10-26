@@ -25,14 +25,14 @@ enum DischargeAgent {
     static func pauseForFullCharge() throws { try monitor.pauseForFullCharge() }
 }
 
-#if !CHARGECAP_LAYOUT_TESTING
+#if !MAULEAF_LAYOUT_TESTING
 @main
 struct ChargeManagerTests {
     static var checks = 0
     @MainActor
     static func main() async throws {
         let directory = FileManager.default.temporaryDirectory
-            .appendingPathComponent("chargecap-tests-\(UUID().uuidString)")
+            .appendingPathComponent("mauleaf-tests-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: directory) }
         let binary = directory.appendingPathComponent("batt")

@@ -6,10 +6,10 @@ import Foundation
 /// AppKit owns the menu-bar button and a persistent panel. The old MenuBarExtra
 /// transient window could disappear during confirmation and authorization,
 /// leaving SwiftUI alerts behind when reopened.
-#if !CHARGECAP_TESTING
+#if !MAULEAF_TESTING
 @main
-struct ChargeCapApp: App {
-    @NSApplicationDelegateAdaptor(ChargeCapAppDelegate.self) private var appDelegate
+struct MauLeafApp: App {
+    @NSApplicationDelegateAdaptor(MauLeafAppDelegate.self) private var appDelegate
 
     var body: some Scene {
         Settings { EmptyView() }
@@ -18,13 +18,13 @@ struct ChargeCapApp: App {
 #endif
 
 @MainActor
-final class ChargeCapAppDelegate: NSObject, NSApplicationDelegate {
-    private var controller: ChargeCapMenuController?
+final class MauLeafAppDelegate: NSObject, NSApplicationDelegate {
+    private var controller: MauLeafMenuController?
     private var terminationPending = false
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
-        controller = ChargeCapMenuController()
+        controller = MauLeafMenuController()
     }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
@@ -54,7 +54,7 @@ private struct PanelContentHeightPreferenceKey: PreferenceKey {
 }
 
 @MainActor
-private final class ChargeCapMenuController: NSObject {
+private final class MauLeafMenuController: NSObject {
     private let manager = ChargeManager()
     private let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
     private let panel: NSPanel
@@ -75,7 +75,7 @@ private final class ChargeCapMenuController: NSObject {
         )
         super.init()
 
-        panel.title = "ChargeCap"
+        panel.title = "MauLeaf"
         panel.titleVisibility = .hidden
         panel.titlebarAppearsTransparent = true
         panel.standardWindowButton(.closeButton)?.isHidden = true
@@ -122,7 +122,7 @@ private final class ChargeCapMenuController: NSObject {
             button.action = #selector(togglePanel)
             button.imageScaling = .scaleProportionallyDown
             button.imagePosition = .imageOnly
-            button.toolTip = "ChargeCap · 充电控制"
+            button.toolTip = "MauLeaf · 充电控制"
         }
 
         refreshSubscription = manager.objectWillChange.sink { [weak self] _ in
@@ -143,7 +143,7 @@ private final class ChargeCapMenuController: NSObject {
             button.imagePosition = .imageOnly
             button.imageScaling = .scaleProportionallyDown
             button.image = LeafAssets.menuBarImage(style: manager.menuBarLeafStyle)
-            button.setAccessibilityLabel("ChargeCap · 电池养护")
+            button.setAccessibilityLabel("MauLeaf · 电池养护")
             renderedLeafStyle = manager.menuBarLeafStyle
         }
         let tooltip = manager.menuBarAccessibilityText
@@ -253,13 +253,13 @@ private final class ChargeCapMenuController: NSObject {
 /// A template image is essential for legibility in both macOS light and dark menu bars.
 private enum LeafAssets {
     static func appImage() -> NSImage? {
-        guard let url = Bundle.main.url(forResource: "ChargeCapIcon", withExtension: "png") else { return nil }
+        guard let url = Bundle.main.url(forResource: "MauLeafIcon", withExtension: "png") else { return nil }
         return NSImage(contentsOf: url)
     }
 
     static func menuBarImage(style: MenuBarLeafStyle) -> NSImage {
         let base = (Bundle.main.url(forResource: "MenuBarLeafTemplate", withExtension: "png").flatMap(NSImage.init(contentsOf:))
-                    ?? NSImage(systemSymbolName: "leaf.fill", accessibilityDescription: "ChargeCap")
+                    ?? NSImage(systemSymbolName: "leaf.fill", accessibilityDescription: "MauLeaf")
                     ?? NSImage())
         base.size = NSSize(width: 17, height: 17)
         switch style {
@@ -416,14 +416,14 @@ struct ContentView: View {
             case .install:
                 return Alert(
                     title: Text("安装官方充电控制组件？"),
-                    message: Text("ChargeCap 已内置经过版本固定和构建时校验的 batt 控制程序。安装时会将其部署为系统服务并请求 macOS 管理员授权，不会在运行时下载组件，也不会覆盖其他来源的安装。"),
+                    message: Text("MauLeaf 已内置经过版本固定和构建时校验的 batt 控制程序。安装时会将其部署为系统服务并请求 macOS 管理员授权，不会在运行时下载组件，也不会覆盖其他来源的安装。"),
                     primaryButton: .default(Text("继续安装"), action: { manager.installBackend() }),
                     secondaryButton: .cancel(Text("取消"))
                 )
             case .uninstall:
                 return Alert(
                     title: Text("卸载充电控制组件？"),
-                    message: Text("将先恢复默认充电控制，再移除 ChargeCap 安装的 batt 程序、系统服务和 batt 配置。ChargeCap 应用本身不会被删除。此操作需要管理员授权。"),
+                    message: Text("将先恢复默认充电控制，再移除 MauLeaf 安装的 batt 程序、系统服务和 batt 配置。MauLeaf 应用本身不会被删除。此操作需要管理员授权。"),
                     primaryButton: .destructive(Text("卸载组件"), action: { manager.uninstallBackend() }),
                     secondaryButton: .cancel(Text("取消"))
                 )
@@ -688,7 +688,7 @@ struct ContentView: View {
                 .font(.subheadline.weight(.medium))
             Text(manager.componentPresent
                  ? "已找到 \(manager.detectedBattPath ?? "batt")，但服务不可用。为避免覆盖其他安装方式，请先检查现有服务。"
-                 : "ChargeCap 已内置 batt 控制程序。点击后会直接安装内置组件并注册系统服务，无需联网下载；首次安装需要管理员授权。")
+                 : "MauLeaf 已内置 batt 控制程序。点击后会直接安装内置组件并注册系统服务，无需联网下载；首次安装需要管理员授权。")
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -881,6 +881,7 @@ final class ChargeManager: ObservableObject {
     private var battPath: String?
 
     private let managedBinaryPath = "/usr/local/bin/batt"
+    // Keep the legacy identity/path so ChargeCap settings and tasks remain compatible.
     private let managedReceiptPath = "/Library/Application Support/ChargeCap/managed-install"
     private let managedDaemonPlistPath = "/Library/LaunchDaemons/cc.chlc.batt.plist"
 
@@ -952,7 +953,7 @@ final class ChargeManager: ObservableObject {
     }
 
     /// Detects the exact batt launch daemon regardless of whether an older
-    /// build created ChargeCap's receipt or UserDefaults marker.
+    /// build created MauLeaf's receipt or UserDefaults marker.
     private var hasManagedLaunchDaemon: Bool {
         let url = URL(fileURLWithPath: managedDaemonPlistPath)
         guard let data = try? Data(contentsOf: url),
@@ -1000,7 +1001,7 @@ final class ChargeManager: ObservableObject {
         let legacyDaemonInstall = hasManagedLaunchDaemon
             && FileManager.default.isExecutableFile(atPath: managedBinaryPath)
         // Older builds and manual `batt install` commands may not have created
-        // ChargeCap's receipt/UserDefaults flag. The exact launchd label plus
+        // MauLeaf's receipt/UserDefaults flag. The exact launchd label plus
         // ProgramArguments path is a stronger, backward-compatible signal.
         isManagedInstall = detectedBattPath == managedBinaryPath
             && FileManager.default.isExecutableFile(atPath: managedBinaryPath)
@@ -1404,7 +1405,7 @@ final class ChargeManager: ObservableObject {
         guard let bundledBinaryURL = Bundle.main.resourceURL?.appendingPathComponent("batt"),
               FileManager.default.isExecutableFile(atPath: bundledBinaryURL.path) else {
             isError = true
-            statusMessage = "应用包中没有找到内置 batt。请重新构建 ChargeCap，并确认构建时成功嵌入控制组件。"
+            statusMessage = "应用包中没有找到内置 batt。请重新构建 MauLeaf，并确认构建时成功嵌入控制组件。"
             return
         }
 
@@ -1416,7 +1417,7 @@ final class ChargeManager: ObservableObject {
             do {
                 let version = bundledBattVersion
                 let appVersion = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "unknown"
-                let directory = FileManager.default.temporaryDirectory.appendingPathComponent("ChargeCapInstall-\(UUID().uuidString)", isDirectory: true)
+                let directory = FileManager.default.temporaryDirectory.appendingPathComponent("MauLeafInstall-\(UUID().uuidString)", isDirectory: true)
                 try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
                 defer { try? FileManager.default.removeItem(at: directory) }
 
@@ -1431,7 +1432,7 @@ final class ChargeManager: ObservableObject {
                 DAEMON_PLIST=\(daemonPlist)
                 TARGET=/usr/local/bin/batt
                 if [ -e "$RECEIPT" ] || [ -e "$DAEMON_PLIST" ]; then
-                  echo '检测到 ChargeCap 或 batt 遗留的系统服务/安装凭据。为避免覆盖，已停止安装。请先使用卸载器清理。' >&2
+                  echo '检测到 MauLeaf 或 batt 遗留的系统服务/安装凭据。为避免覆盖，已停止安装。请先使用卸载器清理。' >&2
                   exit 23
                 fi
                 for candidate in /opt/homebrew/bin/batt /opt/homebrew/sbin/batt /usr/local/bin/batt /usr/local/sbin/batt; do
@@ -1451,7 +1452,7 @@ final class ChargeManager: ObservableObject {
                   exit 24
                 fi
                 /bin/mkdir -p "$(/usr/bin/dirname "$RECEIPT")"
-                /usr/bin/printf 'source=ChargeCap\\nchargecap_version=%s\\nbatt_version=%s\\n' \(shellQuote(appVersion)) \(shellQuote(version)) > "$RECEIPT"
+                /usr/bin/printf 'source=MauLeaf\\nmauleaf_version=%s\\nbatt_version=%s\\n' \(shellQuote(appVersion)) \(shellQuote(version)) > "$RECEIPT"
                 /usr/sbin/chown root:wheel "$RECEIPT"
                 /bin/chmod 644 "$RECEIPT"
                 """
@@ -1493,7 +1494,7 @@ final class ChargeManager: ObservableObject {
               FileManager.default.isExecutableFile(atPath: managedBinaryPath),
               (hasReceipt || legacyDaemonInstall) else {
             isError = true
-            statusMessage = "未确认这是由 ChargeCap 或旧版 batt 安装流程创建的服务。为避免误删 Homebrew 或其他来源的组件，未执行卸载。"
+            statusMessage = "未确认这是由 MauLeaf 或旧版 batt 安装流程创建的服务。为避免误删 Homebrew 或其他来源的组件，未执行卸载。"
             return
         }
 
@@ -1507,7 +1508,7 @@ final class ChargeManager: ObservableObject {
                 // commands after the control daemon has been removed.
                 try await DischargeAgent.stop()
                 try await OnceChargeAgent.cancel()
-                let directory = FileManager.default.temporaryDirectory.appendingPathComponent("ChargeCapUninstall-\(UUID().uuidString)", isDirectory: true)
+                let directory = FileManager.default.temporaryDirectory.appendingPathComponent("MauLeafUninstall-\(UUID().uuidString)", isDirectory: true)
                 try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
                 defer { try? FileManager.default.removeItem(at: directory) }
 
@@ -1526,7 +1527,7 @@ final class ChargeManager: ObservableObject {
                   PLIST_LABEL=$(/usr/libexec/PlistBuddy -c 'Print :Label' "$DAEMON_PLIST" 2>/dev/null || true)
                   PLIST_ARGS=$(/usr/libexec/PlistBuddy -c 'Print :ProgramArguments' "$DAEMON_PLIST" 2>/dev/null || true)
                   if [ "$ALLOW_LEGACY" != "1" ] || [ "$PLIST_LABEL" != 'cc.chlc.batt' ] || [[ "$PLIST_ARGS" != *"$TARGET"* ]]; then
-                    echo '未找到 ChargeCap 安装凭据，且系统服务未指向 /usr/local/bin/batt；已停止卸载。' >&2
+                    echo '未找到 MauLeaf 安装凭据，且系统服务未指向 /usr/local/bin/batt；已停止卸载。' >&2
                     exit 41
                   fi
                 fi
@@ -1575,7 +1576,7 @@ final class ChargeManager: ObservableObject {
                 backendReady = false
                 isBusy = false
                 modeText = "未启用限充"
-                statusMessage = "已卸载 ChargeCap 控制组件并清理其配置。"
+                statusMessage = "已卸载 MauLeaf 控制组件并清理其配置。"
                 isError = false
                 readSystemBattery()
             } catch {

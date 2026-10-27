@@ -3,8 +3,8 @@ set -Eeuo pipefail
 
 ROOT="$(cd "$(dirname "$0")" && pwd)"
 BUILD_DIR="$ROOT/build"
-APP_VERSION="0.7.3"
-APP_BUILD="23"
+APP_VERSION="0.7.4"
+APP_BUILD="26"
 # Publish bundles only after their icons, metadata and signatures are complete.
 APP_STAGE="$BUILD_DIR/.app-staging"
 MAULEAF_APP="$APP_STAGE/MauLeaf.app"

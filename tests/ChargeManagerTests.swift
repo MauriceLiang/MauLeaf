@@ -104,6 +104,34 @@ struct ChargeManagerTests {
         let afterLanguageChange = try String(contentsOf: directory.appendingPathComponent("commands"), encoding: .utf8)
         try check(afterLanguageChange == beforeLanguageChange,
                   "language changes execute no control or refresh commands")
+        let savedBatteryState = manager.batteryStateText
+        let savedAdapter = manager.isAdapterConnected
+        let savedLowPower = manager.lowPowerMode
+        manager.batteryStateText = "正在读取电池状态…"
+        manager.isAdapterConnected = false
+        manager.lowPowerMode = false
+        try check(manager.batteryRingIcon == nil, "unknown supply must not claim battery or adapter power")
+        manager.batteryStateText = "正在充电"
+        manager.isAdapterConnected = true
+        try check(manager.batteryRingIcon == .charging, "charging shows the lightning symbol")
+        manager.batteryStateText = "已接电源，未充电"
+        try check(manager.batteryRingIcon == .adapter, "plugged-in idle state shows the plug")
+        manager.batteryStateText = "已接电源，已充满"
+        try check(manager.batteryRingIcon == .adapter, "plugged-in full state keeps the plug")
+        manager.batteryStateText = "电池供电"
+        try check(manager.batteryRingIcon == .battery, "active battery use takes priority even with an attached adapter")
+        manager.isAdapterConnected = false
+        try check(manager.batteryRingIcon == .battery, "unplugged battery use shows the leaf")
+        manager.lowPowerMode = true
+        try check(manager.batteryRingIcon == .battery, "Low Power Mode does not change the source icon")
+        try check(manager.batteryDisplayText.source == "电池供电，低电量模式", "Chinese status explicitly identifies Low Power Mode")
+        manager.language = .english
+        try check(manager.text(manager.batteryDisplayText) == "On battery power, Low Power Mode", "English status distinguishes battery use from Low Power Mode")
+        try check(manager.batteryRingIcon == .battery, "language changes preserve the source icon")
+        manager.batteryStateText = savedBatteryState
+        manager.isAdapterConnected = savedAdapter
+        manager.lowPowerMode = savedLowPower
+        manager.language = .simplifiedChinese
         manager.batteryPercent = 100
         manager.selectChargeMode(.full)
         try await finish(manager)

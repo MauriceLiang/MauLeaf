@@ -252,13 +252,15 @@ private final class MauLeafMenuController: NSObject {
 /// Single-leaf branding shared between Finder, the panel, and the menu bar.
 /// A template image is essential for legibility in both macOS light and dark menu bars.
 private enum LeafAssets {
+    static let templateName = "MenuBarLeafTemplate"
+
     static func appImage() -> NSImage? {
         guard let url = Bundle.main.url(forResource: "MauLeafIcon", withExtension: "png") else { return nil }
         return NSImage(contentsOf: url)
     }
 
     static func menuBarImage(style: MenuBarLeafStyle) -> NSImage {
-        let base = (Bundle.main.url(forResource: "MenuBarLeafTemplate", withExtension: "png").flatMap(NSImage.init(contentsOf:))
+        let base = (Bundle.main.url(forResource: templateName, withExtension: "png").flatMap(NSImage.init(contentsOf:))
                     ?? NSImage(systemSymbolName: "leaf.fill", accessibilityDescription: "MauLeaf")
                     ?? NSImage())
         base.size = NSSize(width: 17, height: 17)
@@ -289,6 +291,12 @@ private enum LeafAssets {
 }
 
 
+
+enum BatteryRingIcon: Hashable {
+    case charging
+    case adapter
+    case battery
+}
 
 enum MenuBarLeafStyle: String, CaseIterable, Identifiable {
     case monochrome
@@ -379,6 +387,50 @@ private struct MenuBarBatteryIcon: View {
     }
 }
 
+/// Kept as a small view so tests render the same ring displayed in the panel.
+struct BatteryStatusRing: View {
+    let percent: Int?
+    let tint: Color
+    let icon: BatteryRingIcon?
+
+    var body: some View {
+        ZStack {
+            Circle().stroke(Color.primary.opacity(0.09), lineWidth: 7)
+            Circle()
+                .trim(from: 0, to: CGFloat(percent ?? 0) / 100)
+                .stroke(tint, style: StrokeStyle(lineWidth: 7, lineCap: .round))
+                .rotationEffect(.degrees(-90))
+            if let icon {
+                centerImage(icon)
+                    .font(.system(size: 26, weight: .semibold))
+                    .symbolRenderingMode(.monochrome)
+                    .foregroundStyle(Color.primary.opacity(0.85))
+                    .frame(width: 36, height: 36)
+                    .id(icon)
+                    .transition(.opacity)
+            }
+        }
+        .animation(.easeInOut(duration: 0.18), value: icon)
+        .accessibilityHidden(true)
+        .frame(width: 68, height: 68)
+    }
+
+    @ViewBuilder
+    private func centerImage(_ icon: BatteryRingIcon) -> some View {
+        if icon == .battery {
+            // Loose bundle PNGs must be loaded explicitly; SwiftUI's named
+            // lookup can produce an empty image without an asset catalog.
+            Image(nsImage: LeafAssets.menuBarImage(style: .monochrome))
+                .renderingMode(.template)
+                .resizable()
+                .scaledToFit()
+                .frame(width: 28, height: 28)
+        } else {
+            Image(systemName: icon == .charging ? "bolt.fill" : "powerplug.fill")
+        }
+    }
+}
+
 struct ContentView: View {
     @ObservedObject var manager: ChargeManager
     @State private var confirmation: Confirmation?
@@ -444,21 +496,14 @@ struct ContentView: View {
                     Text(manager.batteryPercent.map { "\($0)%" } ?? "--")
                         .font(.system(size: 34, weight: .semibold, design: .rounded))
                         .monospacedDigit()
-                    Label(manager.text(AppText(key: manager.batteryStateText)), systemImage: manager.batteryStateSymbol)
+                    Label(manager.text(manager.batteryDisplayText), systemImage: manager.batteryStateSymbol)
                         .font(.caption)
                         .foregroundStyle(manager.batteryTint)
                 }
                 Spacer()
-                ZStack {
-                    Circle()
-                        .stroke(Color.primary.opacity(0.09), lineWidth: 7)
-                    Circle()
-                        .trim(from: 0, to: CGFloat(manager.batteryPercent ?? 0) / 100)
-                        .stroke(manager.batteryTint, style: StrokeStyle(lineWidth: 7, lineCap: .round))
-                        .rotationEffect(.degrees(-90))
-                }
-                .frame(width: 68, height: 68)
-                .padding(.trailing, 3)
+                BatteryStatusRing(percent: manager.batteryPercent, tint: manager.batteryTint,
+                                  icon: manager.batteryRingIcon)
+                    .padding(.trailing, 3)
             }
 
             Divider().opacity(0.7)
@@ -949,6 +994,22 @@ final class ChargeManager: ObservableObject {
         if batteryStateText == "正在充电" { return .green }
         if lowPowerMode == true { return .yellow }
         return .primary
+    }
+
+    /// The center describes the power source; ring color describes battery state.
+    var batteryRingIcon: BatteryRingIcon? {
+        switch batteryStateText {
+        case "正在充电": return .charging
+        case "电池供电": return .battery
+        case "已接电源，未充电", "已接电源，已充满": return .adapter
+        default: return isAdapterConnected ? .adapter : nil
+        }
+    }
+
+    var batteryDisplayText: AppText {
+        let state = AppText(key: batteryStateText)
+        if lowPowerMode == true { return "\(state)，低电量模式" }
+        return state
     }
 
     var batteryCardSymbol: String {

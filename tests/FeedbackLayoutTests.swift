@@ -19,6 +19,17 @@ struct FeedbackLayoutTests {
         UserDefaults.standard.set("limited", forKey: "chargeModeV5")
         UserDefaults.standard.set("adapter", forKey: "highChargePolicy")
         UserDefaults.standard.set(false, forKey: "chargeControlReleasedOnQuit")
+        guard let leafURL = Bundle.main.url(forResource: "MenuBarLeafTemplate", withExtension: "png"),
+              let leaf = NSImage(contentsOf: leafURL), leaf.isValid else {
+            fatalError("The actual brand leaf template must be bundled for UI tests")
+        }
+        let sourceLeaf = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("Assets/MenuBarLeafTemplate.png")
+        guard try Data(contentsOf: leafURL) == Data(contentsOf: sourceLeaf) else {
+            fatalError("Bundled leaf must match the canonical brand template")
+        }
+        let renderOutput = URL(fileURLWithPath: CommandLine.arguments[1], isDirectory: true)
+        try verifyBatteryRingRendering(outputDirectory: renderOutput)
         let manager = ChargeManager(battPath: binary.path)
         manager.start()
         manager.requestLimit(80, immediate: true)

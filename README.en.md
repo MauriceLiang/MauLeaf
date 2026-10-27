@@ -65,6 +65,8 @@ Some internal identifiers and data directories retain the old name for compatibi
 - **Always need a full battery:** Choose full charging → continuously allow full charging (`直接充满 → 持续允许充满`). Returning to control mode restores your saved limit.
 - **Actively reduce the battery level:** Select the corresponding strategy in control mode. Adapter power is restored when the target is reached or a protection condition is triggered. You can manually resume after a pause.
 
+The battery ring shows a lightning bolt while charging, a plug when connected to power without charging, and the app’s leaf silhouette in its original orientation while using the battery. Low Power Mode is indicated by the ring color and status text.
+
 With the panel open, power readings update about every 2 seconds while charging or discharging, and every 5 seconds while idle. Closing the panel stops extra sampling; background status checks and safety monitoring continue. These are battery-side readings, **not charger input power**. A dash (`—`) appears when the system provides no valid data.
 
 **Closing the panel and quitting the app are different actions.** A normal quit waits for ongoing operations, stops tasks, and verifies that charging control has been released. If cleanup fails, the app keeps the error visible and lets you try quitting again. The batt service stays installed with no charging limit.

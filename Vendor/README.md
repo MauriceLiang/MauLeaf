@@ -1,8 +1,8 @@
 # Vendored batt dependency
 
-- `batt-version` pins the upstream release used for builds (`v0.8.0`).
-- `build.command` downloads the official Apple Silicon release asset and verifies its SHA-256 digest when the release metadata publishes one.
-- The resulting binary is copied into both app bundles so end users do not need to download it at runtime.
-- The upstream license is bundled in the app resources.
+- `batt-version` pins upstream `v0.8.0`.
+- GitHub Actions verifies the official ARM64 archive's SHA-256 before bundling batt in the supported Apple Silicon release.
+- The Intel experimental preview contains no batt or uninstaller, exposes battery information only, and does not support charging control.
+- The GPL-2.0 license and corresponding upstream source are distributed with the application and GitHub Release.
 
-Upstream project: https://github.com/charlie0129/batt
+Upstream: https://github.com/charlie0129/batt

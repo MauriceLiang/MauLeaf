@@ -41,6 +41,14 @@ Active battery discharge has protection for a closed lid, abnormal temperature, 
 - Administrator authorization for the initial system component installation. Everyday operations use the installed service.
 - On Apple Silicon, charging-control capabilities depend on batt's device report. The Intel preview is NOT a full-featured charging controller.
 
+### Intel experimental preview disclaimer
+
+**The maintainer currently has no Intel Mac available for testing. MauLeaf has not been installed, launched, or tested on physical Intel hardware.** A successful GitHub Actions compilation or automated check does **not** establish that the software works on Intel Macs. Actual behavior—including launch, UI, battery readings, installation, uninstallation, system compatibility, and stability—**is unknown**.
+
+This is an **unverified experimental preview, not an officially supported Intel release**. To reduce risk, this build does not bundle batt and disables charging control and system-service installation or removal. Do not rely on it for critical or production battery management. Users who choose to download, install, or use this preview should independently assess compatibility and risks and back up important data.
+
+The software is provided **AS IS**, without warranties of Intel compatibility, merchantability, fitness for a particular purpose, or error-free operation. To the extent permitted by applicable law, the developer disclaims liability for loss arising from use of the experimental preview. Nothing here excludes rights or liability that cannot legally be excluded, and the project's open-source licenses remain applicable.
+
 ## Installation
 
 1. From [GitHub Releases](https://github.com/MauriceLiang/MauLeaf/releases/latest), choose `MauLeaf-<version>-macos-arm64.dmg` (supported) or `MauLeaf-<version>-macos-x86_64-EXPERIMENTAL.dmg` (Intel read-only preview).

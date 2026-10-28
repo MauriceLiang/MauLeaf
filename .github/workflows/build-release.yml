@@ -8,7 +8,7 @@ on:
 permissions:
   contents: read
 concurrency:
-  group: mauleaf-$\{{ github.ref }}
+  group: mauleaf-${{ github.ref }}
   cancel-in-progress: false
 jobs:
   test:
@@ -26,7 +26,7 @@ jobs:
         include:
           - {arch: arm64, runner: macos-15}
           - {arch: x86_64, runner: macos-15-intel}
-    runs-on: $\{{ matrix.runner }}
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 35
     steps:
       - uses: actions/checkout@v4
@@ -35,17 +35,17 @@ jobs:
         run: |
           set -euo pipefail
           [[ "$GITHUB_REF_NAME" =~ ^v([0-9]+)\.([0-9]+)\.([0-9]+)$ ]] || exit 1
-          major="$\{BASH_REMATCH[1]}"; minor="$\{BASH_REMATCH[2]}"; patch="$\{BASH_REMATCH[3]}"
+          major="${BASH_REMATCH[1]}"; minor="${BASH_REMATCH[2]}"; patch="${BASH_REMATCH[3]}"
           ((minor < 1000 && patch < 1000)) || exit 1
-          echo "RELEASE_VERSION=$\{GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
+          echo "RELEASE_VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
           echo "BUILD_NUMBER=$((major*1000000+minor*1000+patch))" >> "$GITHUB_ENV"
       - name: Package
         env:
-          TARGET_ARCH: $\{{ matrix.arch }}
+          TARGET_ARCH: ${{ matrix.arch }}
         run: bash Scripts/ci/package-macos.sh
       - uses: actions/upload-artifact@v4
         with:
-          name: MauLeaf-$\{{ matrix.arch }}
+          name: MauLeaf-${{ matrix.arch }}
           path: dist/*.dmg
           if-no-files-found: error
   release:
@@ -63,7 +63,7 @@ jobs:
       - name: Verify release notes and assets
         run: |
           set -euo pipefail
-          V="$\{GITHUB_REF_NAME#v}"; F="docs/releases/v$V.md"
+          V="${GITHUB_REF_NAME#v}"; F="docs/releases/v$V.md"
           test -s "$F"
           grep -q '## 简体中文' "$F"
           grep -q '## English' "$F"
@@ -79,10 +79,10 @@ jobs:
           tar -tzf artifacts/batt-v0.8.0-source.tar.gz | grep -q 'LICENSE$'
       - name: Publish GitHub Release
         env:
-          GH_TOKEN: $\{{ github.token }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          V="$\{GITHUB_REF_NAME#v}"
+          V="${GITHUB_REF_NAME#v}"
           (cd artifacts && sha256sum *.dmg batt-v0.8.0-source.tar.gz > SHA256SUMS.txt)
           gh release create "$GITHUB_REF_NAME" artifacts/*.dmg artifacts/SHA256SUMS.txt \
             artifacts/batt-v0.8.0-source.tar.gz --verify-tag \

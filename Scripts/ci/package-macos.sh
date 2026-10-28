@@ -1,9 +1,9 @@
 #!/bin/bash
 set -euo pipefail
 cd "$(dirname "$0")/../.."
-: "$\{RELEASE_VERSION:?missing version}"
-: "$\{TARGET_ARCH:?missing arch}"
-: "$\{BUILD_NUMBER:?missing build number}"
+: "${RELEASE_VERSION:?missing version}"
+: "${TARGET_ARCH:?missing arch}"
+: "${BUILD_NUMBER:?missing build number}"
 [[ "$RELEASE_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || exit 2
 [[ "$TARGET_ARCH" == arm64 || "$TARGET_ARCH" == x86_64 ]] || exit 2
 [[ "$(uname -m)" == "$TARGET_ARCH" ]] || exit 2
@@ -60,15 +60,15 @@ if [[ "$TARGET_ARCH" == arm64 ]]; then
 fi
 FLAGS=(-parse-as-library -O -target "$TARGET_ARCH-apple-macos13.0")
 if [[ "$TARGET_ARCH" == x86_64 ]]; then FLAGS+=(-D MAULEAF_INTEL_EXPERIMENTAL); fi
-xcrun swiftc "$\{FLAGS[@]}" -framework SwiftUI -framework AppKit -framework Combine -framework Foundation -framework IOKit -framework ServiceManagement \
+xcrun swiftc "${FLAGS[@]}" -framework SwiftUI -framework AppKit -framework Combine -framework Foundation -framework IOKit -framework ServiceManagement \
  Sources/MauLeaf.swift Sources/ChargeModeCore.swift Sources/AppLocalization.swift Sources/OnceChargeAgent.swift \
  Sources/DischargeControl.swift Sources/DischargeAgent.swift Sources/PowerRefreshController.swift Sources/LoginItemSettings.swift \
  -o "$APP/Contents/MacOS/MauLeaf"
 if [[ "$TARGET_ARCH" == arm64 ]]; then
-  xcrun swiftc "$\{FLAGS[@]}" -framework SwiftUI -framework AppKit -framework Combine -framework Foundation \
+  xcrun swiftc "${FLAGS[@]}" -framework SwiftUI -framework AppKit -framework Combine -framework Foundation \
    Sources/UninstallMauLeaf.swift Sources/ChargeModeCore.swift Sources/AppLocalization.swift Sources/DischargeControl.swift Sources/DischargeAgent.swift \
    -o "$UNINSTALLER/Contents/MacOS/UninstallMauLeaf"
-  xcrun swiftc "$\{FLAGS[@]}" -framework Foundation \
+  xcrun swiftc "${FLAGS[@]}" -framework Foundation \
    Sources/MauLeafOnceHelper.swift Sources/ChargeModeCore.swift Sources/AppLocalization.swift Sources/DischargeControl.swift \
    -o "$APP/Contents/Resources/MauLeafOnceHelper"
 fi
@@ -106,10 +106,27 @@ else
   [[ ! -e "$APP/Contents/Resources/batt" ]] || exit 6
   NAME="MauLeaf-$RELEASE_VERSION-macos-x86_64-EXPERIMENTAL.dmg"
   cat > "$STAGE/dmg/INTEL-EXPERIMENTAL-READ-ME.txt" <<'NOTICE'
-Intel EXPERIMENTAL read-only preview: battery information only.
-Charging controls, batt installation and service removal are DISABLED.
-Intel hardware charging compatibility is NOT validated.
-Intel 实验预览仅显示电池信息；禁用充电控制与服务安装卸载，兼容性未经验证。
+Intel EXPERIMENTAL, UNTESTED, READ-ONLY preview / Intel 未测试只读实验版
+
+The developer does not have access to an Intel Mac. This build has NOT
+been installed, launched or tested on real Intel hardware. Compilation
+is NOT evidence of compatibility. Actual usability, stability and
+battery-reading behavior are UNKNOWN.
+
+This preview does NOT contain batt and disables charging controls and
+installation or removal of system services. Use at your own risk; back
+up important data and do not rely on this preview for critical tasks.
+
+Provided AS IS, without warranties of Intel compatibility or reliability.
+Developer liability is limited only to the extent allowed by applicable
+law. Mandatory statutory rights remain unaffected. Open-source licenses
+continue to apply.
+
+开发者没有 Intel Mac 设备，因此没有进行过 Intel 实机安装、启动或
+运行测试。构建通过不代表兼容，软件实际使用情况及稳定性未知。
+此版本仅供实验性预览，不内置 batt，不支持充电控制及系统服务安装卸载。
+用户应自行评估风险并备份重要数据；软件按现状提供，不保证 Intel 兼容性，
+法律不允许排除的权利与责任不受影响。
 NOTICE
 fi
 ln -s /Applications "$STAGE/dmg/Applications"

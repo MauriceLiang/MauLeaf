@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
     inputs:
       release_tag:
-        description: 'Existing vX.Y.Z tag to publish (blank = test only)'
+        description: 'Existing vX.Y.Z tag to publish (blank = tests only)'
         required: false
         type: string
 permissions:
@@ -94,9 +94,10 @@ jobs:
           set -euo pipefail
           [[ "$(tr -d '\r\n' < Vendor/batt-version)" == "v0.8.0" ]] || exit 1
           curl -fLsS --retry 3 "https://github.com/charlie0129/batt/archive/refs/tags/v0.8.0.tar.gz" -o artifacts/batt-v0.8.0-source.tar.gz
-          # grep -q closes pipes early; consume tar output before matching under pipefail.
+          # Fully consume the archive listing first. grep -q in a pipe can
+          # cause tar: stdout: write error when pipefail is enabled.
           tar -tzf artifacts/batt-v0.8.0-source.tar.gz > "$RUNNER_TEMP/batt-source-contents.txt"
-          grep -Eq '(^|/)LICENSE
+          grep -Eq '(^|/)LICENSE$' "$RUNNER_TEMP/batt-source-contents.txt"
       - name: Publish GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -112,14 +113,3 @@ jobs:
           gh release create "$RELEASE_TAG" artifacts/*.dmg artifacts/SHA256SUMS.txt \
             artifacts/batt-v0.8.0-source.tar.gz --verify-tag \
             --title "MauLeaf $RELEASE_TAG" --notes-file "docs/releases/v$V.md"
- "$RUNNER_TEMP/batt-source-contents.txt"
-      - name: Publish GitHub Release
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          V="${GITHUB_REF_NAME#v}"
-          (cd artifacts && sha256sum *.dmg batt-v0.8.0-source.tar.gz > SHA256SUMS.txt)
-          gh release create "$GITHUB_REF_NAME" artifacts/*.dmg artifacts/SHA256SUMS.txt \
-            artifacts/batt-v0.8.0-source.tar.gz --verify-tag \
-            --title "MauLeaf $GITHUB_REF_NAME" --notes-file "docs/releases/v$V.md"

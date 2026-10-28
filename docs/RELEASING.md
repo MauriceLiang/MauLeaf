@@ -10,3 +10,14 @@
 - Intel 免责声明必须同时放在 README 中英文版、发布说明中英文版、DMG 内的 README；不能暗示 CI 编译成功就说明 Intel 可用。提供按现状（AS IS）、风险自担及法定权利保留说明。
 
 发布前将更新日志与对应版本双语说明合并至 `main`，确认测试通过；再检查标签不重复，执行 `git tag -a v0.7.5 -m "MauLeaf v0.7.5"`、`git push origin v0.7.5`（实际版本按需替换）。不要重写已发布标签。
+
+
+## 已有标签发布失败的恢复
+
+如果 `v0.7.5` 一类已有版本标签的测试与安装包已成功构建，但 Release 阶段失败，请先修复并合并工作流，不要删除或强制重设标签。
+
+1. GitHub → Actions → **Build & Release** → **Run workflow**。
+2. 选择 `main`，在 `release_tag` 输入已存在的标签（例如 `v0.7.5`）。
+3. 手动启动：使用最新工作流定义，从该标签检出源码进行测试、双架构打包和发布。
+4. 发布前检查已有 Release；如果已经存在则拒绝覆盖。输入留空则只运行测试。
+5. 原先 `tar -tzf ... | grep -q 'LICENSE$'` 在 `pipefail` 下可能因 `grep -q` 提前关闭管道导致 `tar: stdout: write error`；现先完整输出到临时文件再匹配。

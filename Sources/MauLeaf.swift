@@ -770,8 +770,8 @@ struct ContentView: View {
             Text(manager.language == .english ? "Intel experimental preview" : "Intel 实验预览版")
                 .font(.subheadline.weight(.semibold))
             Text(manager.language == .english
-                 ? "Battery information only. Charging limits, batt installation and removal are disabled. Intel charging control has not been validated."
-                 : "仅提供电池信息展示。充电上限、batt 安装与卸载均已禁用；Intel 充电控制尚未验证。")
+                 ? "Unverified Intel preview: the developer has no Intel Mac and has not tested launching or running this build on Intel hardware. Actual operation, accuracy and stability are unknown. Battery information only; all charging controls and batt installation/removal are disabled. Provided AS IS, at your own risk."
+                 : "未经实机测试的 Intel 实验预览版：开发者没有 Intel Mac，未在 Intel 设备上安装、启动或运行本版本。实际运行情况、数据准确性与稳定性均未知。仅展示电池信息，充电控制和 batt 安装、卸载全部禁用；软件按现状提供，风险由使用者自行评估。")
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)

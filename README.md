@@ -52,9 +52,9 @@ MauLeaf 让长期接电使用的 Mac 可以按设定上限充电，也能在出�
 ## 安装
 
 1. 从 [GitHub Releases](https://github.com/MauriceLiang/MauLeaf/releases/latest) 下载 `MauLeaf-<版本>-macos-arm64.dmg`（正式版）或 `MauLeaf-<版本>-macos-x86_64-EXPERIMENTAL.dmg`（Intel 只读实验版）。
-2. 打开 DMG，将 `MauLeaf.app` 拖入 `Applications` 后启动。安装包另含 `Uninstall MauLeaf.app`。
+2. 打开 DMG，将 `MauLeaf.app` 拖入 `Applications` 后启动。**仅 Apple Silicon 正式版**包含 `Uninstall MauLeaf.app`；Intel 实验版不包含卸载器。
 3. Apple Silicon 正式版可按提示安装内置 batt。Intel 实验预览版不内置 batt，也不允许安装、卸载或执行充电控制操作。
-4. 选择充电模式和目标上限，操作结果会在底部提示。应用启动和面板打开时自动更新状态。
+4. 仅 Apple Silicon 正式版可选择充电模式和目标上限；Intel 实验预览版仅可查看电池信息，无法修改充电设置。
 5. 默认使用中文；点击面板底部的「English」切换为英文，再点击「中文」切回。语言选择会保留到下次启动。
 
 当前安装包使用本地 ad-hoc 签名，尚未进行 Apple notarization，macOS 可能阻止首次打开。确认下载来源后，可在系统设置「隐私与安全性」中按系统提示允许打开。

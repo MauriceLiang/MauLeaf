@@ -52,9 +52,9 @@ The software is provided **AS IS**, without warranties of Intel compatibility, m
 ## Installation
 
 1. From [GitHub Releases](https://github.com/MauriceLiang/MauLeaf/releases/latest), choose `MauLeaf-<version>-macos-arm64.dmg` (supported) or `MauLeaf-<version>-macos-x86_64-EXPERIMENTAL.dmg` (Intel read-only preview).
-2. Open the DMG, drag `MauLeaf.app` into `Applications`, and launch it. The image also includes `Uninstall MauLeaf.app`.
+2. Open the DMG and drag `MauLeaf.app` to `Applications`. **Only the supported Apple Silicon DMG** also contains `Uninstall MauLeaf.app`; the Intel preview does not include an uninstaller.
 3. The Apple Silicon release can install bundled batt. The Intel preview contains no batt or uninstaller and disables all charging-control operations.
-4. Select a charging mode and limit. Results appear at the bottom of the panel. Status updates automatically on launch and whenever you open the panel.
+4. On Apple Silicon, you can select charging modes and limits. On the Intel experimental preview, only battery information is visible and charging settings are not available.
 5. The interface defaults to Chinese. Click “English” at the bottom of the panel to switch to English, or “中文” to switch back. Your language choice is remembered on the next launch.
 
 The current package is locally ad-hoc signed and has not been notarized by Apple, so macOS may block its first launch. After confirming the download source, follow the system prompts in System Settings → Privacy & Security to allow it to open.

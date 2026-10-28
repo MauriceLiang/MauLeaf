@@ -36,16 +36,25 @@ Active battery discharge has protection for a closed lid, abnormal temperature, 
 
 ## Requirements
 
-- Apple Silicon Mac (arm64), running macOS 13 or later.
+- Apple Silicon (arm64) supported release: macOS 13+.
+- Intel (x86_64) EXPERIMENTAL read-only preview: battery information only. Charging control, batt installation and removal are disabled. Intel charging hardware is **NOT validated**.
 - Administrator authorization for the initial system component installation. Everyday operations use the installed service.
-- Available charging and adapter-control capabilities depend on what batt actually reports on your device. Intel builds are not currently provided.
+- On Apple Silicon, charging-control capabilities depend on batt's device report. The Intel preview is NOT a full-featured charging controller.
+
+### Intel experimental preview disclaimer
+
+**The maintainer currently has no Intel Mac available for testing. MauLeaf has not been installed, launched, or tested on physical Intel hardware.** A successful GitHub Actions compilation or automated check does **not** establish that the software works on Intel Macs. Actual behavior—including launch, UI, battery readings, installation, uninstallation, system compatibility, and stability—**is unknown**.
+
+This is an **unverified experimental preview, not an officially supported Intel release**. To reduce risk, this build does not bundle batt and disables charging control and system-service installation or removal. Do not rely on it for critical or production battery management. Users who choose to download, install, or use this preview should independently assess compatibility and risks and back up important data.
+
+The software is provided **AS IS**, without warranties of Intel compatibility, merchantability, fitness for a particular purpose, or error-free operation. To the extent permitted by applicable law, the developer disclaims liability for loss arising from use of the experimental preview. Nothing here excludes rights or liability that cannot legally be excluded, and the project's open-source licenses remain applicable.
 
 ## Installation
 
-1. Download `MauLeaf-<version>.dmg` from [GitHub Releases](https://github.com/MauriceLiang/MauLeaf/releases/latest). Release notes and SHA-256 checksums are provided on the same page.
-2. Open the DMG, drag `MauLeaf.app` into `Applications`, and launch it. The image also includes `Uninstall MauLeaf.app`.
-3. Click the menu bar leaf to open the panel. If the control component is missing, click the built-in component installation button (`一键安装内置组件`) and complete macOS administrator authorization. No separate batt download is needed at runtime.
-4. Select a charging mode and limit. Results appear at the bottom of the panel. Status updates automatically on launch and whenever you open the panel.
+1. From [GitHub Releases](https://github.com/MauriceLiang/MauLeaf/releases/latest), choose `MauLeaf-<version>-macos-arm64.dmg` (supported) or `MauLeaf-<version>-macos-x86_64-EXPERIMENTAL.dmg` (Intel read-only preview).
+2. Open the DMG and drag `MauLeaf.app` to `Applications`. **Only the supported Apple Silicon DMG** also contains `Uninstall MauLeaf.app`; the Intel preview does not include an uninstaller.
+3. The Apple Silicon release can install bundled batt. The Intel preview contains no batt or uninstaller and disables all charging-control operations.
+4. On Apple Silicon, you can select charging modes and limits. On the Intel experimental preview, only battery information is visible and charging settings are not available.
 5. The interface defaults to Chinese. Click “English” at the bottom of the panel to switch to English, or “中文” to switch back. Your language choice is remembered on the next launch.
 
 The current package is locally ad-hoc signed and has not been notarized by Apple, so macOS may block its first launch. After confirming the download source, follow the system prompts in System Settings → Privacy & Security to allow it to open.
@@ -94,16 +103,15 @@ To remove only the control component while keeping MauLeaf, use the component re
 
 ## Local development
 
-You need an Apple Silicon Mac, Xcode Command Line Tools, and Python 3. The first build requires network access to fetch the pinned official batt release; subsequent builds can reuse the local cache in `Vendor`.
+Run source regression tests:
 
 ```bash
 git clone https://github.com/MauriceLiang/MauLeaf.git
 cd MauLeaf
-./tests/run.sh
-./build.command
+bash tests/run.sh
 ```
 
-Outputs are placed in `build/`: `MauLeaf.app`, `Uninstall MauLeaf.app`, and `MauLeaf-<version>.dmg`. Both apps embed the leaf icon and license texts. The app version and build number are maintained in `build.command`.
+[GitHub Actions](https://github.com/MauriceLiang/MauLeaf/actions) builds and publishes both DMGs on `vX.Y.Z` tags using `Scripts/ci/package-macos.sh` (the deleted `build.command` is no longer needed). Versions are derived from tags. See [Releasing](docs/RELEASING.md).
 
 Tests use a simulated control component and do not execute real hardware-control commands. They cover mode transitions, limit restoration, protection and quit flows, adaptive sampling, and feedback that does not shift the layout.
 

@@ -43,5 +43,5 @@ PLIST
     "$LAYOUT_APP/Contents/MacOS/layouttests" "$ROOT/build/ui-verification"
 fi
 swiftc -frontend -parse "$ROOT/Sources/MauLeaf.swift" "$ROOT/Sources/OnceChargeAgent.swift" "$ROOT/Sources/MauLeafOnceHelper.swift" "$ROOT/Sources/UninstallMauLeaf.swift" "$ROOT/Sources/DischargeControl.swift" "$ROOT/Sources/DischargeAgent.swift" "$ROOT/Sources/PowerRefreshController.swift" "$ROOT/Sources/LoginItemSettings.swift"
-bash -n "$ROOT/build.command"
+bash -n "$ROOT/Scripts/ci/package-macos.sh"
 echo "Source parsing and build script checks passed"

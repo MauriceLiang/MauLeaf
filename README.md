@@ -36,16 +36,25 @@ MauLeaf 让长期接电使用的 Mac 可以按设定上限充电，也能在出�
 
 ## 系统要求
 
-- Apple Silicon Mac（arm64），macOS 13 或更高版本。
+- Apple Silicon（arm64）正式版：macOS 13+。
+- Intel（x86_64）实验预览版：仅能查看电池信息，充电控制、batt 安装和卸载已禁用；**Intel 充电硬件未经兼容性验证**。
 - 首次安装系统控制组件需要管理员授权；日常操作通过已安装的服务执行。
-- 可用的充电与适配器控制能力以 batt 在设备上实际报告的结果为准。当前不提供 Intel 安装包。
+- Apple Silicon 充电控制能力以 batt 在设备上的实际报告为准；Intel 实验预览版不具备充电控制能力。
+
+### Intel 实验预览版免责声明
+
+**本项目维护者目前没有可用于测试的 Intel Mac 设备，因此未在任何 Intel 实机上安装、启动或测试 MauLeaf。** 虽然 GitHub Actions 会尝试编译 Intel（x86_64）安装包，但编译通过或自动化检查通过都不代表软件能够在 Intel Mac 上正常运行。包括启动、界面表现、电池信息准确性、安装与卸载、系统兼容性及稳定性在内的实际使用情况均属未知。
+
+该安装包仅为**未经实机验证的实验性预览版本**，并非正式支持的 Intel 产品。为降低风险，实验版不内置 batt、不提供充电控制或系统服务安装、卸载功能。建议不要在依赖稳定电池管理的生产或重要设备上使用。选择下载、安装和使用实验版的用户应自行判断其适用性、备份重要数据，并承担测试未知功能和兼容性可能带来的风险。
+
+软件按现状提供，不作关于 Intel 兼容性、适销性、特定用途适用性或无故障运行的保证；法律允许的范围内，开发者不承担因使用实验版造成的损失责任。本说明不排除或限制适用法律不得排除的权利和责任，亦不取代项目的开源许可证。
 
 ## 安装
 
-1. 在 [GitHub Releases](https://github.com/MauriceLiang/MauLeaf/releases/latest) 下载 `MauLeaf-<版本>.dmg`。同页提供更新内容和 SHA-256 校验文件。
-2. 打开 DMG，将 `MauLeaf.app` 拖入 `Applications` 后启动。安装包另含 `Uninstall MauLeaf.app`。
-3. 点击菜单栏叶子打开面板。若尚未安装控制组件，点击「一键安装内置组件」，按系统提示完成管理员授权。运行时无需另行下载 batt。
-4. 选择充电模式和目标上限，操作结果会在底部提示。应用启动和面板打开时自动更新状态。
+1. 从 [GitHub Releases](https://github.com/MauriceLiang/MauLeaf/releases/latest) 下载 `MauLeaf-<版本>-macos-arm64.dmg`（正式版）或 `MauLeaf-<版本>-macos-x86_64-EXPERIMENTAL.dmg`（Intel 只读实验版）。
+2. 打开 DMG，将 `MauLeaf.app` 拖入 `Applications` 后启动。**仅 Apple Silicon 正式版**包含 `Uninstall MauLeaf.app`；Intel 实验版不包含卸载器。
+3. Apple Silicon 正式版可按提示安装内置 batt。Intel 实验预览版不内置 batt，也不允许安装、卸载或执行充电控制操作。
+4. 仅 Apple Silicon 正式版可选择充电模式和目标上限；Intel 实验预览版仅可查看电池信息，无法修改充电设置。
 5. 默认使用中文；点击面板底部的「English」切换为英文，再点击「中文」切回。语言选择会保留到下次启动。
 
 当前安装包使用本地 ad-hoc 签名，尚未进行 Apple notarization，macOS 可能阻止首次打开。确认下载来源后，可在系统设置「隐私与安全性」中按系统提示允许打开。
@@ -94,16 +103,15 @@ MauLeaf 让长期接电使用的 Mac 可以按设定上限充电，也能在出�
 
 ## 本地开发
 
-需要 Apple Silicon Mac、Xcode Command Line Tools 和 Python 3。首次构建需要联网获取固定版本的官方 batt，后续可复用 `Vendor` 中的本地缓存。
+从源码运行回归测试：
 
 ```bash
 git clone https://github.com/MauriceLiang/MauLeaf.git
 cd MauLeaf
-./tests/run.sh
-./build.command
+bash tests/run.sh
 ```
 
-产物位于 `build/`：`MauLeaf.app`、`Uninstall MauLeaf.app` 和 `MauLeaf-<版本>.dmg`。两个应用均内嵌叶子图标和许可证。版本号与构建号统一维护于 `build.command`。
+正式安装包由 [GitHub Actions](https://github.com/MauriceLiang/MauLeaf/actions) 在推送 `vX.Y.Z` 标签后自动构建发布。CI 脚本位于 `Scripts/ci/package-macos.sh`，版本号来自标签，不使用已删除的 `build.command`。详情见 [发布指南](docs/RELEASING.md)。
 
 测试使用模拟控制组件，不执行真实硬件控制命令；涵盖模式切换、上限恢复、保护与退出流程、自适应采样及提示不挤动布局等行为。
 

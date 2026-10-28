@@ -451,12 +451,16 @@ struct ContentView: View {
             menuBarIconStyleSection
             loginItemSection
             Divider()
+            #if MAULEAF_INTEL_EXPERIMENTAL
+            intelPreviewSection
+            #else
             chargeModeSection
                 .disabled(manager.isPreparingToQuit)
 
             if !manager.backendReady {
                 componentSetupSection
             }
+            #endif
 
             Divider()
             footer
@@ -759,6 +763,24 @@ struct ContentView: View {
                 .fixedSize(horizontal: false, vertical: true)
         }
     }
+
+    #if MAULEAF_INTEL_EXPERIMENTAL
+    private var intelPreviewSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(manager.language == .english ? "Intel experimental preview" : "Intel 实验预览版")
+                .font(.subheadline.weight(.semibold))
+            Text(manager.language == .english
+                 ? "Unverified Intel preview: the developer has no Intel Mac and has not tested launching or running this build on Intel hardware. Actual operation, accuracy and stability are unknown. Battery information only; all charging controls and batt installation/removal are disabled. Provided AS IS, at your own risk."
+                 : "未经实机测试的 Intel 实验预览版：开发者没有 Intel Mac，未在 Intel 设备上安装、启动或运行本版本。实际运行情况、数据准确性与稳定性均未知。仅展示电池信息，充电控制和 batt 安装、卸载全部禁用；软件按现状提供，风险由使用者自行评估。")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(11)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.orange.opacity(0.075), in: RoundedRectangle(cornerRadius: 10))
+    }
+    #endif
 
     private var componentSetupSection: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -1099,6 +1121,18 @@ final class ChargeManager: ObservableObject {
 
     func refresh() {
         guard !isPreparingToQuit else { return }
+        #if MAULEAF_INTEL_EXPERIMENTAL
+        readSystemBattery()
+        backendReady = false
+        componentPresent = false
+        isManagedInstall = false
+        detectedBattPath = nil
+        supportsAdapterControl = false
+        modeText = "Intel 实验预览"
+        statusMessage = "Intel 充电控制未经验证，已禁用所有充电控制操作。"
+        isError = false
+        return
+        #endif
         if isBusy {
             readSystemBattery()
             return
@@ -1438,6 +1472,14 @@ final class ChargeManager: ObservableObject {
     }
 
     func prepareForTermination() async -> Bool {
+        #if MAULEAF_INTEL_EXPERIMENTAL
+        // Never touch charging tasks or other installed batt services on Intel.
+        timer?.invalidate()
+        timer = nil
+        powerRefresh.setVisible(false)
+        terminationReady = true
+        return true
+        #endif
         if terminationReady { return true }
         guard !isPreparingToQuit else { return false }
         isPreparingToQuit = true
@@ -1503,6 +1545,11 @@ final class ChargeManager: ObservableObject {
     }
 
     func installBackend() {
+        #if MAULEAF_INTEL_EXPERIMENTAL
+        statusMessage = "Intel 实验预览版禁止安装充电控制组件。"
+        isError = true
+        return
+        #endif
         guard !isBusy, !isPreparingToQuit else { return }
         lastChargeRequest = nil
         refresh()
@@ -1594,6 +1641,11 @@ final class ChargeManager: ObservableObject {
     }
 
     func uninstallBackend() {
+        #if MAULEAF_INTEL_EXPERIMENTAL
+        statusMessage = "Intel 实验预览版禁止卸载充电控制组件。"
+        isError = true
+        return
+        #endif
         guard !isBusy, !isPreparingToQuit else { return }
         lastChargeRequest = nil
         let hasReceipt = FileManager.default.fileExists(atPath: managedReceiptPath)
@@ -1832,6 +1884,9 @@ final class ChargeManager: ObservableObject {
     }
 
     private func locateBatt() -> String? {
+        #if MAULEAF_INTEL_EXPERIMENTAL
+        return nil
+        #endif
         if let cached = battPath, FileManager.default.isExecutableFile(atPath: cached) {
             return cached
         }

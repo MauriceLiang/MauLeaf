@@ -1,10 +1,12 @@
-# 本地构建与 GitHub Release
+# GitHub Actions 自动发布
 
-1. 在 `build.command` 中递增 `APP_VERSION`、`APP_BUILD`，同步更新 `CHANGELOG.md` 和 `docs/releases/v<版本>.md`。项目介绍或使用方式变更时，同时更新 `README.md`（中文）与 `README.en.md`（英文），保留双向语言入口。
-2. 在 Apple Silicon Mac 上执行 `./tests/run.sh` 和 `./build.command`。发布使用本地生成的 `build/MauLeaf-<版本>.dmg`。
-3. 检查应用版本、图标和许可证，执行 `codesign --verify --deep --strict` 及 `hdiutil verify`，生成 `SHA256SUMS.txt`。
-4. 提交、推送源代码，再创建并推送对应版本标签。保留已有远端历史，不强制覆盖标签或分支。
-5. 使用 GitHub CLI 发布 Release，更新说明使用对应 Markdown 文件，必须包含内容一致的完整中文、英文两节及语言跳转入口；上传本地 DMG、校验文件和固定版本 batt 源码归档。不要只上传二进制而省略更新说明。
-6. 发布后检查标签提交、Release 正文、资产大小与 SHA-256，确保上传资产与本地构建文件一致。
+推送 `main`、PR 或手动运行 Actions：仅测试。推送 `vX.Y.Z` 标签：先测试，再分别在 macos-15 与 macos-15-intel 上构建 ARM64 / Intel DMG，最后自动创建 Release。
 
-`build/` 和本地缓存的 `Vendor/batt` 不提交进 Git；安装包通过 GitHub Releases 分发。自动生成的源码归档由版本标签提供。
+- ARM64 正式版：主应用、卸载器、固定版本 batt v0.8.0。
+- Intel 实验版：**仅电池信息只读预览**，不打包 batt，不提供系统服务卸载器，也不允许执行充电控制。开发者**没有 Intel 实机，因此从未进行 Intel 实机安装或运行测试**，包括软件能否启动及稳定运行在内的实际使用情况未知。
+- CI 专用打包脚本：`Scripts/ci/package-macos.sh`，CI 不依赖本地 `build.command`。
+- Release：两个 DMG、`SHA256SUMS.txt`、batt v0.8.0 对应 GPL-2.0 源码；双语说明取自 `docs/releases/vX.Y.Z.md`。
+- DMG 采用 ad-hoc 签名，未经 notarization。
+- Intel 免责声明必须同时放在 README 中英文版、发布说明中英文版、DMG 内的 README；不能暗示 CI 编译成功就说明 Intel 可用。提供按现状（AS IS）、风险自担及法定权利保留说明。
+
+发布前将更新日志与对应版本双语说明合并至 `main`，确认测试通过；再检查标签不重复，执行 `git tag -a v0.7.5 -m "MauLeaf v0.7.5"`、`git push origin v0.7.5`（实际版本按需替换）。不要重写已发布标签。

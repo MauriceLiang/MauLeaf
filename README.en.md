@@ -97,6 +97,16 @@ This uses the native macOS [SMAppService login item API](https://developer.apple
 
 ## Uninstallation
 
+**On macOS 26/27, download and run [`Scripts/uninstall-macos26-27.sh`](Scripts/uninstall-macos26-27.sh)** instead of relying on the broken GUI uninstaller. The [entire script is also provided in the bilingual guide](docs/MACOS_26_27_UNINSTALL.md#完整卸载脚本可直接复制) for copying and review.
+
+```bash
+curl -fL --output mauleaf-uninstall.sh \
+  https://raw.githubusercontent.com/MauriceLiang/MauLeaf/main/Scripts/uninstall-macos26-27.sh
+bash mauleaf-uninstall.sh
+```
+
+Read the script and keep the Mac connected to power. **Do not run the whole script via `sudo bash`**; it requests specific privileges when required.
+
 > [!WARNING]
 > **macOS 26/27: Do not rely on the GUI uninstaller. Read the [emergency removal guide](docs/MACOS_26_27_UNINSTALL.md#english), inspect [Scripts/uninstall-macos26-27.sh](Scripts/uninstall-macos26-27.sh), and run it as a normal user.** It verifies backend ownership and restores adapter power before removing a verified managed service.
 

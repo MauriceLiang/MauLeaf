@@ -1,5 +1,10 @@
 [简体中文](README.md) | [English](README.en.md)
 
+> [!CAUTION]
+> **Compatibility warning (2026-11-10): Current MauLeaf releases do NOT support macOS 26 or macOS 27. Do not install or continue relying on MauLeaf on either release.**
+>
+> Bundled **batt v0.8.0** has shown unsupported charging control and failed quit/GUI uninstall on macOS 27. **Already upgraded? Follow the [emergency removal guide](docs/MACOS_26_27_UNINSTALL.md#english) and [guarded uninstall script](Scripts/uninstall-macos26-27.sh).** macOS 26 is designated unsupported too; identical symptoms have not been verified on every device.
+
 <p align="center">
   <img src="Assets/MauLeafIcon-1024.png" width="128" alt="MauLeaf leaf icon">
 </p>
@@ -36,7 +41,7 @@ Active battery discharge has protection for a closed lid, abnormal temperature, 
 
 ## Requirements
 
-- Apple Silicon (arm64) supported release: macOS 13+.
+- Apple Silicon (arm64): originally targeted macOS 13–15. **Current releases do NOT support macOS 26 or 27; do not install or continue using them.**
 - Intel (x86_64) EXPERIMENTAL read-only preview: battery information only. Charging control, batt installation and removal are disabled. Intel charging hardware is **NOT validated**.
 - Administrator authorization for the initial system component installation. Everyday operations use the installed service.
 - On Apple Silicon, charging-control capabilities depend on batt's device report. The Intel preview is NOT a full-featured charging controller.
@@ -50,6 +55,8 @@ This is an **unverified experimental preview, not an officially supported Intel 
 The software is provided **AS IS**, without warranties of Intel compatibility, merchantability, fitness for a particular purpose, or error-free operation. To the extent permitted by applicable law, the developer disclaims liability for loss arising from use of the experimental preview. Nothing here excludes rights or liability that cannot legally be excluded, and the project's open-source licenses remain applicable.
 
 ## Installation
+
+**Do NOT install this release on macOS 26 or 27.** Already upgraded? Use the [emergency removal guide](docs/MACOS_26_27_UNINSTALL.md#english) rather than relying on an affected in-app uninstall action.
 
 1. From [GitHub Releases](https://github.com/MauriceLiang/MauLeaf/releases/latest), choose `MauLeaf-<version>-macos-arm64.dmg` (supported) or `MauLeaf-<version>-macos-x86_64-EXPERIMENTAL.dmg` (Intel read-only preview).
 2. Open the DMG and drag `MauLeaf.app` to `Applications`. **Only the supported Apple Silicon DMG** also contains `Uninstall MauLeaf.app`; the Intel preview does not include an uninstaller.
@@ -89,6 +96,9 @@ This launches the app after you log in to your Mac. Quitting normally preserves 
 This uses the native macOS [SMAppService login item API](https://developer.apple.com/documentation/servicemanagement/smappservice).
 
 ## Uninstallation
+
+> [!WARNING]
+> **macOS 26/27: Do not rely on the GUI uninstaller. Read the [emergency removal guide](docs/MACOS_26_27_UNINSTALL.md#english), inspect [Scripts/uninstall-macos26-27.sh](Scripts/uninstall-macos26-27.sh), and run it as a normal user.** It verifies backend ownership and restores adapter power before removing a verified managed service.
 
 If launch at login is enabled, turn it off first. Quit MauLeaf normally, then run `Uninstall MauLeaf.app` from the installation image. The uninstaller first attempts to restore default charging control, then removes the app-managed component, tasks, settings, and both old and new main app names from `/Applications`. You can delete the uninstaller afterward. Externally installed copies of batt are preserved.
 

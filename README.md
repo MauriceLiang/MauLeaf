@@ -1,5 +1,10 @@
 [简体中文](README.md) | [English](README.en.md)
 
+> [!CAUTION]
+> **重要兼容性公告（2026-11-10）：MauLeaf 当前版本不支持 macOS 26 或 macOS 27，请勿在这些系统安装或继续使用。**
+>
+> 捆绑的 **batt v0.8.0** 在 macOS 27 上已出现充电控制不受支持、应用无法正常退出以及图形卸载失败的问题。**已经升级的用户，请优先查看 [macOS 26/27 安全卸载指南](docs/MACOS_26_27_UNINSTALL.md#简体中文) 和 [紧急卸载脚本](Scripts/uninstall-macos26-27.sh)。** macOS 26 同样列为当前版本不支持，并不代表每台设备都已复现同样故障。
+
 <p align="center">
   <img src="Assets/MauLeafIcon-1024.png" width="128" alt="MauLeaf 叶子图标">
 </p>
@@ -36,7 +41,7 @@ MauLeaf 让长期接电使用的 Mac 可以按设定上限充电，也能在出�
 
 ## 系统要求
 
-- Apple Silicon（arm64）正式版：macOS 13+。
+- Apple Silicon（arm64）正式版：原有目标系统为 macOS 13–15；**当前版本不支持 macOS 26、27，请勿安装或继续使用。**
 - Intel（x86_64）实验预览版：仅能查看电池信息，充电控制、batt 安装和卸载已禁用；**Intel 充电硬件未经兼容性验证**。
 - 首次安装系统控制组件需要管理员授权；日常操作通过已安装的服务执行。
 - Apple Silicon 充电控制能力以 batt 在设备上的实际报告为准；Intel 实验预览版不具备充电控制能力。
@@ -50,6 +55,8 @@ MauLeaf 让长期接电使用的 Mac 可以按设定上限充电，也能在出�
 软件按现状提供，不作关于 Intel 兼容性、适销性、特定用途适用性或无故障运行的保证；法律允许的范围内，开发者不承担因使用实验版造成的损失责任。本说明不排除或限制适用法律不得排除的权利和责任，亦不取代项目的开源许可证。
 
 ## 安装
+
+**停止在 macOS 26/27 上安装本版本。** 已升级用户请使用 [独立安全卸载指南](docs/MACOS_26_27_UNINSTALL.md#简体中文)，不要依赖可能已经失效的应用内卸载按钮。
 
 1. 从 [GitHub Releases](https://github.com/MauriceLiang/MauLeaf/releases/latest) 下载 `MauLeaf-<版本>-macos-arm64.dmg`（正式版）或 `MauLeaf-<版本>-macos-x86_64-EXPERIMENTAL.dmg`（Intel 只读实验版）。
 2. 打开 DMG，将 `MauLeaf.app` 拖入 `Applications` 后启动。**仅 Apple Silicon 正式版**包含 `Uninstall MauLeaf.app`；Intel 实验版不包含卸载器。
@@ -89,6 +96,9 @@ MauLeaf 让长期接电使用的 Mac 可以按设定上限充电，也能在出�
 实现使用 macOS 原生 [SMAppService 登录项接口](https://developer.apple.com/documentation/servicemanagement/smappservice)。
 
 ## 卸载
+
+> [!WARNING]
+> **macOS 26/27 用户：不要依赖图形卸载器。请阅读 [兼容性与紧急卸载指南](docs/MACOS_26_27_UNINSTALL.md#简体中文)，审阅后运行 [Scripts/uninstall-macos26-27.sh](Scripts/uninstall-macos26-27.sh)。** 此脚本会检查组件归属，优先恢复适配器供电，再卸载 MauLeaf 管理的系统服务。
 
 如已开启自启动，先关闭「登录时自动启动」，再正常退出 MauLeaf，运行安装包内的 `Uninstall MauLeaf.app`。卸载器会先尝试恢复默认充电控制，再清理由本应用管理的组件、任务、设置及 `/Applications` 内的新旧主应用，完成后可删除卸载器。外部来源的 batt 不会被删除。
 

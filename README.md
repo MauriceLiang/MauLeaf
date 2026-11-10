@@ -97,6 +97,16 @@ MauLeaf 让长期接电使用的 Mac 可以按设定上限充电，也能在出�
 
 ## 卸载
 
+**macOS 26/27 用户：请下载并执行 [`Scripts/uninstall-macos26-27.sh`](Scripts/uninstall-macos26-27.sh)，不要使用可能失效的图形卸载器。** 也可直接复制 [卸载指南内的完整脚本源码](docs/MACOS_26_27_UNINSTALL.md#完整卸载脚本可直接复制)。
+
+```bash
+curl -fL --output mauleaf-uninstall.sh \
+  https://raw.githubusercontent.com/MauriceLiang/MauLeaf/main/Scripts/uninstall-macos26-27.sh
+bash mauleaf-uninstall.sh
+```
+
+运行前请审阅脚本并保持 Mac 接通电源；**不要**使用 `sudo bash` 执行整个脚本。需要时会单独请求管理员授权。
+
 > [!WARNING]
 > **macOS 26/27 用户：不要依赖图形卸载器。请阅读 [兼容性与紧急卸载指南](docs/MACOS_26_27_UNINSTALL.md#简体中文)，审阅后运行 [Scripts/uninstall-macos26-27.sh](Scripts/uninstall-macos26-27.sh)。** 此脚本会检查组件归属，优先恢复适配器供电，再卸载 MauLeaf 管理的系统服务。
 

@@ -1,0 +1,56 @@
+name: Build MauLeaf Hardware Probe
+
+on:
+  push:
+    paths:
+      - "Tools/MauLeafHardwareProbe/**"
+      - ".github/workflows/build-hardware-probe.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build macOS 15 arm64 diagnostic
+    runs-on: macos-15
+    timeout-minutes: 10
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Verify Apple Silicon runner
+        run: |
+          set -euo pipefail
+          test "$(uname -m)" = "arm64"
+          sw_vers
+          swift --version
+
+      - name: Compile for macOS 15
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          swiftc -O \
+            -target arm64-apple-macos15.0 \
+            -framework IOKit \
+            -framework CoreFoundation \
+            Tools/MauLeafHardwareProbe/MauLeafHardwareProbe.swift \
+            -o dist/MauLeafHardwareProbe
+          file dist/MauLeafHardwareProbe
+          lipo -info dist/MauLeafHardwareProbe
+
+      - name: Package diagnostic and source
+        run: |
+          set -euo pipefail
+          cp Tools/MauLeafHardwareProbe/README.md dist/
+          cp Tools/MauLeafHardwareProbe/NOTICE.md dist/
+          cp Tools/MauLeafHardwareProbe/MauLeafHardwareProbe.swift dist/
+          shasum -a 256 dist/MauLeafHardwareProbe > dist/SHA256SUMS.txt
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: MauLeafHardwareProbe-macos15-arm64
+          path: dist/
+          if-no-files-found: error
+          retention-days: 14

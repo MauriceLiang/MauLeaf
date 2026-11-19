@@ -1,0 +1,109 @@
+name: Build MauLeaf Native Firmware Helper
+
+on:
+  push:
+    branches:
+      - feat/native-firmware-helper-p3
+    paths:
+      - "Sources/FirmwareLimitCore.swift"
+      - "Sources/FirmwareLimitSMCTransport.swift"
+      - "Sources/FirmwareLimitHelperProtocol.swift"
+      - "Sources/FirmwareLimitHelperService.swift"
+      - "Sources/FirmwareLimitHelperMain.swift"
+      - "Sources/FirmwareLimitHelperClient.swift"
+      - "tests/FirmwareLimitHelperServiceTests.swift"
+      - "Support/com.local.chargecap.firmware-helper.plist"
+      - "Scripts/install-native-firmware-helper.sh"
+      - "Scripts/uninstall-native-firmware-helper.sh"
+      - "docs/NATIVE_FIRMWARE_HELPER.md"
+      - ".github/workflows/build-native-firmware-helper.yml"
+  pull_request:
+    paths:
+      - "Sources/FirmwareLimitCore.swift"
+      - "Sources/FirmwareLimitSMCTransport.swift"
+      - "Sources/FirmwareLimitHelperProtocol.swift"
+      - "Sources/FirmwareLimitHelperService.swift"
+      - "Sources/FirmwareLimitHelperMain.swift"
+      - "Sources/FirmwareLimitHelperClient.swift"
+      - "tests/FirmwareLimitHelperServiceTests.swift"
+      - "Support/com.local.chargecap.firmware-helper.plist"
+      - "Scripts/install-native-firmware-helper.sh"
+      - "Scripts/uninstall-native-firmware-helper.sh"
+      - "docs/NATIVE_FIRMWARE_HELPER.md"
+      - ".github/workflows/build-native-firmware-helper.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Test and build arm64 helper
+    runs-on: macos-15
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Verify runner
+        run: |
+          set -euo pipefail
+          sw_vers
+          uname -m
+          swift --version
+
+      - name: Validate installer metadata
+        run: |
+          set -euo pipefail
+          bash -n Scripts/install-native-firmware-helper.sh
+          bash -n Scripts/uninstall-native-firmware-helper.sh
+          plutil -lint Support/com.local.chargecap.firmware-helper.plist
+
+      - name: Run helper service tests
+        run: |
+          set -euo pipefail
+          swiftc -parse-as-library \
+            -framework IOKit -framework Security \
+            Sources/FirmwareLimitCore.swift \
+            Sources/FirmwareLimitSMCTransport.swift \
+            Sources/FirmwareLimitHelperProtocol.swift \
+            Sources/FirmwareLimitHelperService.swift \
+            Sources/FirmwareLimitHelperClient.swift \
+            tests/FirmwareLimitHelperServiceTests.swift \
+            -o /tmp/FirmwareLimitHelperServiceTests
+          /tmp/FirmwareLimitHelperServiceTests
+
+      - name: Build helper executable
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          swiftc -O -parse-as-library \
+            -target arm64-apple-macos13.0 \
+            -framework IOKit -framework Security \
+            Sources/FirmwareLimitCore.swift \
+            Sources/FirmwareLimitSMCTransport.swift \
+            Sources/FirmwareLimitHelperProtocol.swift \
+            Sources/FirmwareLimitHelperService.swift \
+            Sources/FirmwareLimitHelperMain.swift \
+            -o dist/MauLeafFirmwareHelper
+          chmod 755 dist/MauLeafFirmwareHelper
+          codesign --force --sign - --identifier com.local.chargecap.firmware-helper dist/MauLeafFirmwareHelper
+          codesign --verify --strict dist/MauLeafFirmwareHelper
+          file dist/MauLeafFirmwareHelper
+          lipo -info dist/MauLeafFirmwareHelper
+
+      - name: Package installer and documentation
+        run: |
+          set -euo pipefail
+          cp Support/com.local.chargecap.firmware-helper.plist dist/
+          cp Scripts/install-native-firmware-helper.sh dist/
+          cp Scripts/uninstall-native-firmware-helper.sh dist/
+          cp docs/NATIVE_FIRMWARE_HELPER.md dist/README.md
+          chmod 755 dist/install-native-firmware-helper.sh dist/uninstall-native-firmware-helper.sh
+          shasum -a 256 dist/MauLeafFirmwareHelper > dist/SHA256SUMS.txt
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: MauLeafFirmwareHelper-macos-arm64
+          path: dist/
+          if-no-files-found: error
+          retention-days: 14

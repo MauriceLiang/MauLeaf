@@ -17,6 +17,12 @@ swiftc "$ROOT/Sources/ChargeModeCore.swift" "$ROOT/Sources/AppLocalization.swift
     "$ROOT/tests/DischargeControlTests.swift" -o "$TMP/dischargetests"
 "$TMP/dischargetests"
 if [[ "$(uname -s)" == Darwin ]]; then
+    swiftc -parse-as-library -framework IOKit -framework Security \
+        "$ROOT/Sources/FirmwareLimitCore.swift" "$ROOT/Sources/FirmwareLimitSMCTransport.swift" \
+        "$ROOT/Sources/FirmwareLimitHelperProtocol.swift" "$ROOT/Sources/FirmwareLimitHelperService.swift" \
+        "$ROOT/Sources/FirmwareLimitHelperClient.swift" "$ROOT/tests/FirmwareLimitHelperServiceTests.swift" \
+        -o "$TMP/firmwarehelpertests"
+    "$TMP/firmwarehelpertests"
     swiftc -parse-as-library -emit-module -emit-library -module-name MauLeafFirmwareLimit \
         -framework IOKit "$ROOT/Sources/FirmwareLimitCore.swift" "$ROOT/Sources/FirmwareLimitSMCTransport.swift" \
         -emit-module-path "$TMP/MauLeafFirmwareLimit.swiftmodule" -o "$TMP/libMauLeafFirmwareLimit.dylib"

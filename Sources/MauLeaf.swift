@@ -433,15 +433,7 @@ struct BatteryStatusRing: View {
 
 struct ContentView: View {
     @ObservedObject var manager: ChargeManager
-    @State private var confirmation: Confirmation?
-
     private let presets = [70, 75, 80, 85, 90, 95]
-
-    private enum Confirmation: String, Identifiable {
-        case install
-        case uninstall
-        var id: String { rawValue }
-    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -453,9 +445,6 @@ struct ContentView: View {
                 .disabled(manager.isPreparingToQuit)
             oneTimeChargeSection
                 .disabled(manager.isPreparingToQuit)
-            if !manager.backendReady {
-                componentSetupSection
-            }
             #endif
             Divider()
             footer
@@ -463,23 +452,15 @@ struct ContentView: View {
         .padding(.horizontal, 16)
         .padding(.top, 18)
         .padding(.bottom, 16)
-        .alert(item: $confirmation) { item in
-            switch item {
-            case .install:
-                return Alert(
-                    title: Text(manager.text("安装充电控制组件？")),
-                    message: Text(manager.text("此预览版的原生固件后端仍处于只读验证阶段。为保证当前设备上的充电操作可用，本版本暂时保留经过固定版本和校验的 batt 控制组件。安装需要管理员授权，不会覆盖其他来源的安装。")),
-                    primaryButton: .default(Text(manager.text("继续安装")), action: { manager.installBackend() }),
-                    secondaryButton: .cancel(Text(manager.text("取消")))
-                )
-            case .uninstall:
-                return Alert(
-                    title: Text(manager.text("卸载充电控制组件？")),
-                    message: Text(manager.text("将先恢复默认充电控制，再移除 MauLeaf 管理的控制程序和系统服务。MauLeaf 应用本身不会被删除。此操作需要管理员授权。")),
-                    primaryButton: .destructive(Text(manager.text("卸载组件")), action: { manager.uninstallBackend() }),
-                    secondaryButton: .cancel(Text(manager.text("取消")))
-                )
+        .alert(manager.text("启用原生固件控制？"), isPresented: $manager.showNativeWriteConfirmation) {
+            Button(manager.text("确认并继续"), role: .destructive) {
+                manager.confirmNativeWrite()
             }
+            Button(manager.text("取消"), role: .cancel) {
+                manager.cancelNativeWrite()
+            }
+        } message: {
+            Text(manager.text("此操作会直接修改本机 AppleSMC 固件充电寄存器。仅支持已限定的 MacBookPro18,1、指定固件和 macOS 15，并且必须连接电源。程序会逐项读回校验并在失败时尝试恢复；寄存器写入成功仍不代表实际充电停止点已经验证。"))
         }
         .task { manager.start() }
     }
@@ -540,7 +521,7 @@ struct ContentView: View {
                 in: 50...95,
                 step: 5
             )
-            .disabled(!manager.backendReady || manager.isBusy || manager.fullOncePending)
+            .disabled(!manager.backendReady || !manager.isAdapterConnected || manager.isBusy || manager.fullOncePending)
 
             HStack(spacing: 5) {
                 ForEach(presets, id: \.self) { preset in
@@ -555,10 +536,10 @@ struct ContentView: View {
                             .clipShape(RoundedRectangle(cornerRadius: 6))
                     }
                     .buttonStyle(.plain)
-                    .disabled(!manager.backendReady || manager.isBusy || manager.fullOncePending)
+                    .disabled(!manager.backendReady || !manager.isAdapterConnected || manager.isBusy || manager.fullOncePending)
                 }
             }
-            Text(manager.text("调整后自动应用；本次充满期间暂不可修改上限。"))
+            Text(manager.text("连接电源后自动写入原生固件；本次充满期间暂不可修改上限。"))
                 .font(.caption2)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -579,7 +560,7 @@ struct ContentView: View {
             }
 
             if manager.fullOncePending {
-                Text(manager.text("正在临时解除充电上限；达到 100% 后自动恢复原上限，最长 10 小时。"))
+                Text(manager.text("原生固件限充已临时关闭；达到 100% 或 10 小时期限后自动恢复原上限。断开电源时会等待重新接电再恢复。"))
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -592,19 +573,19 @@ struct ContentView: View {
                 .buttonStyle(.bordered)
                 .disabled(manager.isBusy)
             } else {
-                Text(manager.text("仅本次允许充至 100%；完成后自动恢复当前设置的充电上限。"))
+                Text(manager.text("仅本次允许充至 100%；完成后由原生后台服务恢复当前充电上限。"))
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
                 Button {
-                    manager.selectFullBehavior(.once)
+                    manager.beginOneTimeFullCharge()
                 } label: {
                     Label(manager.text("充满至 100%"), systemImage: "bolt.fill")
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.borderedProminent)
                 .disabled(
-                    !manager.backendReady || manager.isBusy
+                    !manager.backendReady || !manager.isAdapterConnected || manager.isBusy
                     || (manager.batteryPercent ?? 0) >= 100
                 )
             }
@@ -619,8 +600,8 @@ struct ContentView: View {
             Text(manager.language == .english ? "Intel experimental preview" : "Intel 实验预览版")
                 .font(.subheadline.weight(.semibold))
             Text(manager.language == .english
-                 ? "Unverified Intel preview: the developer has no Intel Mac and has not tested launching or running this build on Intel hardware. Actual operation, accuracy and stability are unknown. Battery information only; charging controls are disabled. Provided AS IS, at your own risk."
-                 : "未经实机测试的 Intel 实验预览版：开发者没有 Intel Mac，未在 Intel 设备上安装、启动或运行本版本。实际运行情况、数据准确性与稳定性均未知。仅展示电池信息，充电控制已禁用；软件按现状提供，风险由使用者自行评估。")
+                 ? "Unverified Intel preview: the developer has no Intel Mac and has not tested launching or running this build on Intel hardware. Actual operation, accuracy and stability are unknown. Battery information only; native charging controls are unavailable. Provided AS IS, at your own risk."
+                 : "未经实机测试的 Intel 实验预览版：开发者没有 Intel Mac，未在 Intel 设备上安装、启动或运行本版本。实际运行情况、数据准确性与稳定性均未知。仅展示电池信息，不提供原生充电控制；软件按现状提供，风险由使用者自行评估。")
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -631,57 +612,9 @@ struct ContentView: View {
     }
     #endif
 
-    private var componentSetupSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text(manager.componentPresent ? manager.text("检测到已有控制组件") : manager.text("首次使用需要安装控制组件"))
-                .font(.subheadline.weight(.medium))
-            Text(manager.componentPresent
-                 ? manager.text("已找到现有控制程序，但服务不可用。为避免覆盖其他安装方式，请先检查现有服务。")
-                 : manager.text("原生固件控制仍在只读验证阶段。当前预览版暂时使用固定版本的兼容控制组件，安装时需要管理员授权。"))
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-
-            if !manager.componentPresent {
-                Button {
-                    confirmation = .install
-                } label: {
-                    Label(manager.isBusy ? manager.text("正在安装…") : manager.text("安装控制组件"), systemImage: "shippingbox.fill")
-                        .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.borderedProminent)
-                .disabled(manager.isBusy)
-            } else {
-                Button {
-                    manager.refresh()
-                } label: {
-                    Label(manager.text("重新检查服务"), systemImage: "arrow.clockwise")
-                }
-                .buttonStyle(.bordered)
-                .disabled(manager.isBusy)
-            }
-        }
-        .padding(11)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.orange.opacity(0.075), in: RoundedRectangle(cornerRadius: 10))
-    }
-
     private var footer: some View {
         HStack(spacing: 12) {
-            if manager.isManagedInstall {
-                Button {
-                    confirmation = .uninstall
-                } label: {
-                    Label(manager.text("卸载组件"), systemImage: "trash")
-                }
-                .buttonStyle(.plain)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .disabled(manager.isBusy)
-            }
-
             Spacer()
-
             Button {
                 manager.language = manager.language.other
             } label: {
@@ -697,7 +630,7 @@ struct ContentView: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .disabled(manager.isPreparingToQuit)
-                .help(manager.text("停止后台充电任务、解除充电限制并恢复适配器供电后退出"))
+                .help(manager.text("退出 MauLeaf 不会取消已写入固件的充电上限；本次充满由原生后台服务负责恢复。"))
         }
     }
 }

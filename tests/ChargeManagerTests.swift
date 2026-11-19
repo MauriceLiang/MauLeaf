@@ -65,12 +65,156 @@ private enum ChargeManagerTests {
                   "disabling restores the exact pre-MauLeaf firmware state and removes the snapshot")
 
         let allowed = await manager.prepareForTermination()
-        try check(allowed, "app can quit after current operation completes")
-        try check(!backend.state.active && !backend.pending,
-                  "quitting after disable leaves the original firmware state intact")
+        try check(allowed, "app can quit after an already verified manual disable")
+        try check(!backend.state.active && !backend.pending && backend.restoreCount == 1,
+                  "quitting after manual disable leaves the original firmware state intact")
+
+        try await testAutomaticQuitRestore()
+        try await testQuitDuringOneTimeFullCharge()
+        try await testUnpluggedQuitIsDenied()
+        try await testRestoreFailureBlocksQuit()
+        try await testFalseRestoreAcknowledgmentBlocksQuit()
+        try await testLegacyPreview4RestoresActivationOnQuit()
+        try await testInactiveQuitNeedsNoFirmwareWrite()
+        try await testUnknownFirmwareStateBlocksQuit()
 
         UserDefaults.standard.removeObject(forKey: "nativeFirmwareWriteConfirmed")
-        print("ChargeManagerTests: PASS (opt-in activation, snapshot preservation, exact disable restore, AC guard)")
+        print("ChargeManagerTests: PASS (opt-in activation, automatic quit restore, AC guard, failure retry, one-time full and legacy migration)")
+    }
+
+    @MainActor
+    private static func activatedManager(
+        backend: FixtureNativeFirmwareBackend
+    ) async throws -> ChargeManager {
+        UserDefaults.standard.set(true, forKey: "nativeFirmwareWriteConfirmed")
+        let manager = ChargeManager(backend: backend, autoInstallNativeHelper: false)
+        manager.start()
+        try await wait { manager.currentState != nil && manager.backendReady }
+        manager.isAdapterConnected = true
+        manager.batteryPercent = 80
+        manager.enableLimit()
+        try await wait { backend.applyCount == 1 && !manager.isBusy }
+        try check(backend.state.active && manager.hasOriginalStateSnapshot,
+                  "test fixture enabled a limit while retaining the pre-MauLeaf snapshot")
+        return manager
+    }
+
+    @MainActor
+    private static func testAutomaticQuitRestore() async throws {
+        let backend = FixtureNativeFirmwareBackend()
+        let manager = try await activatedManager(backend: backend)
+        manager.requestLimit(90, immediate: true)
+        try await wait { backend.applyCount == 2 && !manager.isBusy }
+        let allowed = await manager.prepareForTermination()
+        try check(allowed && manager.isPreparingToQuit,
+                  "normal quit succeeds after automatic firmware restoration")
+        try check(backend.restoreCount == 1 && !backend.state.active
+                  && backend.state.upper == 80 && backend.state.lower == 78
+                  && !manager.hasOriginalStateSnapshot,
+                  "normal quit restores the original activation and both thresholds without manual disable")
+    }
+
+    @MainActor
+    private static func testQuitDuringOneTimeFullCharge() async throws {
+        let backend = FixtureNativeFirmwareBackend()
+        let manager = try await activatedManager(backend: backend)
+        manager.beginOneTimeFullCharge()
+        try await wait { backend.beginCount == 1 && !manager.isBusy }
+        try check(backend.pending && !backend.state.active,
+                  "a one-time full-charge task is active before quit")
+
+        let allowed = await manager.prepareForTermination()
+        try check(allowed && backend.restoreCount == 1
+                  && !backend.pending && !backend.state.active
+                  && !manager.hasOriginalStateSnapshot,
+                  "quitting cancels one-time full charge and restores the original pre-activation firmware state")
+        try check(backend.cancelCount == 0,
+                  "quit never reactivates the current MauLeaf limit through cancelOneTimeCharge")
+    }
+
+    @MainActor
+    private static func testUnpluggedQuitIsDenied() async throws {
+        let backend = FixtureNativeFirmwareBackend()
+        let manager = try await activatedManager(backend: backend)
+        manager.isAdapterConnected = false
+        let denied = await manager.prepareForTermination()
+        try check(!denied && manager.isError && !manager.isPreparingToQuit,
+                  "without AC power, quitting is denied rather than silently leaving the limit active")
+        try check(backend.restoreCount == 0 && backend.state.active,
+                  "an unplugged quit does not attempt an unsafe firmware write")
+        manager.isAdapterConnected = true
+        let retry = await manager.prepareForTermination()
+        try check(retry && backend.restoreCount == 1 && !backend.state.active,
+                  "reconnecting AC permits a safe automatic restore and quit")
+    }
+
+    @MainActor
+    private static func testRestoreFailureBlocksQuit() async throws {
+        let backend = FixtureNativeFirmwareBackend()
+        let manager = try await activatedManager(backend: backend)
+        backend.failNextRestore = true
+        let denied = await manager.prepareForTermination()
+        try check(!denied && manager.isError && !manager.isPreparingToQuit
+                  && backend.state.active && manager.hasOriginalStateSnapshot,
+                  "a helper restore error blocks normal termination and retains the snapshot")
+        let retried = await manager.prepareForTermination()
+        try check(retried && backend.restoreCount == 2 && !backend.state.active,
+                  "the next normal quit retries original-state restore successfully")
+    }
+
+    @MainActor
+    private static func testFalseRestoreAcknowledgmentBlocksQuit() async throws {
+        let backend = FixtureNativeFirmwareBackend()
+        let manager = try await activatedManager(backend: backend)
+        backend.falselyReportRestoreSuccess = true
+        let denied = await manager.prepareForTermination()
+        try check(!denied && backend.state.active && manager.hasOriginalStateSnapshot,
+                  "a successful helper acknowledgment cannot bypass independent firmware state read-back")
+        let retried = await manager.prepareForTermination()
+        try check(retried && !backend.state.active && backend.restoreCount == 2,
+                  "quit succeeds once the real state is restored and verified")
+    }
+
+    @MainActor
+    private static func testLegacyPreview4RestoresActivationOnQuit() async throws {
+        let backend = FixtureNativeFirmwareBackend()
+        backend.state = FirmwareLimitHelperStateResponse(
+            state: FirmwareLimitState(activationByte: 0x02, upper: 85, lower: 83)
+        )
+        let manager = ChargeManager(backend: backend, autoInstallNativeHelper: false)
+        manager.start()
+        try await wait { manager.currentState != nil && manager.isLegacyActive }
+        manager.isAdapterConnected = true
+        let allowed = await manager.prepareForTermination()
+        try check(allowed && backend.restoreCount == 1 && !backend.state.active,
+                  "normal quit automatically deactivates a Preview 4 legacy limit")
+        try check(backend.state.upper == 85 && backend.state.lower == 83,
+                  "legacy quit does not invent or zero historical threshold values")
+    }
+
+    @MainActor
+    private static func testInactiveQuitNeedsNoFirmwareWrite() async throws {
+        let backend = FixtureNativeFirmwareBackend()
+        let manager = ChargeManager(backend: backend, autoInstallNativeHelper: false)
+        manager.start()
+        try await wait { manager.currentState != nil && manager.backendReady }
+        manager.isAdapterConnected = false
+        let allowed = await manager.prepareForTermination()
+        try check(allowed && backend.restoreCount == 0,
+                  "an already-inactive clean installation can quit on battery without firmware writes")
+    }
+
+    @MainActor
+    private static func testUnknownFirmwareStateBlocksQuit() async throws {
+        let backend = FixtureNativeFirmwareBackend()
+        let manager = try await activatedManager(backend: backend)
+        backend.failNextRead = true
+        let denied = await manager.prepareForTermination()
+        try check(!denied && backend.state.active && !manager.isPreparingToQuit,
+                  "unknown firmware state blocks quitting when restoration cannot be verified")
+        let retried = await manager.prepareForTermination()
+        try check(retried && !backend.state.active,
+                  "reading the firmware and restoring it on retry permits quitting")
     }
 
     @MainActor

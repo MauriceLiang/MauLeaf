@@ -1151,7 +1151,7 @@ final class ChargeManager: ObservableObject {
         isAdapterConnected = snapshot.isACConnected == true
 
         switch snapshot.isACConnected {
-        case true:
+        case .some(true):
             if snapshot.isFullyCharged || snapshot.percent == 100 {
                 batteryStateText = "已接电源，已充满"
             } else if snapshot.isCharging {
@@ -1159,9 +1159,9 @@ final class ChargeManager: ObservableObject {
             } else {
                 batteryStateText = "已接电源，未充电"
             }
-        case false:
+        case .some(false):
             batteryStateText = "电池供电"
-        case nil:
+        case .none:
             batteryStateText = "电池状态不可用"
         }
     }

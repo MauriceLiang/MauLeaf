@@ -21,9 +21,6 @@
 "操作未完成" = "Operation incomplete";
 "关闭" = "Close";
 "正在读取电池状态…" = "Reading battery status…";
-"Intel 实验预览" = "Intel experimental preview";
-"Intel 版本不包含原生固件控制服务。" = "The Intel build does not include the native firmware control service.";
-"未经实机测试的 Intel 实验预览版：开发者没有 Intel Mac，未在 Intel 设备上安装、启动或运行本版本。实际运行情况、数据准确性与稳定性均未知。仅展示电池信息，不提供原生充电控制；软件按现状提供，风险由使用者自行评估。" = "Untested Intel experimental preview: the developer does not have an Intel Mac and has not installed, launched, or run this build on Intel hardware. Operation, accuracy, and stability are unknown. Battery information only; native charging controls are unavailable. Provided AS IS, at your own risk.";
 "当前设备不支持原生固件控制" = "This device does not support native firmware control";
 "当前硬件配置未通过原生写入验证。" = "This hardware profile has not passed native write validation.";
 "等待接电后恢复原生充电上限" = "Waiting for AC power to restore the native charging limit";
@@ -70,3 +67,33 @@
 "正在连接 MauLeaf 原生固件服务…" = "Connecting to the MauLeaf native firmware service…";
 
 "%@，正在充电" = "%@, charging";
+
+"检测到旧版充电限制" = "Legacy charging limit detected";
+"Preview 4 没有保存首次启用前的固件阈值，因此无法恢复原始上限。继续操作只会关闭旧版限充激活标志，并保留当前阈值；这不等于恢复历史原状。" = "Preview 4 did not save the firmware thresholds from before the first activation, so the original values cannot be restored. Continuing only clears the legacy limit activation flag and preserves the current thresholds; this is not a restoration of the historical state.";
+"检测到旧版或未托管的固件限充" = "Legacy or unmanaged firmware limit detected";
+"没有找到首次启用前的原始固件快照。停用旧版限制只能关闭激活标志，不能恢复未保存的阈值。" = "No original firmware snapshot from before activation was found. Disabling this legacy limit only clears its activation flag; it cannot restore thresholds that were never saved.";
+"停用旧版限制" = "Disable legacy limit";
+"正在等待恢复原始固件配置" = "Waiting to restore the original firmware state";
+"原始配置快照已保留。接入电源后，后台服务会继续恢复；也可以手动重试。" = "The original-state snapshot is retained. The background helper will continue after AC power is connected, or you can retry manually.";
+"重试恢复原始配置" = "Retry original-state restore";
+"限制充电已启用" = "Charging limit enabled";
+"MauLeaf 已保存启用前的固件配置。关闭时会逐项恢复并验证原始值。" = "MauLeaf saved the firmware state from before activation. Disabling restores and verifies each original value.";
+"关闭限制充电" = "Disable charging limit";
+"限制充电尚未启用" = "Charging limit is not enabled";
+"当前不会向固件写入充电上限。启用时会先保存原始配置，之后可随时关闭并恢复。" = "No charging limit is currently written to firmware. The original state is saved when you enable it, and can be restored later.";
+"未启用时仅保存上限设置；启用后修改会立即应用。" = "While disabled, the limit is saved locally only. Changes apply immediately after activation.";
+"已保存设置；启用限制充电后生效" = "Preference saved; it takes effect when charging limits are enabled";
+"当前限制充电未启用，此次调整仅保存在 MauLeaf 中。" = "Charging limits are currently disabled. This change is saved in MauLeaf only.";
+"本次充满进行中，暂不可修改充电上限。" = "A one-time full charge is in progress; the limit cannot be changed yet.";
+"当前系统或硬件配置不允许写入新的充电上限。" = "The current OS or hardware profile does not allow a new charging limit to be written.";
+"请先连接电源，再启用限制充电。" = "Connect AC power before enabling the charging limit.";
+"当前设备暂时不能启用限制充电。" = "Charging limits cannot be enabled on this device right now.";
+"正在恢复启用前的原始固件配置…" = "Restoring the original firmware state from before activation…";
+"检测到未托管的固件限充" = "An unmanaged firmware limit was detected";
+"恢复原始固件配置失败：%@" = "Could not restore the original firmware state: %@";
+"限制充电未启用" = "Charging limit is disabled";
+"已请求取消本次充满；接入电源后会恢复当前限充设置。" = "Cancellation was requested. The current limit will be restored when AC power is connected.";
+"当前系统不允许启用新的限充配置，但可以使用已保存快照恢复原始状态。" = "This OS does not allow a new charging limit, but the saved snapshot can still be used to restore the original state.";
+"没有找到启用前的原始快照；停用时只能关闭激活标志，无法恢复历史阈值。" = "No pre-activation snapshot was found. Disabling can only clear the activation flag; historical thresholds cannot be restored.";
+"上限" = "Limit";
+"启用限制充电" = "Enable charging limit";

@@ -758,7 +758,11 @@ final class ChargeManager: ObservableObject {
         autoInstallNativeHelper: Bool = true
     ) {
         self.backend = backend
+        #if MAULEAF_INTEL_EXPERIMENTAL
+        self.autoInstallNativeHelper = false
+        #else
         self.autoInstallNativeHelper = autoInstallNativeHelper
+        #endif
         let saved = UserDefaults.standard.integer(forKey: "chargeLimit")
         limit = (50...95).contains(saved) ? saved : 80
     }
@@ -846,6 +850,13 @@ final class ChargeManager: ObservableObject {
 
     private func refreshNativeState(allowInstall: Bool) async {
         guard !isPreparingToQuit, !isBusy else { return }
+        #if MAULEAF_INTEL_EXPERIMENTAL
+        backendReady = false
+        modeText = "Intel 实验预览"
+        statusMessage = "Intel 版本不包含原生固件控制服务。"
+        isError = false
+        return
+        #endif
         do {
             let state = try await backend.readState()
             let oneTime = try await backend.oneTimeChargeStatus()

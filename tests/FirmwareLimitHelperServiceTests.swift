@@ -243,8 +243,8 @@ private enum FirmwareLimitHelperServiceTests {
         var legacyStateError: NSString?
         legacyService.readState { data, error in legacyStateData = data; legacyStateError = error }
         precondition(legacyStateError == nil, "legacy state remains readable after an OS upgrade")
-        let legacyState = try JSONDecoder().decode(FirmwareLimitHelperStateResponse.self, from: legacyStateData! as Data)
-        precondition(!legacyState.writeSupported && legacyState.restoreSupported,
+        let upgradedLegacyState = try JSONDecoder().decode(FirmwareLimitHelperStateResponse.self, from: legacyStateData! as Data)
+        precondition(!upgradedLegacyState.writeSupported && upgradedLegacyState.restoreSupported,
                      "new writes stay blocked on the upgraded OS while activation-only legacy cleanup remains available")
 
         var legacyData: NSData?

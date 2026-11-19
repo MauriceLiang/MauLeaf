@@ -8,6 +8,7 @@ SUPPORT_DIR="/Library/Application Support/MauLeaf"
 JOB="$SUPPORT_DIR/one-time-charge.json"
 SNAPSHOT="$SUPPORT_DIR/original-firmware-state.json"
 RESTORE_REQUEST="$SUPPORT_DIR/restore-original-state.pending"
+BACKGROUND_RECOVERY="$SUPPORT_DIR/background-recovery.pending"
 
 if [[ "$EUID" -ne 0 ]]; then
   echo "请使用 sudo 运行此脚本。" >&2
@@ -43,6 +44,8 @@ else
   printf '%s\n' "$RESTORE_OUTPUT" >&2
   if [[ -e "$RESTORE_REQUEST" ]]; then
     echo "当前无法完成恢复请求。已保留原始快照，并重新启动后台恢复服务；接入电源后会自动重试。" >&2
+    /bin/mkdir -p "$SUPPORT_DIR"
+    /usr/bin/touch "$BACKGROUND_RECOVERY"
     /bin/launchctl bootstrap system "$PLIST_TARGET" >/dev/null 2>&1 || true
     /bin/launchctl kickstart -k "system/$LABEL" >/dev/null 2>&1 || true
   else
@@ -51,7 +54,7 @@ else
   exit 5
 fi
 
-if [[ -e "$SNAPSHOT" || -e "$RESTORE_REQUEST" || -e "$JOB" ]]; then
+if [[ -e "$SNAPSHOT" || -e "$RESTORE_REQUEST" || -e "$BACKGROUND_RECOVERY" || -e "$JOB" ]]; then
   echo "恢复命令已返回，但仍存在持久化恢复数据；为避免丢失恢复能力，拒绝删除服务。" >&2
   /bin/launchctl bootstrap system "$PLIST_TARGET" >/dev/null 2>&1 || true
   exit 6

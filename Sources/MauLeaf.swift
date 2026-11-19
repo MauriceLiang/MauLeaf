@@ -177,7 +177,10 @@ private final class MauLeafMenuController: NSObject {
         }
 
         let restored = await manager.prepareForTermination()
-        let completed = restored ? await manager.finishQuitComponentCleanup(policy) : false
+        var completed = false
+        if restored {
+            completed = await manager.finishQuitComponentCleanup(policy)
+        }
         guard !completed else { return true }
 
         positionPanel()
@@ -191,8 +194,12 @@ private final class MauLeafMenuController: NSObject {
         // and helper for recovery; never imply Finder deletion is safe.
         let alert = NSAlert()
         alert.alertStyle = .warning
-        alert.messageText = manager.text("无法验证充电限制恢复")
-        alert.informativeText = manager.text("原始固件配置尚未确认恢复。建议返回应用，连接电源或排查原因后重试退出。如果选择「仍然退出」，后台 Helper 和恢复快照会保留以尝试修复；此时不能直接将 MauLeaf.app 扔进废纸篓，否则可能留下后台服务或限充状态。")
+        alert.messageText = manager.didVerifyFirmwareOnQuit
+            ? manager.text("固件已恢复，但后台组件未处理完成")
+            : manager.text("无法验证充电限制恢复")
+        alert.informativeText = manager.didVerifyFirmwareOnQuit
+            ? manager.text("原始固件已恢复，但 Helper 停止或脚本清理失败。建议返回应用重试；如果仍然退出，请勿直接删除 App，以免留下系统后台组件。")
+            : manager.text("原始固件配置尚未确认恢复。建议返回应用，连接电源或排查原因后重试退出。如果选择「仍然退出」，后台 Helper 和恢复快照会保留以尝试修复；此时不能直接将 MauLeaf.app 扔进废纸篓，否则可能留下后台服务或限充状态。")
         alert.addButton(withTitle: manager.text("仍然退出"))
         alert.addButton(withTitle: manager.text("返回应用"))
         return alert.runModal() == .alertFirstButtonReturn
@@ -785,12 +792,14 @@ final class ChargeManager: ObservableObject {
     @Published private(set) var restoreReady = false
     @Published var isBusy = false
     @Published private(set) var isPreparingToQuit = false
+    @Published private(set) var didVerifyFirmwareOnQuit = false
     @Published var isError = false
     @Published var showNativeWriteConfirmation = false
     @Published var showLegacyDisableConfirmation = false
 
     private let backend: NativeFirmwareBackend
     private let autoInstallNativeHelper: Bool
+    private let exitLifecycleForTesting: ((QuitComponentPolicy) async throws -> Void)?
     private var helperInstallAttempted = false
     private var started = false
     private var refreshTimer: Timer?
@@ -807,10 +816,12 @@ final class ChargeManager: ObservableObject {
 
     init(
         backend: NativeFirmwareBackend = FirmwareLimitHelperClient(),
-        autoInstallNativeHelper: Bool = true
+        autoInstallNativeHelper: Bool = true,
+        exitLifecycleForTesting: ((QuitComponentPolicy) async throws -> Void)? = nil
     ) {
         self.backend = backend
         self.autoInstallNativeHelper = autoInstallNativeHelper
+        self.exitLifecycleForTesting = exitLifecycleForTesting
         let saved = UserDefaults.standard.integer(forKey: "chargeLimit")
         limit = (50...95).contains(saved) ? saved : 80
     }
@@ -1330,6 +1341,7 @@ final class ChargeManager: ObservableObject {
     func prepareForTermination() async -> Bool {
         guard !isPreparingToQuit else { return false }
         isPreparingToQuit = true
+        didVerifyFirmwareOnQuit = false
         limitDebounce?.cancel()
         limitDebounce = nil
         pendingAction = nil
@@ -1397,6 +1409,7 @@ final class ChargeManager: ObservableObject {
             backendReady = verified.writeSupported
             restoreReady = verified.restoreSupported
             modeText = "限制充电未启用"
+            didVerifyFirmwareOnQuit = true
             statusMessage = "退出前已将限充恢复至原始固件配置并完成校验。现在可以安全关闭应用。"
             isError = false
             isBusy = false
@@ -1412,16 +1425,24 @@ final class ChargeManager: ObservableObject {
     /// original SMC state. Even when choosing Keep, stop the launchd helper.
     /// The next application launch can bootstrap the retained files again.
     func finishQuitComponentCleanup(_ policy: QuitComponentPolicy) async -> Bool {
-        guard isPreparingToQuit, !isBusy else { return false }
-        // Pure in-memory test backends do not install privileged components.
-        guard autoInstallNativeHelper else { return true }
+        guard isPreparingToQuit, didVerifyFirmwareOnQuit, !isBusy else { return false }
+
+        // A fake callback is used only for deterministic UI tests; production
+        // always executes the privileged bundled helper lifecycle script.
+        if !autoInstallNativeHelper && exitLifecycleForTesting == nil {
+            return true
+        }
 
         isBusy = true
         statusMessage = policy == .keep
             ? "正在停止原生后台服务并保留控制组件…"
             : "正在停止并移除原生后台服务和脚本…"
         do {
-            try await runPrivilegedNativeExitScript(policy: policy)
+            if let exitLifecycleForTesting {
+                try await exitLifecycleForTesting(policy)
+            } else {
+                try await runPrivilegedNativeExitScript(policy: policy)
+            }
             isBusy = false
             refreshTimer?.invalidate()
             refreshTimer = nil

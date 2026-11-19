@@ -213,4 +213,10 @@ private func run() {
     reader.close()
 }
 
-run()
+
+@main
+private enum MauLeafHardwareProbeMain {
+    static func main() {
+        run()
+    }
+}

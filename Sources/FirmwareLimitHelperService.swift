@@ -11,6 +11,8 @@ final class FirmwareLimitHelperService: NSObject, FirmwareLimitHelperProtocol {
     private let isAdministrator: () -> Bool
     private let batteryObservation: () -> FirmwareLimitBatteryObservation
     private let jobURL: URL
+    private let originalStateURL: URL
+    private let restoreRequestURL: URL
     private let now: () -> Date
     private let monitorEnabled: Bool
     private let hardwareLock = NSLock()
@@ -19,6 +21,8 @@ final class FirmwareLimitHelperService: NSObject, FirmwareLimitHelperProtocol {
     private var operationSequence = 0
     private var activeOperation: Int?
     private var pendingJob: FirmwareLimitOnceJob?
+    private var originalStateSnapshot: FirmwareLimitOriginalStateSnapshot?
+    private var originalSnapshotLoadError: String?
     private var monitorTimer: DispatchSourceTimer?
     private let watchdogTimeout: TimeInterval = 15
 
@@ -29,6 +33,8 @@ final class FirmwareLimitHelperService: NSObject, FirmwareLimitHelperProtocol {
         isAdministrator: @escaping () -> Bool = { FirmwareLimitRuntime.isAdministrator },
         batteryObservation: @escaping () -> FirmwareLimitBatteryObservation = FirmwareLimitRuntime.batteryObservation,
         jobURL: URL = URL(fileURLWithPath: "/Library/Application Support/MauLeaf/one-time-charge.json"),
+        originalStateURL: URL = URL(fileURLWithPath: "/Library/Application Support/MauLeaf/original-firmware-state.json"),
+        restoreRequestURL: URL = URL(fileURLWithPath: "/Library/Application Support/MauLeaf/restore-original-state.pending"),
         now: @escaping () -> Date = Date.init,
         monitorEnabled: Bool = true
     ) {
@@ -38,11 +44,24 @@ final class FirmwareLimitHelperService: NSObject, FirmwareLimitHelperProtocol {
         self.isAdministrator = isAdministrator
         self.batteryObservation = batteryObservation
         self.jobURL = jobURL
+        self.originalStateURL = originalStateURL
+        self.restoreRequestURL = restoreRequestURL
         self.now = now
         self.monitorEnabled = monitorEnabled
         super.init()
         pendingJob = loadPendingJob()
-        if pendingJob != nil { startMonitoring() }
+        originalStateSnapshot = loadOriginalStateSnapshot()
+        if FileManager.default.fileExists(atPath: restoreRequestURL.path),
+           var snapshot = originalStateSnapshot {
+            snapshot.restoreRequested = true
+            originalStateSnapshot = snapshot
+            try? persistOriginalStateSnapshot(snapshot)
+        } else if originalStateSnapshot == nil, originalSnapshotLoadError == nil {
+            try? FileManager.default.removeItem(at: restoreRequestURL)
+        }
+        if pendingJob != nil || originalStateSnapshot?.restoreRequested == true {
+            startMonitoring()
+        }
     }
 
     var hasPendingOneTimeCharge: Bool {
@@ -51,13 +70,19 @@ final class FirmwareLimitHelperService: NSObject, FirmwareLimitHelperProtocol {
         return pendingJob != nil
     }
 
+    var hasPendingBackgroundRecovery: Bool {
+        stateLock.lock()
+        defer { stateLock.unlock() }
+        return pendingJob != nil || originalStateSnapshot?.restoreRequested == true
+    }
+
     func readState(withReply reply: @escaping (NSData?, NSString?) -> Void) {
         do {
-            let identity = identityProvider()
-            let response = FirmwareLimitHelperStateResponse(
-                state: try withHardwareWatchdog { try controller.readState() },
-                identity: identity
-            )
+            guard originalSnapshotLoadError == nil else {
+                throw FirmwareLimitCoreError.invalidOriginalSnapshot
+            }
+            let state = try withHardwareWatchdog { try controller.readState() }
+            let response = stateResponse(state)
             reply(try JSONEncoder().encode(response) as NSData, nil)
         } catch {
             reply(nil, error.localizedDescription as NSString)
@@ -78,6 +103,9 @@ final class FirmwareLimitHelperService: NSObject, FirmwareLimitHelperProtocol {
 
     func applyLimit(upper: Int, lower: Int, confirmed: Bool, withReply reply: @escaping (NSData?, NSString?) -> Void) {
         do {
+            guard originalSnapshotLoadError == nil else {
+                throw FirmwareLimitCoreError.invalidOriginalSnapshot
+            }
             let request = try FirmwareLimitRequest(upper: upper, lower: lower)
             let response = try withHardwareWatchdog {
                 guard !hasPendingOneTimeCharge else {
@@ -85,15 +113,25 @@ final class FirmwareLimitHelperService: NSObject, FirmwareLimitHelperProtocol {
                 }
                 let permit = try writePermit(confirmed: confirmed)
                 let previous = try controller.readState()
+                let snapshot = try ensureOriginalStateSnapshot(beforeEnablingFrom: previous)
                 do {
                     let state = try controller.configure(request, permit: permit)
                     return FirmwareLimitHelperOperationResponse(
-                        state: FirmwareLimitHelperStateResponse(state: state),
+                        state: stateResponse(state),
                         oneTimePending: false,
-                        message: "Firmware registers were written and read back successfully. Real charging enforcement still requires hardware observation."
+                        message: "The original firmware state was saved before enabling MauLeaf. The requested registers were written and read back; actual charging behavior still requires hardware verification."
                     )
                 } catch {
-                    persistRecoveryIfNeeded(previous: previous, error: error)
+                    do {
+                        let restorePermit = try writeRestorePermit(for: snapshot)
+                        _ = try controller.restore(snapshot.state, permit: restorePermit)
+                        removePersistedOriginalStateSnapshot()
+                    } catch {
+                        var pending = snapshot
+                        pending.restoreRequested = true
+                        try? persistOriginalStateSnapshot(pending)
+                        startMonitoring()
+                    }
                     throw error
                 }
             }

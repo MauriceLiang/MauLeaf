@@ -1,4 +1,8 @@
 #!/bin/bash
+# LEGACY ONLY: cleanup for older MauLeaf releases (0.7.x and earlier).
+# This script is not part of the native-only 0.8.0 preview package.
+# Do not use it to remove the current MauLeaf AppleSMC helper.
+# MauLeaf native helper removal is documented in docs/NATIVE_FIRMWARE_HELPER.md.
 # MauLeaf emergency uninstaller for macOS 26 / 27.
 # Run as your normal macOS user: bash Scripts/uninstall-macos26-27.sh
 set -euo pipefail

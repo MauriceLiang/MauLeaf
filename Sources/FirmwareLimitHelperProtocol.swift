@@ -50,7 +50,12 @@ struct FirmwareLimitHelperStateResponse: Codable, Equatable {
                     snapshotIdentity: snapshot.deviceIdentity
                 )
             } else {
-                restoreBlockReason = writeBlockReason
+                // Without a snapshot, this capability is limited to clearing
+                // a legacy activation flag on the exact validated hardware.
+                restoreBlockReason = FirmwareLimitWritePermit.restoreBlockReason(
+                    identity: identity,
+                    snapshotIdentity: identity
+                )
             }
             restoreSupported = restoreBlockReason == nil
         } else {

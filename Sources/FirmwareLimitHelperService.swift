@@ -153,7 +153,7 @@ final class FirmwareLimitHelperService: NSObject, FirmwareLimitHelperProtocol {
                 stateLock.unlock()
                 try persist(job)
                 setPendingJob(job)
-                monitorOneTimeCharge()
+                monitorOneTimeChargeLocked()
                 let state = try controller.readState()
                 return FirmwareLimitHelperOperationResponse(
                     state: FirmwareLimitHelperStateResponse(state: state),
@@ -200,6 +200,14 @@ final class FirmwareLimitHelperService: NSObject, FirmwareLimitHelperProtocol {
     }
 
     private func monitorOneTimeCharge() {
+        do {
+            try withHardwareWatchdog { monitorOneTimeChargeLocked() }
+        } catch {
+            NSLog("MauLeaf native one-time charge monitor will retry: %@", error.localizedDescription)
+        }
+    }
+
+    private func monitorOneTimeChargeLocked() {
         stateLock.lock()
         let job = pendingJob
         stateLock.unlock()
@@ -385,6 +393,7 @@ final class FirmwareLimitHelperListener: NSObject, NSXPCListenerDelegate {
             guard let self else { return }
             self.stateLock.lock()
             let shouldExit = self.activeConnections == 0 && self.idleGeneration == generation
+                && !self.service.hasPendingOneTimeCharge
             self.stateLock.unlock()
             if shouldExit { exit(0) }
         }

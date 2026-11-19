@@ -84,12 +84,18 @@ final class FirmwareLimitHelperService: NSObject, FirmwareLimitHelperProtocol {
                     throw FirmwareLimitCoreError.transportFailure("A one-time full-charge task is active; cancel it before changing the limit.")
                 }
                 let permit = try writePermit(confirmed: confirmed)
-                let state = try controller.configure(request, permit: permit)
-                return FirmwareLimitHelperOperationResponse(
-                    state: FirmwareLimitHelperStateResponse(state: state),
-                    oneTimePending: false,
-                    message: "Firmware registers were written and read back successfully. Real charging enforcement still requires hardware observation."
-                )
+                let previous = try controller.readState()
+                do {
+                    let state = try controller.configure(request, permit: permit)
+                    return FirmwareLimitHelperOperationResponse(
+                        state: FirmwareLimitHelperStateResponse(state: state),
+                        oneTimePending: false,
+                        message: "Firmware registers were written and read back successfully. Real charging enforcement still requires hardware observation."
+                    )
+                } catch {
+                    persistRecoveryIfNeeded(previous: previous, error: error)
+                    throw error
+                }
             }
             reply(try JSONEncoder().encode(response) as NSData, nil)
         } catch {
@@ -222,6 +228,27 @@ final class FirmwareLimitHelperService: NSObject, FirmwareLimitHelperProtocol {
                 userConfirmed: confirmed
             )
         )
+    }
+
+    private func persistRecoveryIfNeeded(previous: FirmwareLimitState, error: Error) {
+        guard previous.isActive,
+              let coreError = error as? FirmwareLimitCoreError,
+              case .transactionFailed(_, let recovery) = coreError,
+              !recovery.contains("previous firmware state was restored and verified"),
+              let request = try? FirmwareLimitRequest(upper: previous.upper, lower: previous.lower) else { return }
+        do {
+            let job = try FirmwareLimitOnceJob(
+                jobID: UUID().uuidString,
+                restore: request,
+                deadline: now().addingTimeInterval(10 * 60 * 60),
+                cancelRequested: true
+            )
+            try persist(job)
+            setPendingJob(job)
+            startMonitoring()
+        } catch {
+            NSLog("MauLeaf could not persist the native recovery job: %@", error.localizedDescription)
+        }
     }
 
     private func monitorOneTimeCharge() {

@@ -13,6 +13,7 @@ final class FirmwareLimitHelperService: NSObject, FirmwareLimitHelperProtocol {
     private let jobURL: URL
     private let originalStateURL: URL
     private let restoreRequestURL: URL
+    private let backgroundRecoveryURL: URL
     private let now: () -> Date
     private let monitorEnabled: Bool
     private let hardwareLock = NSLock()
@@ -35,6 +36,7 @@ final class FirmwareLimitHelperService: NSObject, FirmwareLimitHelperProtocol {
         jobURL: URL = URL(fileURLWithPath: "/Library/Application Support/MauLeaf/one-time-charge.json"),
         originalStateURL: URL = URL(fileURLWithPath: "/Library/Application Support/MauLeaf/original-firmware-state.json"),
         restoreRequestURL: URL = URL(fileURLWithPath: "/Library/Application Support/MauLeaf/restore-original-state.pending"),
+        backgroundRecoveryURL: URL = URL(fileURLWithPath: "/Library/Application Support/MauLeaf/background-recovery.pending"),
         now: @escaping () -> Date = Date.init,
         monitorEnabled: Bool = true
     ) {
@@ -46,6 +48,7 @@ final class FirmwareLimitHelperService: NSObject, FirmwareLimitHelperProtocol {
         self.jobURL = jobURL
         self.originalStateURL = originalStateURL
         self.restoreRequestURL = restoreRequestURL
+        self.backgroundRecoveryURL = backgroundRecoveryURL
         self.now = now
         self.monitorEnabled = monitorEnabled
         super.init()
@@ -57,14 +60,19 @@ final class FirmwareLimitHelperService: NSObject, FirmwareLimitHelperProtocol {
             originalStateSnapshot = snapshot
         }
         if let snapshot = originalStateSnapshot, snapshot.restoreRequested {
-            // Recreate a missing marker so launchd can restart us after a crash.
+            // Recreate missing markers so launchd can restart us after a crash.
             try? persistOriginalStateSnapshot(snapshot)
+            try? persistBackgroundRecoveryMarker()
         } else if originalSnapshotLoadError != nil {
             // A corrupt snapshot cannot be retried automatically, but is kept
             // intact for diagnostics and must still block uninstallation.
             try? FileManager.default.removeItem(at: restoreRequestURL)
-        } else if originalStateSnapshot == nil {
+            try? FileManager.default.removeItem(at: backgroundRecoveryURL)
+        } else if originalStateSnapshot == nil && pendingJob == nil {
             try? FileManager.default.removeItem(at: restoreRequestURL)
+            try? FileManager.default.removeItem(at: backgroundRecoveryURL)
+        } else if pendingJob != nil {
+            try? persistBackgroundRecoveryMarker()
         }
         if pendingJob != nil || originalStateSnapshot?.restoreRequested == true {
             startMonitoring()
@@ -424,18 +432,22 @@ final class FirmwareLimitHelperService: NSObject, FirmwareLimitHelperProtocol {
             [.posixPermissions: 0o600],
             ofItemAtPath: originalStateURL.path
         )
+        stateLock.lock()
+        originalStateSnapshot = snapshot
+        stateLock.unlock()
         if snapshot.restoreRequested {
             try Data("restore".utf8).write(to: restoreRequestURL, options: .atomic)
             try FileManager.default.setAttributes(
                 [.posixPermissions: 0o600],
                 ofItemAtPath: restoreRequestURL.path
             )
-        } else if FileManager.default.fileExists(atPath: restoreRequestURL.path) {
-            try FileManager.default.removeItem(at: restoreRequestURL)
+            try persistBackgroundRecoveryMarker()
+        } else {
+            if FileManager.default.fileExists(atPath: restoreRequestURL.path) {
+                try FileManager.default.removeItem(at: restoreRequestURL)
+            }
+            removeBackgroundRecoveryMarkerIfIdle()
         }
-        stateLock.lock()
-        originalStateSnapshot = snapshot
-        stateLock.unlock()
     }
 
     private func loadOriginalStateSnapshot() -> FirmwareLimitOriginalStateSnapshot? {
@@ -462,6 +474,7 @@ final class FirmwareLimitHelperService: NSObject, FirmwareLimitHelperProtocol {
         stateLock.lock()
         originalStateSnapshot = nil
         stateLock.unlock()
+        removeBackgroundRecoveryMarkerIfIdle()
     }
 
     private func persistRecoveryIfNeeded(previous: FirmwareLimitState, error: Error) {
@@ -555,6 +568,7 @@ final class FirmwareLimitHelperService: NSObject, FirmwareLimitHelperProtocol {
         let data = try JSONEncoder().encode(job)
         try data.write(to: jobURL, options: .atomic)
         try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: jobURL.path)
+        try persistBackgroundRecoveryMarker()
     }
 
     private func loadPendingJob() -> FirmwareLimitOnceJob? {
@@ -566,6 +580,29 @@ final class FirmwareLimitHelperService: NSObject, FirmwareLimitHelperProtocol {
 
     private func removePersistedJob() {
         try? FileManager.default.removeItem(at: jobURL)
+        removeBackgroundRecoveryMarkerIfIdle()
+    }
+
+    private func persistBackgroundRecoveryMarker() throws {
+        let directory = backgroundRecoveryURL.deletingLastPathComponent()
+        try FileManager.default.createDirectory(
+            at: directory,
+            withIntermediateDirectories: true,
+            attributes: [.posixPermissions: 0o755]
+        )
+        try Data("pending".utf8).write(to: backgroundRecoveryURL, options: .atomic)
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o600],
+            ofItemAtPath: backgroundRecoveryURL.path
+        )
+    }
+
+    private func removeBackgroundRecoveryMarkerIfIdle() {
+        stateLock.lock()
+        let idle = pendingJob == nil && originalStateSnapshot?.restoreRequested != true
+        stateLock.unlock()
+        guard idle, FileManager.default.fileExists(atPath: backgroundRecoveryURL.path) else { return }
+        try? FileManager.default.removeItem(at: backgroundRecoveryURL)
     }
 
     private func startMonitoring() {

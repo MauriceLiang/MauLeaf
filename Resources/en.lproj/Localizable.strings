@@ -142,3 +142,13 @@
 "固件已恢复，但后台组件未处理完成" = "Firmware restored, but background components were not cleaned up";
 "原始固件已恢复，但 Helper 停止或脚本清理失败。建议返回应用重试；如果仍然退出，请勿直接删除 App，以免留下系统后台组件。" = "The original firmware state was restored, but the helper could not be stopped or scripts could not be cleaned up. Return to the app and retry. If you quit anyway, do not trash the app until background components are removed.";
 "管理员授权取消或后台控制组件处理失败（退出码 %@）" = "Administrator authorization was cancelled or native component cleanup failed (exit code %@)";
+
+// User-facing success feedback (keep privileged helper audit text out of toast).
+"充电上限已设为 %@%%，固件写入已验证。" = "Charging limit set to %@%%. Firmware write verified.";
+"已恢复启用前的原始固件配置。" = "The original firmware configuration has been restored.";
+"已关闭限制充电，原始固件配置已恢复。" = "Charging limit disabled. Original firmware configuration restored.";
+"已关闭旧版限充，历史阈值未知。" = "Legacy charging limit disabled. Historical thresholds are unknown.";
+"限充未启用，已核对固件状态。" = "Charging limit is inactive. Firmware state verified.";
+"已请求取消本次充满，等待恢复充电上限。" = "One-time full charge cancellation requested. Waiting to restore the limit.";
+"已取消本次充满，原充电上限已恢复。" = "One-time full charge canceled. Previous limit restored.";
+"本次充满已开启，固件限充暂时关闭。" = "One-time full charge started. Firmware charging limit temporarily disabled.";

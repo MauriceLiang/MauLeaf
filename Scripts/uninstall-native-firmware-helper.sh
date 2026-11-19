@@ -68,6 +68,8 @@ fi
 
 if [[ "$RESTORE_OUTPUT" == *"Legacy limit disabled."* ]]; then
   echo "警告：检测到 Preview 4 或更早版本遗留的限充。旧版本未保存历史阈值，因此本次仅停用了限充激活标志，无法还原此前的阈值数值。"
+elif [[ "$RESTORE_OUTPUT" == *"No MauLeaf original-state snapshot exists"* ]]; then
+  echo "注意：没有找到 MauLeaf 原始快照，且当前限充已经关闭；本次未修改任何寄存器，因此无法独立验证历史阈值是否与首次启用前一致。"
 else
   echo "MauLeaf 原始固件配置已恢复并验证，原生服务和恢复快照已安全清理。"
 fi

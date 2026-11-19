@@ -44,7 +44,7 @@ The snapshot is root-owned with mode 0600 and is stored outside the app bundle. 
 
 - **Disable charging limit:** The helper disables the limit, restores the original upper threshold, resume threshold, and activation byte, then verifies all three values before deleting the snapshot.
 - **Uninstall the native service:** The uninstaller stops MauLeaf and asks the helper to restore the original firmware state. Only after successful verification does it remove the LaunchDaemon, helper, and snapshot.
-- **No AC power or failed restore:** The snapshot and recovery service are retained. The uninstaller does not claim success. The helper retries after AC power returns, and the user can rerun the uninstaller.
+- **No AC power:** Normal quit and app removal remain available. The helper saves a durable restore request; a minimal independent root-owned recovery service remains until power returns. After verifying the firmware restore, it automatically removes itself. The app never claims an incomplete restore has succeeded.
 - **OS upgrades:** Restoration is allowed only when the model, system firmware, and Apple Silicon architecture still match the snapshot. A saved original state can therefore be restored even if the new OS blocks enabling new limits.
 
 **Preview 4 and earlier releases did not save the pre-activation thresholds.** If an upgraded installation has an active limit but no snapshot, MauLeaf displays a migration warning. Disabling that legacy state clears only the activation flag and keeps the current thresholds; the historical values cannot be reconstructed. If Preview 5 is enabled again afterward, those retained values become the new snapshot baseline. They represent the currently readable state, not the true values from before Preview 4.
@@ -82,15 +82,15 @@ Only Apple Silicon arm64 packages are built and published. Intel builds are disc
 - **Change the limit:** Once enabled, the slider and presets apply immediately without overwriting the original snapshot.
 - **Disable charging limit:** Click “Disable charging limit” to restore the three original register values.
 - **One-time full charge:** Available only while a MauLeaf limit is enabled. When the one-time task finishes, the current MauLeaf limit is restored. You can then disable the limit to restore the original snapshot.
-- **Quit normally:** Using Quit, Cmd+Q, or a normal macOS termination request automatically restores the original pre-activation firmware state, clears any one-time full-charge task, and independently reads back the inactive state before the app exits. You do **not** have to click Disable first. If AC power is missing, the helper is unavailable, or verification fails, normal quitting is cancelled, recovery data is retained, and a visible error is shown. Force Quit, process crashes, and sudden power loss cannot guarantee immediate restoration.
+- **Quit normally:** On AC power, restore and verify the original firmware immediately. On battery, save a durable recovery request and allow the app to quit; the root helper resumes restoration when AC power returns. No manual Disable action is required. If the helper or recovery record is unavailable, show a clear warning with a **Quit anyway** option rather than locking the app open. Force Quit, crashes, and unexpected power loss cannot guarantee immediate restoration.
 
 ## Uninstall the native service
 
-Launch the current Preview 5 app once to ensure its native helper is upgraded to the matching version, then connect AC power, quit MauLeaf, and run:
+Launch the current MauLeaf app once so its native helper is upgraded, then quit normally. **AC power is not required** to start uninstallation. Run:
 
     sudo "/Applications/MauLeaf.app/Contents/Resources/MauLeafNativeControl/uninstall-native-firmware-helper.sh"
 
-The uninstaller restores and verifies the original firmware state before removing the service and snapshot. If AC power is unavailable or restoration fails, it retains the helper, LaunchDaemon, and snapshot. When the failure is caused by missing AC power, the background service waits and retries after power is reconnected. Do not manually delete the system service or snapshot before restoration has been verified.
+When AC is available and restoration succeeds, the helper and data are removed immediately. When unplugged, the uninstaller queues restoration, allows MauLeaf.app to be deleted immediately, and retains only the independent helper and recovery files until AC returns. After verified restoration, a root-owned finalizer removes the service itself. If the hardware identity is incompatible or restoration remains impossible, manual diagnostics may still be needed. Do not manually delete unrecovered snapshots.
 
 Preview 4 and earlier releases have no original-state snapshot. When uninstalling one of those legacy states, the script can only deactivate the old charging limit and explicitly reports that the historical thresholds cannot be restored.
 

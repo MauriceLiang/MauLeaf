@@ -93,7 +93,7 @@ struct FirmwareLimitOnceJob: Codable, Equatable {
         try? FirmwareLimitRequest(upper: restoreUpper, lower: restoreLower)
     }
 
-    var isExpired(at date: Date) -> Bool {
+    func isExpired(at date: Date) -> Bool {
         date.timeIntervalSince1970 >= deadlineUnixSeconds
     }
 }

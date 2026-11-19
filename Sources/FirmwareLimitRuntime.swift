@@ -63,21 +63,4 @@ enum FirmwareLimitRuntime {
 
     static var isAdministrator: Bool { geteuid() == 0 }
 
-    private static func run(_ path: String, _ arguments: [String]) -> (status: Int32, output: String) {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: path)
-        process.arguments = arguments
-        process.standardInput = FileHandle.nullDevice
-        let pipe = Pipe()
-        process.standardOutput = pipe
-        process.standardError = pipe
-        do {
-            try process.run()
-            let data = pipe.fileHandleForReading.readDataToEndOfFile()
-            process.waitUntilExit()
-            return (process.terminationStatus, String(data: data, encoding: .utf8) ?? "")
-        } catch {
-            return (-1, error.localizedDescription)
-        }
-    }
 }

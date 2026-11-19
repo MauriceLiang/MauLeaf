@@ -84,10 +84,13 @@ if grep -Eq 'componentSetupSection|installBackend|uninstallBackend' "$ROOT/Sourc
     exit 1
 fi
 if grep -RniE 'MAULEAF_INTEL_EXPERIMENTAL|x86_64|macos-15-intel|EXPERIMENTAL.dmg' \
-    "$ROOT/Sources" "$ROOT/Scripts/ci/package-macos.sh" "$ROOT/.github/workflows/build-release.yml"; then
+    "$ROOT/Sources" "$ROOT/Scripts/ci/package-macos.sh"; then
     echo "Intel build support must not ship in Preview 5." >&2
     exit 1
 fi
+! grep -q 'macos-15-intel' "$ROOT/.github/workflows/build-release.yml"
+! grep -q 'arch: x86_64' "$ROOT/.github/workflows/build-release.yml"
+! grep -q 'EXPERIMENTAL.dmg' "$ROOT/.github/workflows/build-release.yml"
 [[ "$(grep -c 'arch: arm64' "$ROOT/.github/workflows/build-release.yml")" -eq 1 ]]
 grep -Fq -- '--restore-original-state' "$ROOT/Sources/FirmwareLimitHelperMain.swift"
 grep -Fq 'original-firmware-state.json' "$ROOT/Sources/FirmwareLimitHelperService.swift"

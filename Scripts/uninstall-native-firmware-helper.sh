@@ -25,8 +25,21 @@ if [[ "$EUID" -ne 0 ]]; then
   echo "请使用 sudo 运行此脚本。" >&2
   exit 1
 fi
-if [[ "$#" -ne 0 ]]; then
-  echo "卸载不接受强制绕过恢复的参数。必须先验证固件安全恢复。" >&2
+# Used interactively while the app is still running:
+#   --keep-components   restore original state, stop daemon, keep installed files
+#   --remove-components restore original state, stop and delete root components;
+#                       Finder is responsible for trashing the app after quit
+# No arguments remains the standalone complete uninstaller, which also
+# deletes /Applications/MauLeaf.app, but MUST only run after app quit.
+MODE="complete"
+if [[ "$#" -eq 1 ]]; then
+  case "$1" in
+    --keep-components) MODE="keep" ;;
+    --remove-components) MODE="remove" ;;
+    *) echo "未知参数：无法绕过固件恢复校验。" >&2; exit 10 ;;
+  esac
+elif [[ "$#" -ne 0 ]]; then
+  echo "卸载参数不正确；不允许绕过固件恢复校验。" >&2
   exit 10
 fi
 
@@ -56,8 +69,8 @@ if ! /usr/bin/codesign --verify --strict "$SOURCE_BINARY" >/dev/null 2>&1 \
   echo "已安装的 Helper 与当前应用不匹配。请先重新启动当前版本完成升级，未卸载。" >&2
   exit 9
 fi
-if /usr/bin/pgrep -x MauLeaf >/dev/null 2>&1; then
-  echo "请先完全退出 MauLeaf，然后再运行卸载命令。" >&2
+if [[ "$MODE" == "complete" ]] && /usr/bin/pgrep -x MauLeaf >/dev/null 2>&1; then
+  echo "完整卸载前请先退出 MauLeaf；应用内退出时请选择保留或移除组件。" >&2
   exit 4
 fi
 
@@ -103,6 +116,15 @@ if /bin/launchctl print "system/$LABEL" >/dev/null 2>&1; then
   exit 7
 fi
 
+# Preserve the installed components for the next explicit launch while
+# guaranteeing the privileged helper daemon is no longer running.
+# On next launch, MauLeaf automatically re-installs/re-bootstraps the helper,
+# with administrator authorization if macOS requires it.
+if [[ "$MODE" == "keep" ]]; then
+  echo "原始固件状态恢复并二次验证成功；后台 Helper 已停止。安装文件已保留供下次启动使用。"
+  exit 0
+fi
+
 # At this point only the verified safe state remains. Delete all known
 # MauLeaf-owned privileged artifacts, including older deferred-finalizer
 # scripts and markers. No forced removal mode is supported.
@@ -117,21 +139,26 @@ fi
 # unknown data. If this directory is not empty, report incomplete cleanup.
 /bin/rmdir "$SUPPORT_DIR" >/dev/null 2>&1 || true
 
-# Remove the application only after the privileged restore has succeeded.
-# This also removes all the bundled install/uninstall/helper scripts.
-if [[ -L "$APP" || "$BUNDLE_ID" != "com.local.chargecap" ]]; then
-  echo "应用路径在卸载过程中变更；请手动检查残余文件。" >&2
-  exit 8
+# The in-app "remove components and quit" path must NEVER remove the
+# running application bundle. The user then drags MauLeaf.app to Trash.
+# The standalone default command removes the app after it has quit.
+if [[ "$MODE" == "complete" ]]; then
+  if [[ -L "$APP" || "$BUNDLE_ID" != "com.local.chargecap" ]]; then
+    echo "应用路径在卸载过程中变更；请手动检查残余文件。" >&2
+    exit 8
+  fi
+  /bin/rm -rf "$APP"
 fi
-/bin/rm -rf "$APP"
 
-if [[ -e "$APP" || -e "$TARGET" || -e "$PLIST_TARGET" \
+if [[ ( "$MODE" == "complete" && -e "$APP" ) || -e "$TARGET" || -e "$PLIST_TARGET" \
       || -e "$DEFERRED_SCRIPT" || -e "$SNAPSHOT" || -e "$RESTORE_REQUEST" \
       || -e "$SUPPORT_DIR" || -e "/var/log/mauleaf-firmware-helper.log" ]]; then
   echo "恢复已成功，但部分文件未能移除。请检查权限及残留路径。" >&2
   exit 8
 fi
-if [[ "$RESTORE_OUTPUT" == *"Legacy limit disabled."* ]]; then
+if [[ "$MODE" == "remove" ]]; then
+  echo "固件已恢复并验证；Helper、LaunchDaemon 与系统脚本已删除。请退出应用并将 MauLeaf.app 移到废纸篓。"
+elif [[ "$RESTORE_OUTPUT" == *"Legacy limit disabled."* ]]; then
   echo "MauLeaf 已完全卸载：旧版固件限充已关闭、原有阈值未知；Helper、LaunchDaemon 与脚本均已删除。"
 elif [[ "$RESTORE_OUTPUT" == *"No MauLeaf original-state snapshot exists"* ]]; then
   echo "MauLeaf 已完全卸载：当前固件限充已关闭；由于没有原始快照，无法独立确认历史阈值。应用、Helper、LaunchDaemon 与脚本均已删除。"

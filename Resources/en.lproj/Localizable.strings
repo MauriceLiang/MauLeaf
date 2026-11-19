@@ -68,3 +68,5 @@
 "调整后自动应用" = "Applied automatically after adjustment";
 "正在检查原生固件控制…" = "Checking native firmware control…";
 "正在连接 MauLeaf 原生固件服务…" = "Connecting to the MauLeaf native firmware service…";
+
+"%@，正在充电" = "%@, charging";

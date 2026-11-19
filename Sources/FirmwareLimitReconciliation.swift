@@ -40,6 +40,14 @@ enum FirmwareLimitReconciliationPolicy {
     }
 }
 
+enum FirmwareLimitOnceJobError: Error, LocalizedError {
+    case invalidMetadata
+
+    var errorDescription: String? {
+        "The persisted one-time charge job is invalid."
+    }
+}
+
 struct FirmwareLimitOnceJob: Codable, Equatable {
     let jobID: String
     let restoreUpper: Int
@@ -49,14 +57,36 @@ struct FirmwareLimitOnceJob: Codable, Equatable {
     init(jobID: String, restore: FirmwareLimitRequest, deadline: Date) throws {
         guard !jobID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
               deadline.timeIntervalSince1970.isFinite else {
-            throw FirmwareLimitCoreError.invalidRequestedBand(
-                upper: restore.upper, lower: restore.lower
-            )
+            throw FirmwareLimitOnceJobError.invalidMetadata
         }
         self.jobID = jobID
         restoreUpper = restore.upper
         restoreLower = restore.lower
         deadlineUnixSeconds = deadline.timeIntervalSince1970
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case jobID
+        case restoreUpper
+        case restoreLower
+        case deadlineUnixSeconds
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let jobID = try container.decode(String.self, forKey: .jobID)
+        let upper = try container.decode(Int.self, forKey: .restoreUpper)
+        let lower = try container.decode(Int.self, forKey: .restoreLower)
+        let deadline = try container.decode(Double.self, forKey: .deadlineUnixSeconds)
+        guard !jobID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              deadline.isFinite else {
+            throw FirmwareLimitOnceJobError.invalidMetadata
+        }
+        _ = try FirmwareLimitRequest(upper: upper, lower: lower)
+        self.jobID = jobID
+        restoreUpper = upper
+        restoreLower = lower
+        deadlineUnixSeconds = deadline
     }
 
     var restoreRequest: FirmwareLimitRequest? {

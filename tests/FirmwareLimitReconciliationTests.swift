@@ -18,6 +18,17 @@ private enum FirmwareLimitReconciliationTests {
         }
     }
 
+    private static func expectThrows(_ body: () throws -> Void, _ message: String) {
+        checks += 1
+        do {
+            try body()
+            fputs("FAIL: \(message)\n", stderr)
+            exit(1)
+        } catch {
+            // Expected.
+        }
+    }
+
     private static func testStartupAndWakeReconciliation() throws {
         let request = try FirmwareLimitRequest(upper: 80, lower: 78)
         let matching = FirmwareLimitState(activationByte: 0x02, upper: 80, lower: 78)
@@ -73,6 +84,19 @@ private enum FirmwareLimitReconciliationTests {
         )
         expect(job.restoreRequest == request, "one-time job persists the exact original limit")
         expect(!job.isExpired(at: now), "job remains active before its deadline")
+        expect(job.isExpired(at: Date(timeIntervalSince1970: 2_000)), "job expires at its deadline")
+        let encoded = try JSONEncoder().encode(job)
+        let decoded = try JSONDecoder().decode(FirmwareLimitOnceJob.self, from: encoded)
+        expect(decoded == job, "one-time job survives JSON persistence and reload")
+        expectThrows({
+            _ = try FirmwareLimitOnceJob(jobID: " ", restore: request, deadline: now)
+        }, "empty job identifiers are rejected")
+        let invalidJobJSON = Data(
+            #"{"jobID":"invalid","restoreUpper":101,"restoreLower":99,"deadlineUnixSeconds":2000}"#.utf8
+        )
+        expectThrows({
+            _ = try JSONDecoder().decode(FirmwareLimitOnceJob.self, from: invalidJobJSON)
+        }, "invalid persisted restore thresholds are rejected")
 
         let charging = FirmwareLimitBatteryObservation(
             percent: 84, fullyCharged: false, externalConnected: true

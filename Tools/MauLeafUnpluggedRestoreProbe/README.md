@@ -76,6 +76,48 @@ Do **not** use that command until the read-only status matches every requirement
 3. Observe actual battery charging behavior through the former upper-limit threshold. **Register readback alone does not prove the battery has resumed charging.** macOS Optimized Battery Charging, temperature, charge tapering, and the battery's current percentage can affect observations.
 4. Only after these results should the main MauLeaf project consider a separately validated **offline full original-state restoration** and eventually **offline complete uninstall**.
 
+## Phase 3: battery-only FULL original-state restoration (experimental)
+
+This is a **new command**, distinct from the already-verified `test-unplugged-deactivation`. It performs three read-back-verified writes while running entirely on battery power: first `bfF0=0x00`, then the two **original** thresholds read from MauLeaf's root-owned snapshot. The order is chosen to keep the intermediate lower/upper range valid. It does **not** reinstall or remove anything.
+
+### Prepare a test that can actually verify both threshold writes
+
+Your previous successful deactivation was followed by AC-powered background recovery. That intentionally removed the snapshot and left `bfF0=0x00, bfD0=80, bfE0=78`. **The old snapshot cannot be reused.**
+
+1. Install/retain **MauLeaf v0.8.0-preview.7** for Mac Apple Silicon. Older Preview 4 may not save a proper original snapshot.
+2. Plug in AC, launch MauLeaf Preview 7, and explicitly enable the limit at **85%**. Its original snapshot should record the current disabled values `0x00, 80%, 78%`, while the active limit becomes `0x02, 85%, 83%`. This gives the test something real to restore. (If your original values differ, the tool will display them instead.)
+3. With AC still connected, run `sudo ./MauLeafUnpluggedRestoreProbe status`. Check that `bfF0=0x02` and the original snapshot exists and matches the machine.
+4. Unplug ALL charging adapters, confirm battery percentage >=30%, quit MauLeaf normally (do not force quit or delete its helper), then run the same read-only `status`. The snapshot must remain valid, `pmset battery=true`, `External power=false`, `MauLeaf running=false`, and `bfF0=0x02`.
+5. Perform the single one-shot test:
+
+```bash
+sudo ./MauLeafUnpluggedRestoreProbe test-unplugged-full-restore
+```
+
+At the interactive prompt, type exactly:
+
+```text
+UNPLUGGED FULL RESTORE MacBookPro18,1
+```
+
+The CLI prints the exact before/original values before accepting confirmation. It also requires BOTH upper/lower values to differ, so the test actually covers two threshold writes; otherwise it refuses.
+
+**On PASS:** all three registers were restored and verified while running on battery power. Preserve the root-owned snapshot and existing Helper; reconnect AC and let Preview 7 finish its normal restoration/cleanup. Verify actual battery charging afterwards. This result does not demonstrate completely removing the Helper while unplugged.
+
+**On FAILED:** do not rerun blindly, force-remove any helper, delete the snapshot, or try another charging-control tool. Save the output, reconnect AC to let the previously queued standard restore run, and check the final state.
+
+## Phase 4: complete offline uninstall — NOT YET IMPLEMENTED
+
+Do **not** interpret Phase 3's success as permission to remove the Helper and snapshot. Preview 7's default uninstaller currently queues an AC-powered background restore when the Mac is unplugged, even if the test previously showed it can deactivate `bfF0`. An immediate, fully verified offline uninstall requires a future production change and separate hardware acceptance tests.
+
+Existing **safe but deferred** Preview 7 uninstaller (run while the app is fully quit):
+
+```bash
+sudo "/Applications/MauLeaf.app/Contents/Resources/MauLeafNativeControl/uninstall-native-firmware-helper.sh"
+```
+
+When unplugged, this may **retain** its root-owned recovery Helper until AC is connected and firmware recovery is verified. It is NOT an immediate complete removal. Never use `--force-remove-without-restore` to bypass that protection.
+
 ## What this cannot establish
 
 - If `bfF0` is already **0x00**, no write is made, and the test does not claim to have proven offline SMC-write capability.

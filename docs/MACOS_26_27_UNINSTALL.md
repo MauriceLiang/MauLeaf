@@ -1,13 +1,16 @@
-# macOS 26/27：兼容性警告与紧急卸载 / Compatibility & emergency uninstall
+# macOS 26/27：旧版兼容性警告与紧急卸载 / Legacy compatibility & emergency uninstall
 
 [简体中文](#简体中文) | [English](#english)
+
+> [!IMPORTANT]
+> **本文件和配套脚本仅用于清理旧版 MauLeaf（0.7.x 及更早版本）安装的第三方控制服务。** 当前 0.8.0-preview.1 已改为 MauLeaf 自研 AppleSMC 控制，不包含、不调用旧版第三方控制程序。不要用本文件的旧版卸载脚本移除当前预览版的原生 helper；请使用 [原生服务卸载说明](NATIVE_FIRMWARE_HELPER.md)。
 
 ## 简体中文
 
 > [!CAUTION]
-> **紧急兼容性公告（2026-11-10）：当前 MauLeaf 不支持 macOS 26 或 macOS 27。请勿安装或继续依赖其充电控制功能。**
+> **历史兼容性公告（2026-11-10）：旧版 MauLeaf 不支持 macOS 26 或 macOS 27。此警告针对旧版第三方控制后端，不代表当前原生预览版支持 macOS 26/27。当前预览版仍仅支持已限定的 macOS 15 目标环境。**
 >
-> 当前版本捆绑 `batt v0.8.0`。macOS 27 上已观察到 `Error: charging control is not supported on this Mac`、无法正常退出、无法通过图形界面卸载组件。macOS 26 同样被列为不支持，但这不代表相同故障已在所有 macOS 26 设备上复现。
+> 旧版 0.7.x 及更早版本曾捆绑 `batt v0.8.0`。macOS 27 上已观察到 `Error: charging control is not supported on this Mac`、无法正常退出、无法通过图形界面卸载组件。macOS 26 同样被列为不支持，但这不代表相同故障已在所有 macOS 26 设备上复现。
 
 ### 已升级用户：推荐卸载方法
 
@@ -243,7 +246,7 @@ sudo launchctl print system/cc.chlc.batt
 > [!CAUTION]
 > **Compatibility warning (2026-11-10): Current MauLeaf releases do NOT support macOS 26 or macOS 27. Do not install or rely on them for charging control.**
 >
-> The bundled `batt v0.8.0` failed with `Error: charging control is not supported on this Mac` on macOS 27, leaving the UI unable to quit or uninstall the backend. macOS 26 is likewise designated unsupported; identical symptoms have not been verified on every macOS 26 device.
+> Older releases bundled `batt v0.8.0`, which failed with `Error: charging control is not supported on this Mac` on macOS 27, leaving the UI unable to quit or uninstall the backend. macOS 26 is likewise designated unsupported; identical symptoms have not been verified on every macOS 26 device.
 
 ### Removal after an OS upgrade
 

@@ -75,7 +75,7 @@ One-time completion restores the current MauLeaf limit; disabling MauLeaf restor
 
 ## Uninstallation
 
-Connect AC power, quit MauLeaf, then run:
+Launch the current Preview 5 app once so it can install the matching native helper, then connect AC power, quit MauLeaf, and run:
 
     sudo "/Applications/MauLeaf.app/Contents/Resources/MauLeafNativeControl/uninstall-native-firmware-helper.sh"
 

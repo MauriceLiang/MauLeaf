@@ -73,6 +73,9 @@ private enum ChargeManagerTests {
         try await testQuitDuringOneTimeFullCharge()
         try await testUnpluggedManualDisableRestoresImmediately()
         try await testUnpluggedQuitRestoresImmediately()
+        try await testQuitKeepsComponentsAfterRestore()
+        try await testQuitRemovesComponentsAfterRestore()
+        try await testComponentCleanupFailureBlocksNormalQuit()
         try await testUnpluggedLowBatteryQuitBlocked()
         try await testUnpluggedLegacyQuitRequiresExplicitOverride()
         try await testUnpluggedOneTimeQuitRestoresImmediately()
@@ -83,15 +86,20 @@ private enum ChargeManagerTests {
         try await testUnknownFirmwareStateBlocksQuit()
 
         UserDefaults.standard.removeObject(forKey: "nativeFirmwareWriteConfirmed")
-        print("ChargeManagerTests: PASS (battery + AC exact restoration on normal quit, low-battery refusal, manual disable, one-time full, legacy migration)")
+        print("ChargeManagerTests: PASS (AC/battery quit restore, keep/remove native lifecycle, cleanup-failure protection, manual disable, one-time full and legacy migration)")
     }
 
     @MainActor
     private static func activatedManager(
-        backend: FixtureNativeFirmwareBackend
+        backend: FixtureNativeFirmwareBackend,
+        exitLifecycle: ((QuitComponentPolicy) async throws -> Void)? = nil
     ) async throws -> ChargeManager {
         UserDefaults.standard.set(true, forKey: "nativeFirmwareWriteConfirmed")
-        let manager = ChargeManager(backend: backend, autoInstallNativeHelper: false)
+        let manager = ChargeManager(
+            backend: backend,
+            autoInstallNativeHelper: false,
+            exitLifecycleForTesting: exitLifecycle
+        )
         manager.start()
         try await wait { manager.currentState != nil && manager.backendReady }
         manager.isAdapterConnected = true
@@ -168,6 +176,66 @@ private enum ChargeManagerTests {
                   && !manager.hasOriginalStateSnapshot && !backend.pending
                   && !manager.restorePending,
                   "battery-only normal quit restores exact original three keys and clears durable snapshot")
+    }
+
+    @MainActor
+    private static func testQuitKeepsComponentsAfterRestore() async throws {
+        let backend = FixtureNativeFirmwareBackend()
+        var actions: [QuitComponentPolicy] = []
+        let manager = try await activatedManager(backend: backend) { policy in
+            actions.append(policy)
+        }
+        backend.acConnected = false
+        manager.isAdapterConnected = false
+        let restored = await manager.prepareForTermination()
+        try check(restored && manager.didVerifyFirmwareOnQuit && actions.isEmpty,
+                  "no helper stop or removal occurs before firmware restoration")
+        let completed = await manager.finishQuitComponentCleanup(.keep)
+        try check(completed && actions == [.keep] && !backend.state.active
+                  && backend.state.upper == 80 && backend.state.lower == 78,
+                  "keep mode starts only after full unplugged restore and retains files")
+    }
+
+    @MainActor
+    private static func testQuitRemovesComponentsAfterRestore() async throws {
+        let backend = FixtureNativeFirmwareBackend()
+        var actions: [QuitComponentPolicy] = []
+        let manager = try await activatedManager(backend: backend) { policy in
+            actions.append(policy)
+        }
+        let restored = await manager.prepareForTermination()
+        try check(restored && actions.isEmpty && manager.didVerifyFirmwareOnQuit,
+                  "AC restore must complete before removal action")
+        let completed = await manager.finishQuitComponentCleanup(.remove)
+        try check(completed && actions == [.remove]
+                  && !manager.hasOriginalStateSnapshot && !backend.state.active,
+                  "remove mode executes only after exact original restore and verification")
+    }
+
+    @MainActor
+    private static func testComponentCleanupFailureBlocksNormalQuit() async throws {
+        let backend = FixtureNativeFirmwareBackend()
+        let manager = try await activatedManager(backend: backend) { _ in
+            throw FixtureBackendError.injected
+        }
+        try check(await manager.prepareForTermination(),
+                  "fixture firmware restore succeeds before cleanup failure")
+        let completed = await manager.finishQuitComponentCleanup(.remove)
+        try check(!completed && !manager.isPreparingToQuit
+                  && manager.didVerifyFirmwareOnQuit && manager.isError
+                  && !backend.state.active,
+                  "failed system cleanup blocks normal quit without pretending firmware restore failed")
+
+        let secondBackend = FixtureNativeFirmwareBackend()
+        var actionCount = 0
+        let noCleanup = try await activatedManager(backend: secondBackend) { _ in
+            actionCount += 1
+        }
+        secondBackend.failNextRestore = true
+        let denied = await noCleanup.prepareForTermination()
+        try check(!denied && actionCount == 0
+                  && !(await noCleanup.finishQuitComponentCleanup(.remove)),
+                  "failed firmware restore must never trigger a delete-components action")
     }
 
     @MainActor

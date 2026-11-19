@@ -56,9 +56,10 @@ struct LocalizationTests {
               "native helper errors remain visible in English")
         check(translations["启用原生固件控制？"] == "Enable native firmware control?",
               "hardware write consent has an English string-table entry")
-        let level: AppText = "电量 \(75)%"
-        let tooltip: AppText = "\(level)，正在充电"
-        check(tooltip.localized(in: .english) == "Battery 75%, charging", "nested menu bar tooltip")
+        let tooltipFormat = translations["电量 %@%%，正在充电"]
+        check(tooltipFormat == "Battery %@%%, charging", "menu bar tooltip has an English string-table entry")
+        check(String(format: tooltipFormat!, arguments: ["Battery 75%"]) == "Battery 75%, charging",
+              "menu bar tooltip preserves its nested percentage")
         check(AppText(key: "正在充电").localized(in: .english) == "Charging", "battery status label")
         check(AppText(key: "已接电源，未充电").localized(in: .english) == "Connected to power, not charging",
               "adapter idle status is translated")

@@ -27,7 +27,7 @@ The app talks only to the authenticated MauLeaf XPC helper. The menu-bar process
 The root helper creates a write permit only when all checks pass:
 
 - exact model `MacBookPro18,1`
-- exact firmware `mBoot-20457.41.3`
+- exact firmware `mBoot-20457.41.3` (read recursively from the IODeviceTree, including nested nodes)
 - macOS major version 15 and arm64
 - helper effective UID is root
 - AC power is connected

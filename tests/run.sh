@@ -83,7 +83,10 @@ if grep -Eq 'componentSetupSection|installBackend|uninstallBackend' "$ROOT/Sourc
     echo "The legacy component installer UI must not return" >&2
     exit 1
 fi
-if grep -RniE 'MAULEAF_INTEL_EXPERIMENTAL|x86_64|macos-15-intel|EXPERIMENTAL.dmg|(^|[^[:alnum:]_])batt([^[:alnum:]_]|$)' \
+# The word "batt" is also the name of Apple's built-in `pmset -g batt`
+# status subcommand. Reject legacy backend symbols and paths above, not this
+# unrelated native battery-read argument.
+if grep -RniE 'MAULEAF_INTEL_EXPERIMENTAL|x86_64|macos-15-intel|EXPERIMENTAL.dmg' \
     "$ROOT/Sources" "$ROOT/Scripts/ci/package-macos.sh" "$ROOT/build.command"; then
     echo "Intel build support must not ship in Preview 5." >&2
     exit 1

@@ -51,6 +51,13 @@ jobs:
           uname -m
           swift --version
 
+      - name: Validate installer metadata
+        run: |
+          set -euo pipefail
+          bash -n Scripts/install-native-firmware-helper.sh
+          bash -n Scripts/uninstall-native-firmware-helper.sh
+          plutil -lint Support/com.local.chargecap.firmware-helper.plist
+
       - name: Run helper service tests
         run: |
           set -euo pipefail

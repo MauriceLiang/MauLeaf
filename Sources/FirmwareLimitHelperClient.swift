@@ -44,6 +44,7 @@ final class FirmwareLimitHelperClient {
         try await withCheckedThrowingContinuation { continuation in
             let delivery = FirmwareLimitXPCDelivery<Response>(continuation)
             let connection = NSXPCConnection(machServiceName: serviceName, options: [.privileged])
+            let connectionBox = FirmwareLimitXPCConnectionBox(connection)
             connection.remoteObjectInterface = NSXPCInterface(with: FirmwareLimitHelperProtocol.self)
             connection.invalidationHandler = {
                 delivery.deliver(.failure(FirmwareLimitHelperClientError.connectionInvalidated))
@@ -54,7 +55,7 @@ final class FirmwareLimitHelperClient {
             connection.resume()
             DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + 20) {
                 delivery.deliver(.failure(FirmwareLimitHelperClientError.timedOut))
-                connection.invalidate()
+                connectionBox.connection.invalidate()
             }
 
             let proxyObject = connection.remoteObjectProxyWithErrorHandler { error in
@@ -90,7 +91,7 @@ final class FirmwareLimitHelperClient {
     }
 }
 
-private final class FirmwareLimitXPCDelivery<Value> {
+private final class FirmwareLimitXPCDelivery<Value>: @unchecked Sendable {
     private let lock = NSLock()
     private var delivered = false
     private var continuation: CheckedContinuation<Value, Error>?
@@ -110,5 +111,14 @@ private final class FirmwareLimitXPCDelivery<Value> {
         self.continuation = nil
         lock.unlock()
         continuation?.resume(with: result)
+    }
+}
+
+
+private final class FirmwareLimitXPCConnectionBox: @unchecked Sendable {
+    let connection: NSXPCConnection
+
+    init(_ connection: NSXPCConnection) {
+        self.connection = connection
     }
 }

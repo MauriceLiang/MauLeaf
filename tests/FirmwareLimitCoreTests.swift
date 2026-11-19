@@ -76,7 +76,10 @@ private enum FirmwareLimitCoreTests {
         try testTransientWriteFailureRetries()
         try testNoOp()
         try testDeactivate()
+        try testExactOriginalStateRestore()
+        try testOriginalStateSnapshot()
         try testSafetyPermit()
+        try testRestorePermitAcrossOSUpgrade()
         try testInvalidStateRefusesWrites()
         try testUnexpectedMetadataRefusesWrites()
         try testRollbackRestoresPreviousState()
@@ -201,6 +204,39 @@ private enum FirmwareLimitCoreTests {
         expect(transport.writes == ["bfF0=00"], "deactivate writes only activation byte")
     }
 
+    private static func testExactOriginalStateRestore() throws {
+        let transport = FakeFirmwareLimitTransport()
+        transport.activation = 0x02
+        transport.upper = 85
+        transport.lower = 83
+        let original = FirmwareLimitState(activationByte: 0x00, upper: 80, lower: 78)
+        let restored = try controller(transport).restore(original, permit: permit())
+        expect(restored == original, "restore returns the exact saved firmware state")
+        expect(transport.activation == 0x00 && transport.upper == 80 && transport.lower == 78,
+               "restore writes the original activation byte and both thresholds")
+        expect(transport.writes == [
+            "bfF0=00", "bfD0=50000000", "bfE0=4E000000", "bfF0=00"
+        ], "restore deactivates, restores thresholds, then restores the original activation byte")
+    }
+
+    private static func testOriginalStateSnapshot() throws {
+        let identity = FirmwareLimitDeviceIdentity(
+            modelIdentifier: "MacBookPro18,1",
+            systemFirmware: "mBoot-20457.41.3",
+            macOSMajorVersion: 15,
+            architecture: "arm64"
+        )
+        var snapshot = try FirmwareLimitOriginalStateSnapshot(
+            deviceIdentity: identity,
+            state: FirmwareLimitState(activationByte: 0x00, upper: 80, lower: 78)
+        )
+        snapshot.restoreRequested = true
+        let data = try JSONEncoder().encode(snapshot)
+        let decoded = try JSONDecoder().decode(FirmwareLimitOriginalStateSnapshot.self, from: data)
+        expect(decoded == snapshot && decoded.isValid,
+               "the root helper snapshot round-trips the exact state and durable restore request")
+    }
+
     private static func testSafetyPermit() throws {
         let identity = FirmwareLimitDeviceIdentity(
             modelIdentifier: "MacBookPro18,1",
@@ -284,6 +320,46 @@ private enum FirmwareLimitCoreTests {
                 context: base
             )
         }, "unverified macOS major version is rejected")
+    }
+
+    private static func testRestorePermitAcrossOSUpgrade() throws {
+        let savedIdentity = FirmwareLimitDeviceIdentity(
+            modelIdentifier: "MacBookPro18,1",
+            systemFirmware: "mBoot-20457.41.3",
+            macOSMajorVersion: 15,
+            architecture: "arm64"
+        )
+        let upgradedIdentity = FirmwareLimitDeviceIdentity(
+            modelIdentifier: savedIdentity.modelIdentifier,
+            systemFirmware: savedIdentity.systemFirmware,
+            macOSMajorVersion: 27,
+            architecture: savedIdentity.architecture
+        )
+        let context = FirmwareLimitWriteContext(
+            isAdministrator: true,
+            isOnACPower: true,
+            userConfirmed: true
+        )
+        expect(FirmwareLimitWritePermit.targetBlockReason(identity: upgradedIdentity) != nil,
+               "new charging-limit writes remain blocked on an unvalidated OS")
+        _ = try FirmwareLimitWritePermit.authorizeRestore(
+            identity: upgradedIdentity,
+            snapshotIdentity: savedIdentity,
+            context: context
+        )
+        let changedFirmware = FirmwareLimitDeviceIdentity(
+            modelIdentifier: savedIdentity.modelIdentifier,
+            systemFirmware: "different-firmware",
+            macOSMajorVersion: 27,
+            architecture: savedIdentity.architecture
+        )
+        expectThrows({
+            _ = try FirmwareLimitWritePermit.authorizeRestore(
+                identity: changedFirmware,
+                snapshotIdentity: savedIdentity,
+                context: context
+            )
+        }, "restore is blocked when the saved model or firmware identity no longer matches")
     }
 
     private static func testInvalidStateRefusesWrites() throws {

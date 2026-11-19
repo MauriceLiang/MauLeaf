@@ -760,7 +760,6 @@ final class FirmwareLimitHelperService: NSObject, FirmwareLimitHelperProtocol {
         // Standalone CLI uninstallation owns its own cleanup; only the
         // long-lived launchd helper may spawn deferred self-removal.
         guard monitorEnabled, isAdministrator(),
-              !deferredUninstallLaunched,
               FileManager.default.fileExists(atPath: deferredUninstallURL.path),
               FileManager.default.isExecutableFile(atPath: deferredUninstallScriptURL.path) else {
             return
@@ -769,6 +768,7 @@ final class FirmwareLimitHelperService: NSObject, FirmwareLimitHelperProtocol {
         let idle = originalStateSnapshot == nil
             && legacyRestoreRequest == nil
             && pendingJob == nil
+            && !deferredUninstallLaunched
         stateLock.unlock()
         guard idle,
               !FileManager.default.fileExists(atPath: originalStateURL.path),
@@ -783,10 +783,23 @@ final class FirmwareLimitHelperService: NSObject, FirmwareLimitHelperProtocol {
         process.standardInput = FileHandle.nullDevice
         process.standardOutput = FileHandle.nullDevice
         process.standardError = FileHandle.nullDevice
+        process.terminationHandler = { [weak self] finished in
+            guard finished.terminationStatus != 0, let self else { return }
+            self.stateLock.lock()
+            self.deferredUninstallLaunched = false
+            self.stateLock.unlock()
+            NSLog("MauLeaf deferred uninstaller exited with status %d; it will retry.",
+                  finished.terminationStatus)
+        }
+        stateLock.lock()
+        deferredUninstallLaunched = true
+        stateLock.unlock()
         do {
             try process.run()
-            deferredUninstallLaunched = true
         } catch {
+            stateLock.lock()
+            deferredUninstallLaunched = false
+            stateLock.unlock()
             NSLog("MauLeaf deferred uninstaller could not launch: %@", error.localizedDescription)
         }
     }

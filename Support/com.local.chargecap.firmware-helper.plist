@@ -25,6 +25,8 @@
         <dict>
             <key>/Library/Application Support/MauLeaf/one-time-charge.json</key>
             <true/>
+            <key>/Library/Application Support/MauLeaf/restore-original-state.pending</key>
+            <true/>
         </dict>
     </dict>
     <key>ProcessType</key>

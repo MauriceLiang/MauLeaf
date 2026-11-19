@@ -509,7 +509,7 @@ struct ContentView: View {
                         .font(.subheadline.weight(.semibold))
                         .foregroundStyle(.green)
                     Spacer()
-                    Text(manager.text("上限 \(manager.limit)%"))
+                    Text(manager.text("上限") + " \(manager.limit)%")
                         .font(.subheadline.monospacedDigit().weight(.semibold))
                 }
                 Text(manager.text("MauLeaf 已保存启用前的固件配置。关闭时会逐项恢复并验证原始值。"))

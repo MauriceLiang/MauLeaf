@@ -86,7 +86,7 @@ Only Apple Silicon arm64 packages are built and published. Intel builds are disc
 
 ## Uninstall the native service
 
-Connect AC power and quit MauLeaf first, then run:
+Launch the current Preview 5 app once to ensure its native helper is upgraded to the matching version, then connect AC power, quit MauLeaf, and run:
 
     sudo "/Applications/MauLeaf.app/Contents/Resources/MauLeafNativeControl/uninstall-native-firmware-helper.sh"
 

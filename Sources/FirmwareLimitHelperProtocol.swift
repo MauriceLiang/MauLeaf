@@ -16,12 +16,21 @@ struct FirmwareLimitHelperStateResponse: Codable, Equatable {
     let active: Bool
     let upper: Int
     let lower: Int
+    let writeSupported: Bool
+    let writeBlockReason: String?
 
-    init(state: FirmwareLimitState) {
+    init(state: FirmwareLimitState, identity: FirmwareLimitDeviceIdentity? = nil) {
         activationByte = state.activationByte
         active = state.isActive
         upper = state.upper
         lower = state.lower
+        if let identity {
+            writeBlockReason = FirmwareLimitWritePermit.targetBlockReason(identity: identity)
+            writeSupported = writeBlockReason == nil
+        } else {
+            writeSupported = true
+            writeBlockReason = nil
+        }
     }
 }
 

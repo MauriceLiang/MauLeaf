@@ -115,3 +115,16 @@
 "固件状态复查未通过，已取消退出；恢复数据已保留。" = "Firmware read-back verification failed. Quit was cancelled, and recovery data was retained.";
 "退出前已确认限制充电关闭。" = "Charging limits were verified as disabled before quitting.";
 "退出前恢复固件失败：%@；已取消退出，请保持接电并重试。" = "Firmware restoration failed before quitting: %@. Quit was cancelled; keep AC connected and retry.";
+"无法验证充电限制恢复" = "Could not verify charging-limit recovery";
+"后台恢复请求无法得到确认。仍然退出可能暂时保留固件限充；请在方便时重新接电或使用恢复脚本。" = "The background recovery request could not be verified. You can still quit, but the firmware limit may remain active. Connect AC later or use the recovery script.";
+"仍然退出" = "Quit anyway";
+"返回应用" = "Return to app";
+"原生固件操作仍在进行；无法确认恢复状态。" = "A firmware operation is still running, so the recovery state cannot be verified.";
+"退出前正在核对固件状态并提交恢复请求…" = "Checking firmware state and queuing recovery before quitting…";
+"当前硬件无法安全恢复：%@" = "Safe firmware restoration is unavailable on this hardware: %@";
+"无法确认固件恢复或后台恢复请求已保存。" = "Could not confirm either firmware restoration or a durable recovery request.";
+"等待接电后恢复固件配置" = "Recovery queued until AC power is connected";
+"恢复任务已安全保存；MauLeaf 可以立即退出，接电后后台服务会继续恢复。" = "Recovery was saved. MauLeaf may quit now; the background service will restore firmware after AC reconnects.";
+"退出前已确认充电限制关闭。" = "Charging limits were confirmed inactive before quitting.";
+"退出时无法确认固件恢复状态：%@" = "Could not verify the firmware recovery state on quit: %@";
+"已提交持久恢复请求，接入电源后后台服务会自动恢复。" = "A durable recovery request was submitted. The background helper will restore firmware when AC power is connected.";

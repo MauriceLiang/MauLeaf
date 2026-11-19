@@ -237,6 +237,9 @@ private enum FirmwareLimitHelperServiceTests {
             originalStateURL: directory.appendingPathComponent("legacy-original-state.json"),
             restoreRequestURL: directory.appendingPathComponent("legacy-restore.pending"),
             backgroundRecoveryURL: directory.appendingPathComponent("legacy-background-recovery.pending"),
+            legacyRestoreURL: directory.appendingPathComponent("legacy-restore.json"),
+            deferredUninstallURL: directory.appendingPathComponent("legacy-deferred-uninstall.pending"),
+            deferredUninstallScriptURL: directory.appendingPathComponent("legacy-finalizer.sh"),
             monitorEnabled: false
         )
         var legacyStateData: NSData?
@@ -257,6 +260,64 @@ private enum FirmwareLimitHelperServiceTests {
         precondition(legacyRestoreResponse.message.contains("cannot be reconstructed"),
                      "legacy migration explicitly reports that historical thresholds are unavailable")
 
-        print("FirmwareLimitHelperServiceTests: PASS (snapshot, exact restore, deferred restore, legacy migration)")
+        // Preview 4 had no original snapshot. Quitting or uninstalling while
+        // on battery must durably queue activation-only recovery, then restore
+        // automatically after AC returns, even across a helper restart.
+        let offlineTransport = HelperFakeTransport()
+        offlineTransport.activation = 0x02
+        offlineTransport.upper = 87
+        offlineTransport.lower = 85
+        var offlineAC = false
+        let offlineLegacyURL = directory.appendingPathComponent("offline-legacy-restore.json")
+        let offlineMarkerURL = directory.appendingPathComponent("offline-recovery.pending")
+        func offlineService() -> FirmwareLimitHelperService {
+            FirmwareLimitHelperService(
+                transport: offlineTransport,
+                identityProvider: { identity },
+                isOnACPower: { offlineAC },
+                isAdministrator: { true },
+                batteryObservation: { observation },
+                jobURL: directory.appendingPathComponent("offline-one-time.json"),
+                originalStateURL: directory.appendingPathComponent("offline-original.json"),
+                restoreRequestURL: directory.appendingPathComponent("offline-original.pending"),
+                backgroundRecoveryURL: offlineMarkerURL,
+                legacyRestoreURL: offlineLegacyURL,
+                deferredUninstallURL: directory.appendingPathComponent("offline-removal.pending"),
+                deferredUninstallScriptURL: directory.appendingPathComponent("offline-finalizer.sh"),
+                monitorEnabled: false
+            )
+        }
+        let firstOfflineService = offlineService()
+        var offlineRestoreError: NSString?
+        firstOfflineService.restoreOriginalState { _, error in offlineRestoreError = error }
+        precondition(offlineRestoreError != nil && offlineTransport.activation == 0x02,
+                     "unplugged legacy restoration never writes SMC prematurely")
+        precondition(FileManager.default.fileExists(atPath: offlineLegacyURL.path)
+                     && FileManager.default.fileExists(atPath: offlineMarkerURL.path),
+                     "a durable, root-owned legacy restore job and keepalive marker survive app exit")
+        let legacyPermissions = try FileManager.default.attributesOfItem(atPath: offlineLegacyURL.path)[.posixPermissions] as? NSNumber
+        precondition(legacyPermissions?.intValue == 0o600,
+                     "legacy recovery request is owner-only")
+        var offlineReadData: NSData?
+        firstOfflineService.readState { data, _ in offlineReadData = data }
+        let offlineRead = try JSONDecoder().decode(FirmwareLimitHelperStateResponse.self, from: offlineReadData! as Data)
+        precondition(offlineRead.restorePending && offlineRead.active,
+                     "the helper exposes queued deactivation to the quitting app")
+
+        // Simulate an app removal and helper restart before AC is connected.
+        let restartedOfflineService = offlineService()
+        precondition(restartedOfflineService.hasPendingBackgroundRecovery,
+                     "restarted helper reloads the pending legacy deactivation")
+        offlineAC = true
+        restartedOfflineService.runOneTimeMonitorTickForTesting()
+        precondition(offlineTransport.activation == 0x00
+                     && offlineTransport.upper == 87 && offlineTransport.lower == 85,
+                     "AC reconnection clears only the legacy activation byte")
+        precondition(!FileManager.default.fileExists(atPath: offlineLegacyURL.path)
+                     && !FileManager.default.fileExists(atPath: offlineMarkerURL.path),
+                     "verified deferred restore removes its pending markers")
+        try restartedOfflineService.verifyReadyForDeferredRemoval()
+
+        print("FirmwareLimitHelperServiceTests: PASS (snapshot, offline legacy restore, deferred retry, uninstall verification)")
     }
 }

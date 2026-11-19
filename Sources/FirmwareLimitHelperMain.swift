@@ -19,6 +19,21 @@ private enum MauLeafFirmwareHelperMain {
             }
         }
 
+        if CommandLine.arguments.contains("--verify-clean-and-inactive") {
+            let service = FirmwareLimitHelperService(
+                transport: AppleSMCFirmwareLimitTransport(),
+                monitorEnabled: false
+            )
+            do {
+                try service.verifyReadyForDeferredRemoval()
+                print("The native firmware limit is inactive and no recovery task remains.")
+                return
+            } catch {
+                fputs("MauLeaf cannot remove its helper: \(error.localizedDescription)\n", stderr)
+                exit(1)
+            }
+        }
+
         let listener = FirmwareLimitHelperListener()
         listener.run()
         dispatchMain()

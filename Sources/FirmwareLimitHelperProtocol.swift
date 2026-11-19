@@ -13,7 +13,7 @@ import Foundation
 }
 
 enum FirmwareLimitHelperProtocolVersion {
-    static let current = 3
+    static let current = 4
 }
 
 struct FirmwareLimitHelperStateResponse: Codable, Equatable {
@@ -32,7 +32,9 @@ struct FirmwareLimitHelperStateResponse: Codable, Equatable {
     init(
         state: FirmwareLimitState,
         identity: FirmwareLimitDeviceIdentity? = nil,
-        snapshot: FirmwareLimitOriginalStateSnapshot? = nil
+        snapshot: FirmwareLimitOriginalStateSnapshot? = nil,
+        legacyRestorePending: Bool = false,
+        durableRecoveryRecorded: Bool = true
     ) {
         helperVersion = FirmwareLimitHelperProtocolVersion.current
         activationByte = state.activationByte
@@ -40,7 +42,8 @@ struct FirmwareLimitHelperStateResponse: Codable, Equatable {
         upper = state.upper
         lower = state.lower
         hasOriginalStateSnapshot = snapshot != nil
-        restorePending = snapshot?.restoreRequested ?? false
+        restorePending = durableRecoveryRecorded
+            && ((snapshot?.restoreRequested ?? false) || legacyRestorePending)
         if let identity {
             writeBlockReason = FirmwareLimitWritePermit.targetBlockReason(identity: identity)
             writeSupported = writeBlockReason == nil

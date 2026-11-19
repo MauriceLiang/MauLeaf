@@ -92,6 +92,12 @@ Launch the current MauLeaf app once so its native helper is upgraded, then quit 
 
 When AC is available and restoration succeeds, the helper and data are removed immediately. When unplugged, the uninstaller queues restoration, allows MauLeaf.app to be deleted immediately, and retains only the independent helper and recovery files until AC returns. After verified restoration, a root-owned finalizer removes the service itself. If the hardware identity is incompatible or restoration remains impossible, manual diagnostics may still be needed. Do not manually delete unrecovered snapshots.
 
+**Remove every background component immediately (high-risk opt-in):** If you do not want any temporary recovery service, you may explicitly discard all recovery records and remove the helper even when unplugged. **Firmware charge limiting may remain active and recovery is not guaranteed.** Only run this if you accept that risk:
+
+    sudo "/Applications/MauLeaf.app/Contents/Resources/MauLeafNativeControl/uninstall-native-firmware-helper.sh" --force-remove-without-restore --i-accept-persistent-charge-limit-risk
+
+The recommended default needs neither option and preserves safe deferred restoration.
+
 Preview 4 and earlier releases have no original-state snapshot. When uninstalling one of those legacy states, the script can only deactivate the old charging limit and explicitly reports that the historical thresholds cannot be restored.
 
 ## Development and tests

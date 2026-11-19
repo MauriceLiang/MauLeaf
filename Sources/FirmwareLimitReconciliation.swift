@@ -53,8 +53,9 @@ struct FirmwareLimitOnceJob: Codable, Equatable {
     let restoreUpper: Int
     let restoreLower: Int
     let deadlineUnixSeconds: Double
+    var cancelRequested: Bool
 
-    init(jobID: String, restore: FirmwareLimitRequest, deadline: Date) throws {
+    init(jobID: String, restore: FirmwareLimitRequest, deadline: Date, cancelRequested: Bool = false) throws {
         guard !jobID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
               deadline.timeIntervalSince1970.isFinite else {
             throw FirmwareLimitOnceJobError.invalidMetadata
@@ -63,6 +64,7 @@ struct FirmwareLimitOnceJob: Codable, Equatable {
         restoreUpper = restore.upper
         restoreLower = restore.lower
         deadlineUnixSeconds = deadline.timeIntervalSince1970
+        self.cancelRequested = cancelRequested
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -70,6 +72,7 @@ struct FirmwareLimitOnceJob: Codable, Equatable {
         case restoreUpper
         case restoreLower
         case deadlineUnixSeconds
+        case cancelRequested
     }
 
     init(from decoder: Decoder) throws {
@@ -87,6 +90,7 @@ struct FirmwareLimitOnceJob: Codable, Equatable {
         restoreUpper = upper
         restoreLower = lower
         deadlineUnixSeconds = deadline
+        cancelRequested = try container.decodeIfPresent(Bool.self, forKey: .cancelRequested) ?? false
     }
 
     var restoreRequest: FirmwareLimitRequest? {
@@ -129,7 +133,7 @@ enum FirmwareLimitOneTimeChargeCoordinator {
         cancelRequested: Bool = false
     ) -> FirmwareLimitOnceDecision {
         let terminalReason: FirmwareLimitOnceRestoreReason?
-        if cancelRequested {
+        if cancelRequested || job.cancelRequested {
             terminalReason = .cancelled
         } else if job.isExpired(at: now) {
             terminalReason = .deadlineExpired

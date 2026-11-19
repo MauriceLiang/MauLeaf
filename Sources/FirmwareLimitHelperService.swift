@@ -67,7 +67,11 @@ final class FirmwareLimitHelperService: NSObject, FirmwareLimitHelperProtocol {
             // A corrupt snapshot cannot be retried automatically, but is kept
             // intact for diagnostics and must still block uninstallation.
             try? FileManager.default.removeItem(at: restoreRequestURL)
-            try? FileManager.default.removeItem(at: backgroundRecoveryURL)
+            if pendingJob != nil {
+                try? persistBackgroundRecoveryMarker()
+            } else {
+                try? FileManager.default.removeItem(at: backgroundRecoveryURL)
+            }
         } else if originalStateSnapshot == nil && pendingJob == nil {
             try? FileManager.default.removeItem(at: restoreRequestURL)
             try? FileManager.default.removeItem(at: backgroundRecoveryURL)

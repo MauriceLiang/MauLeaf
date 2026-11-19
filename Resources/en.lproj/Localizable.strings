@@ -127,3 +127,4 @@
 "恢复任务已安全保存；MauLeaf 可以立即退出，接电后后台服务会继续恢复。" = "Recovery was saved. MauLeaf may quit now; the background service will restore firmware after AC reconnects.";
 "退出前已确认充电限制关闭。" = "Charging limits were confirmed inactive before quitting.";
 "退出时无法确认固件恢复状态：%@" = "Could not verify the firmware recovery state on quit: %@";
+"已提交持久恢复请求，接入电源后后台服务会自动恢复。" = "A durable recovery request was submitted. The background helper will restore firmware when AC power is connected.";

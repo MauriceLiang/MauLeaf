@@ -68,6 +68,7 @@ private enum FirmwareLimitHelperServiceTests {
         let jobURL = directory.appendingPathComponent("one-time-charge.json")
         let originalStateURL = directory.appendingPathComponent("original-firmware-state.json")
         let restoreRequestURL = directory.appendingPathComponent("restore-original-state.pending")
+        let backgroundRecoveryURL = directory.appendingPathComponent("background-recovery.pending")
         let service = FirmwareLimitHelperService(
             transport: transport,
             identityProvider: { identity },
@@ -77,6 +78,7 @@ private enum FirmwareLimitHelperServiceTests {
             jobURL: jobURL,
             originalStateURL: originalStateURL,
             restoreRequestURL: restoreRequestURL,
+            backgroundRecoveryURL: backgroundRecoveryURL,
             monitorEnabled: false
         )
 
@@ -147,6 +149,8 @@ private enum FirmwareLimitHelperServiceTests {
         precondition(begun.oneTimePending && !begun.state.active,
                      "one-time full charge deactivates the firmware limit and persists a job")
         precondition(service.hasPendingOneTimeCharge, "helper retains the one-time task after the XPC request")
+        precondition(FileManager.default.fileExists(atPath: backgroundRecoveryURL.path),
+                     "the unified launchd marker keeps any background recovery job alive")
 
         onAC = false
         var cancelData: NSData?
@@ -159,6 +163,8 @@ private enum FirmwareLimitHelperServiceTests {
         onAC = true
         service.runOneTimeMonitorTickForTesting()
         precondition(!service.hasPendingOneTimeCharge, "pending cancellation restores once AC returns")
+        precondition(!FileManager.default.fileExists(atPath: backgroundRecoveryURL.path),
+                     "the unified launchd marker is removed when no recovery task remains")
         precondition(transport.activation == 2 && transport.upper == 85 && transport.lower == 83,
                      "cancellation restores and verifies the original native limit")
 
@@ -194,11 +200,13 @@ private enum FirmwareLimitHelperServiceTests {
             from: Data(contentsOf: originalStateURL)
         )
         precondition(queuedSnapshot.restoreRequested
-                     && FileManager.default.fileExists(atPath: restoreRequestURL.path),
-                     "a failed unplugged restore keeps the snapshot and durable retry marker")
+                     && FileManager.default.fileExists(atPath: restoreRequestURL.path)
+                     && FileManager.default.fileExists(atPath: backgroundRecoveryURL.path),
+                     "a failed unplugged restore keeps the snapshot and unified durable retry marker")
         onAC = true
         service.runOneTimeMonitorTickForTesting()
         precondition(!FileManager.default.fileExists(atPath: originalStateURL.path)
+                     && !FileManager.default.fileExists(atPath: backgroundRecoveryURL.path)
                      && transport.activation == 0 && transport.upper == 80 && transport.lower == 78,
                      "the helper retries and completes the original-state restore after AC returns")
 
@@ -228,6 +236,7 @@ private enum FirmwareLimitHelperServiceTests {
             jobURL: directory.appendingPathComponent("legacy-one-time-charge.json"),
             originalStateURL: directory.appendingPathComponent("legacy-original-state.json"),
             restoreRequestURL: directory.appendingPathComponent("legacy-restore.pending"),
+            backgroundRecoveryURL: directory.appendingPathComponent("legacy-background-recovery.pending"),
             monitorEnabled: false
         )
         var legacyData: NSData?

@@ -414,23 +414,98 @@ final class FirmwareLimitHelperService: NSObject, FirmwareLimitHelperProtocol {
             )
         }
 
-        setPendingJob(nil)
-        removePersistedJob()
+        guard legacyRestoreLoadError == nil else {
+            throw FirmwareLimitCoreError.transportFailure(
+                "The pending legacy firmware restoration record is corrupt. It was retained for manual recovery."
+            )
+        }
         let current = try controller.readState()
         if current.isActive {
+            // A Preview 4 installation has no original threshold snapshot.
+            // Persist an identity-bound deactivation request *before* checking
+            // AC power, so an unplugged quit or uninstall never traps the user.
+            let request = legacyRestoreRequest ?? FirmwareLimitLegacyRestoreRequest(
+                deviceIdentity: identityProvider(),
+                requestedAt: now()
+            )
+            guard FirmwareLimitWritePermit.restoreBlockReason(
+                identity: identityProvider(),
+                snapshotIdentity: request.deviceIdentity
+            ) == nil else {
+                throw FirmwareLimitCoreError.originalStateDeviceMismatch
+            }
+            try persistLegacyRestoreRequest(request)
+            setPendingJob(nil)
+            removePersistedJob()
+            startMonitoring()
+
             let permit = try writeLegacyDisablePermit()
             let inactive = try controller.deactivate(permit: permit)
+            try removeLegacyRestoreRequest()
+            stopMonitoringIfIdle()
+            triggerDeferredUninstallIfReady()
             return FirmwareLimitHelperOperationResponse(
                 state: stateResponse(inactive),
                 oneTimePending: false,
                 message: "Legacy limit disabled. Preview 4 did not save the pre-MauLeaf thresholds, so only the activation flag was cleared; the original threshold values cannot be reconstructed."
             )
         }
+
+        setPendingJob(nil)
+        removePersistedJob()
+        if legacyRestoreRequest != nil {
+            try removeLegacyRestoreRequest()
+        }
+        stopMonitoringIfIdle()
+        triggerDeferredUninstallIfReady()
         return FirmwareLimitHelperOperationResponse(
             state: stateResponse(current),
             oneTimePending: false,
             message: "No MauLeaf original-state snapshot exists and the firmware limit is already inactive. No register values were changed."
         )
+    }
+
+    private func persistLegacyRestoreRequest(
+        _ request: FirmwareLimitLegacyRestoreRequest
+    ) throws {
+        let directory = legacyRestoreURL.deletingLastPathComponent()
+        try FileManager.default.createDirectory(
+            at: directory, withIntermediateDirectories: true,
+            attributes: [.posixPermissions: 0o755]
+        )
+        let data = try JSONEncoder().encode(request)
+        try data.write(to: legacyRestoreURL, options: .atomic)
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o600], ofItemAtPath: legacyRestoreURL.path
+        )
+        stateLock.lock()
+        legacyRestoreRequest = request
+        stateLock.unlock()
+        try persistBackgroundRecoveryMarker()
+    }
+
+    private func loadLegacyRestoreRequest() -> FirmwareLimitLegacyRestoreRequest? {
+        guard FileManager.default.fileExists(atPath: legacyRestoreURL.path) else { return nil }
+        do {
+            return try JSONDecoder().decode(
+                FirmwareLimitLegacyRestoreRequest.self,
+                from: Data(contentsOf: legacyRestoreURL)
+            )
+        } catch {
+            legacyRestoreLoadError = error.localizedDescription
+            NSLog("MauLeaf legacy restore request is unreadable: %@", error.localizedDescription)
+            return nil
+        }
+    }
+
+    private func removeLegacyRestoreRequest() throws {
+        if FileManager.default.fileExists(atPath: legacyRestoreURL.path) {
+            try FileManager.default.removeItem(at: legacyRestoreURL)
+        }
+        stateLock.lock()
+        legacyRestoreRequest = nil
+        stateLock.unlock()
+        removeBackgroundRecoveryMarkerIfIdle()
     }
 
     /// Legacy Preview 4 state has no original threshold snapshot. This

@@ -68,7 +68,10 @@ swiftc -frontend -parse \
     "$ROOT/Sources/FirmwareLimitHelperService.swift" "$ROOT/Sources/FirmwareLimitHelperMain.swift"
 
 if grep -RniE 'BattCommand|BattStatus|invokeBatt|locateBatt|batt-version|BATT-LICENSE|/usr/local/bin/batt|batt-v0\\.8' \
-    "$ROOT/Sources" "$ROOT/Scripts" "$ROOT/.github/workflows/build-release.yml" "$ROOT/Support"; then
+    "$ROOT/Sources" "$ROOT/Scripts/ci/package-macos.sh" \
+    "$ROOT/Scripts/install-native-firmware-helper.sh" \
+    "$ROOT/Scripts/uninstall-native-firmware-helper.sh" \
+    "$ROOT/.github/workflows/build-release.yml" "$ROOT/Support"; then
     echo "Legacy batt backend references must not ship in the native-only preview" >&2
     exit 1
 fi

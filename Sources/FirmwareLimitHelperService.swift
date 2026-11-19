@@ -407,6 +407,7 @@ final class FirmwareLimitHelperService: NSObject, FirmwareLimitHelperProtocol {
             let restored = try controller.restore(requested.state, permit: permit)
             try removePersistedOriginalStateSnapshot()
             stopMonitoringIfIdle()
+            triggerDeferredUninstallIfReady()
             return FirmwareLimitHelperOperationResponse(
                 state: stateResponse(restored),
                 oneTimePending: false,
@@ -621,13 +622,46 @@ final class FirmwareLimitHelperService: NSObject, FirmwareLimitHelperProtocol {
                 setPendingJob(nil)
                 removePersistedJob()
                 stopMonitoringIfIdle()
+                triggerDeferredUninstallIfReady()
             } catch {
                 NSLog("MauLeaf original firmware restore will retry: %@", error.localizedDescription)
             }
             return
         }
 
-        guard let job else { stopMonitoringIfIdle(); return }
+        stateLock.lock()
+        let legacy = legacyRestoreRequest
+        stateLock.unlock()
+        if let legacy {
+            guard isOnACPower() else { return }
+            do {
+                guard FirmwareLimitWritePermit.restoreBlockReason(
+                    identity: identityProvider(),
+                    snapshotIdentity: legacy.deviceIdentity
+                ) == nil else {
+                    throw FirmwareLimitCoreError.originalStateDeviceMismatch
+                }
+                let current = try controller.readState()
+                if current.isActive {
+                    let permit = try writeLegacyDisablePermit()
+                    _ = try controller.deactivate(permit: permit)
+                }
+                try removeLegacyRestoreRequest()
+                setPendingJob(nil)
+                removePersistedJob()
+                stopMonitoringIfIdle()
+                triggerDeferredUninstallIfReady()
+            } catch {
+                NSLog("MauLeaf legacy deactivation will retry: %@", error.localizedDescription)
+            }
+            return
+        }
+
+        guard let job else {
+            triggerDeferredUninstallIfReady()
+            stopMonitoringIfIdle()
+            return
+        }
 
         let observation = batteryObservation()
         let decision = FirmwareLimitOneTimeChargeCoordinator.decision(
@@ -683,6 +717,42 @@ final class FirmwareLimitHelperService: NSObject, FirmwareLimitHelperProtocol {
         removeBackgroundRecoveryMarkerIfIdle()
     }
 
+    /// Only launch the independent removal script after a successful,
+    /// independently verified restore. The script is installed outside the
+    /// app bundle and remains available after the user removes MauLeaf.app.
+    private func triggerDeferredUninstallIfReady() {
+        guard isAdministrator(),
+              !deferredUninstallLaunched,
+              FileManager.default.fileExists(atPath: deferredUninstallURL.path),
+              FileManager.default.isExecutableFile(atPath: deferredUninstallScriptURL.path) else {
+            return
+        }
+        stateLock.lock()
+        let idle = originalStateSnapshot == nil
+            && legacyRestoreRequest == nil
+            && pendingJob == nil
+        stateLock.unlock()
+        guard idle,
+              !FileManager.default.fileExists(atPath: originalStateURL.path),
+              !FileManager.default.fileExists(atPath: legacyRestoreURL.path),
+              !FileManager.default.fileExists(atPath: jobURL.path),
+              !FileManager.default.fileExists(atPath: restoreRequestURL.path),
+              let firmware = try? controller.readState(),
+              !firmware.isActive else { return }
+
+        let process = Process()
+        process.executableURL = deferredUninstallScriptURL
+        process.standardInput = FileHandle.nullDevice
+        process.standardOutput = FileHandle.nullDevice
+        process.standardError = FileHandle.nullDevice
+        do {
+            try process.run()
+            deferredUninstallLaunched = true
+        } catch {
+            NSLog("MauLeaf deferred uninstaller could not launch: %@", error.localizedDescription)
+        }
+    }
+
     private func persistBackgroundRecoveryMarker() throws {
         let directory = backgroundRecoveryURL.deletingLastPathComponent()
         try FileManager.default.createDirectory(
@@ -699,7 +769,10 @@ final class FirmwareLimitHelperService: NSObject, FirmwareLimitHelperProtocol {
 
     private func removeBackgroundRecoveryMarkerIfIdle() {
         stateLock.lock()
-        let idle = pendingJob == nil && originalStateSnapshot?.restoreRequested != true
+        let idle = pendingJob == nil
+            && originalStateSnapshot?.restoreRequested != true
+            && legacyRestoreRequest == nil
+            && !FileManager.default.fileExists(atPath: deferredUninstallURL.path)
         stateLock.unlock()
         guard idle, FileManager.default.fileExists(atPath: backgroundRecoveryURL.path) else { return }
         try? FileManager.default.removeItem(at: backgroundRecoveryURL)
@@ -708,7 +781,9 @@ final class FirmwareLimitHelperService: NSObject, FirmwareLimitHelperProtocol {
     private func startMonitoring() {
         guard monitorEnabled else { return }
         stateLock.lock()
-        guard (pendingJob != nil || originalStateSnapshot?.restoreRequested == true),
+        guard (pendingJob != nil || originalStateSnapshot?.restoreRequested == true
+               || legacyRestoreRequest != nil
+               || FileManager.default.fileExists(atPath: deferredUninstallURL.path)),
               monitorTimer == nil else {
             stateLock.unlock()
             return
@@ -725,6 +800,8 @@ final class FirmwareLimitHelperService: NSObject, FirmwareLimitHelperProtocol {
         stateLock.lock()
         guard pendingJob == nil,
               originalStateSnapshot?.restoreRequested != true,
+              legacyRestoreRequest == nil,
+              !FileManager.default.fileExists(atPath: deferredUninstallURL.path),
               let timer = monitorTimer else {
             stateLock.unlock()
             return

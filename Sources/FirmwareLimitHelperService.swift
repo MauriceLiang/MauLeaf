@@ -484,8 +484,25 @@ final class FirmwareLimitHelperService: NSObject, FirmwareLimitHelperProtocol {
 
     private func monitorOneTimeChargeLocked() {
         stateLock.lock()
+        let snapshot = originalStateSnapshot
         let job = pendingJob
         stateLock.unlock()
+
+        if let snapshot, snapshot.restoreRequested {
+            guard isOnACPower() else { return }
+            do {
+                let permit = try writeRestorePermit(for: snapshot)
+                _ = try controller.restore(snapshot.state, permit: permit)
+                removePersistedOriginalStateSnapshot()
+                setPendingJob(nil)
+                removePersistedJob()
+                stopMonitoringIfIdle()
+            } catch {
+                NSLog("MauLeaf original firmware restore will retry: %@", error.localizedDescription)
+            }
+            return
+        }
+
         guard let job else { stopMonitoringIfIdle(); return }
 
         let observation = batteryObservation()
@@ -543,7 +560,8 @@ final class FirmwareLimitHelperService: NSObject, FirmwareLimitHelperProtocol {
     private func startMonitoring() {
         guard monitorEnabled else { return }
         stateLock.lock()
-        guard pendingJob != nil, monitorTimer == nil else {
+        guard (pendingJob != nil || originalStateSnapshot?.restoreRequested == true),
+              monitorTimer == nil else {
             stateLock.unlock()
             return
         }
@@ -557,7 +575,9 @@ final class FirmwareLimitHelperService: NSObject, FirmwareLimitHelperProtocol {
 
     private func stopMonitoringIfIdle() {
         stateLock.lock()
-        guard pendingJob == nil, let timer = monitorTimer else {
+        guard pendingJob == nil,
+              originalStateSnapshot?.restoreRequested != true,
+              let timer = monitorTimer else {
             stateLock.unlock()
             return
         }
@@ -670,7 +690,7 @@ final class FirmwareLimitHelperListener: NSObject, NSXPCListenerDelegate {
             let idle = self.activeConnections == 0 && self.idleGeneration == generation
             self.stateLock.unlock()
             if idle {
-                if self.service.hasPendingOneTimeCharge {
+                if self.service.hasPendingBackgroundRecovery {
                     self.scheduleIdleExit()
                 } else {
                     exit(0)

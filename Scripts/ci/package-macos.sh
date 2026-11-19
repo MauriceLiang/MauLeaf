@@ -5,6 +5,7 @@ cd "$(dirname "$0")/../.."
 : "${TARGET_ARCH:?missing arch}"
 : "${BUILD_NUMBER:?missing build number}"
 RELEASE_LABEL="${RELEASE_LABEL:-$RELEASE_VERSION}"
+RELEASE_LABEL="${RELEASE_LABEL#v}"
 [[ "$RELEASE_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || exit 2
 [[ "$RELEASE_LABEL" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-preview\.[0-9]+)?$ ]] || exit 2
 [[ "$TARGET_ARCH" == arm64 || "$TARGET_ARCH" == x86_64 ]] || exit 2
@@ -62,9 +63,9 @@ if [[ "$TARGET_ARCH" == arm64 ]]; then
 fi
 FLAGS=(-parse-as-library -O -target "$TARGET_ARCH-apple-macos13.0")
 if [[ "$TARGET_ARCH" == x86_64 ]]; then FLAGS+=(-D MAULEAF_INTEL_EXPERIMENTAL); fi
-xcrun swiftc "${FLAGS[@]}" -framework SwiftUI -framework AppKit -framework Combine -framework Foundation -framework IOKit -framework ServiceManagement \
+xcrun swiftc "${FLAGS[@]}" -framework SwiftUI -framework AppKit -framework Combine -framework Foundation -framework IOKit \
  Sources/MauLeaf.swift Sources/ChargeModeCore.swift Sources/AppLocalization.swift Sources/OnceChargeAgent.swift \
- Sources/DischargeControl.swift Sources/DischargeAgent.swift Sources/PowerRefreshController.swift Sources/LoginItemSettings.swift \
+ Sources/DischargeControl.swift Sources/DischargeAgent.swift Sources/PowerRefreshController.swift \
  -o "$APP/Contents/MacOS/MauLeaf"
 if [[ "$TARGET_ARCH" == arm64 ]]; then
   xcrun swiftc "${FLAGS[@]}" -framework SwiftUI -framework AppKit -framework Combine -framework Foundation \

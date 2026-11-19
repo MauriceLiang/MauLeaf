@@ -589,8 +589,7 @@ struct ContentView: View {
                 }
                 .buttonStyle(.borderedProminent)
                 .disabled(
-                    !manager.backendReady || !manager.isAdapterConnected || manager.isBusy
-                    || (manager.batteryPercent ?? 0) >= 100
+                    !manager.canStartFullCharge || (manager.batteryPercent ?? 0) >= 100
                 )
             }
         }

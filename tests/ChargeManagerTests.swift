@@ -30,18 +30,27 @@ private enum ChargeManagerTests {
                   "confirmed activation writes the requested native upper and resume thresholds")
         try check(manager.hasOriginalStateSnapshot,
                   "the original firmware state is captured before the first managed limit is applied")
-        try check(!manager.isError && manager.statusMessage.source.contains("Fake native firmware"),
-                  "success reports register read-back, not unverified charging enforcement")
+        try check(!manager.isError
+                  && manager.statusMessage.source == "充电上限已设为 85%，固件写入已验证。"
+                  && manager.statusMessage.localized(in: .english) == "Charging limit set to 85%. Firmware write verified."
+                  && !manager.statusMessage.source.contains("Fake native firmware"),
+                  "limit success is concise and localized; raw helper audit text is never user-facing")
 
         manager.batteryPercent = 90
         manager.beginOneTimeFullCharge()
         try await wait { backend.beginCount == 1 && !manager.isBusy }
         try check(manager.fullOncePending && !backend.state.active && manager.hasOriginalStateSnapshot,
                   "one-time full charge temporarily disables the active limit but keeps the original snapshot")
+        try check(manager.statusMessage.source == "本次充满已开启，固件限充暂时关闭。"
+                  && manager.statusMessage.localized(in: .english) == "One-time full charge started. Firmware charging limit temporarily disabled.",
+                  "one-time full success uses localized compact feedback")
         manager.cancelFullOnce()
         try await wait { backend.cancelCount == 1 && !manager.isBusy }
         try check(!manager.fullOncePending && backend.state.active && backend.state.upper == 85,
                   "cancelling one-time full charge restores the current MauLeaf limit")
+        try check(manager.statusMessage.source == "已取消本次充满，原充电上限已恢复。"
+                  && manager.statusMessage.localized(in: .english) == "One-time full charge canceled. Previous limit restored.",
+                  "cancelling one-time full charge uses localized compact feedback")
 
         backend.failNextApply = true
         manager.requestLimit(90, immediate: true)
@@ -51,6 +60,8 @@ private enum ChargeManagerTests {
         try await wait { backend.applyCount == 3 && !manager.isBusy }
         try check(!manager.isError && backend.state.upper == 90 && manager.hasOriginalStateSnapshot,
                   "retry updates the active limit without overwriting the original snapshot")
+        try check(manager.statusMessage.source == "充电上限已设为 90%，固件写入已验证。",
+                  "automatic limit changes use the same localized confirmation")
 
         manager.isAdapterConnected = false
         manager.requestLimit(95, immediate: true)
@@ -63,6 +74,10 @@ private enum ChargeManagerTests {
         try check(!manager.hasOriginalStateSnapshot && !backend.state.active
                   && backend.state.upper == 80 && backend.state.lower == 78,
                   "disabling restores the exact pre-MauLeaf firmware state and removes the snapshot")
+        try check(manager.statusMessage.source == "已关闭限制充电，原始固件配置已恢复。"
+                  && manager.statusMessage.localized(in: .english) == "Charging limit disabled. Original firmware configuration restored."
+                  && manager.statusMessage.source.count < 30,
+                  "turning off the limit shows a complete compact localized message")
 
         let allowed = await manager.prepareForTermination()
         try check(allowed, "app can quit after an already verified manual disable")

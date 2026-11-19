@@ -19,7 +19,7 @@ struct FeedbackLayoutTests {
         try await wait { manager.backendReady }
         manager.isAdapterConnected = true
         manager.batteryPercent = 80
-        manager.requestLimit(80, immediate: true)
+        manager.enableLimit()
         try await wait { backend.applyCount == 1 && !manager.isBusy }
 
         guard manager.menuBarLeafStyle == .green else {

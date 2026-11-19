@@ -181,3 +181,5 @@
 "已找到现有控制程序，但服务不可用。为避免覆盖其他安装方式，请先检查现有服务。" = "An existing control executable was found, but its service is unavailable. Check the current installation before proceeding.";
 "原生固件控制仍在只读验证阶段。当前预览版暂时使用固定版本的兼容控制组件，安装时需要管理员授权。" = "Native firmware control is still read-only. This preview temporarily uses a pinned compatibility component and requires administrator approval to install.";
 "安装控制组件" = "Install control component";
+
+"原生固件限充至 %@%%" = "Native firmware limit: %@%%";

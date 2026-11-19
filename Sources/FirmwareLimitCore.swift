@@ -45,8 +45,6 @@ struct FirmwareLimitDeviceIdentity: Equatable {
 struct FirmwareLimitWriteContext: Equatable {
     let isAdministrator: Bool
     let isOnACPower: Bool
-    let mauLeafRunning: Bool
-    let battRunning: Bool
     let userConfirmed: Bool
 }
 
@@ -76,9 +74,6 @@ struct FirmwareLimitWritePermit {
         }
         guard context.isOnACPower else {
             throw FirmwareLimitCoreError.externalPowerRequired
-        }
-        guard !context.mauLeafRunning, !context.battRunning else {
-            throw FirmwareLimitCoreError.controllerConflict
         }
         guard context.userConfirmed else {
             throw FirmwareLimitCoreError.confirmationRequired
@@ -144,7 +139,6 @@ enum FirmwareLimitCoreError: Error, Equatable, LocalizedError {
     case unsupportedTarget(String)
     case administratorRequired
     case externalPowerRequired
-    case controllerConflict
     case confirmationRequired
     case invalidRequestedBand(upper: Int, lower: Int)
     case unexpectedKeyShape(key: String, size: Int, type: String)
@@ -160,7 +154,6 @@ enum FirmwareLimitCoreError: Error, Equatable, LocalizedError {
         case .unsupportedTarget(let reason): return reason
         case .administratorRequired: return "Administrator privileges are required."
         case .externalPowerRequired: return "Connect the Mac to AC power before changing firmware charging settings."
-        case .controllerConflict: return "Quit MauLeaf and stop batt before changing firmware charging settings."
         case .confirmationRequired: return "The explicit hardware-write confirmation was not provided."
         case .invalidRequestedBand(let upper, let lower):
             return "Invalid requested charge band: upper \(upper)%, lower \(lower)%."

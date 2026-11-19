@@ -103,6 +103,9 @@ bash -n "$ROOT/Scripts/ci/package-macos.sh"
 bash -n "$ROOT/build.command"
 bash -n "$ROOT/Scripts/install-native-firmware-helper.sh"
 bash -n "$ROOT/Scripts/uninstall-native-firmware-helper.sh"
+bash -n "$ROOT/Scripts/uninstall-macos26-27.sh"
+grep -Fq 'original-firmware-state.json' "$ROOT/Scripts/uninstall-macos26-27.sh"
+grep -Fq 'Native MauLeaf firmware helper or recovery data is present.' "$ROOT/Scripts/uninstall-macos26-27.sh"
 if [[ "$(uname -s)" == Darwin ]]; then
     plutil -lint "$ROOT/Support/com.local.chargecap.firmware-helper.plist"
 fi

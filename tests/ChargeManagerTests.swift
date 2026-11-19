@@ -71,7 +71,9 @@ private enum ChargeManagerTests {
 
         try await testAutomaticQuitRestore()
         try await testQuitDuringOneTimeFullCharge()
-        try await testUnpluggedQuitIsDenied()
+        try await testUnpluggedQuitQueuesRestore()
+        try await testUnpluggedLegacyQuitQueuesDeactivation()
+        try await testUnpluggedOneTimeQuitCancelsAndQueuesRestore()
         try await testRestoreFailureBlocksQuit()
         try await testFalseRestoreAcknowledgmentBlocksQuit()
         try await testLegacyPreview4RestoresActivationOnQuit()
@@ -133,19 +135,58 @@ private enum ChargeManagerTests {
     }
 
     @MainActor
-    private static func testUnpluggedQuitIsDenied() async throws {
+    private static func testUnpluggedQuitQueuesRestore() async throws {
         let backend = FixtureNativeFirmwareBackend()
         let manager = try await activatedManager(backend: backend)
+        backend.acConnected = false
         manager.isAdapterConnected = false
-        let denied = await manager.prepareForTermination()
-        try check(!denied && manager.isError && !manager.isPreparingToQuit,
-                  "without AC power, quitting is denied rather than silently leaving the limit active")
-        try check(backend.restoreCount == 0 && backend.state.active,
-                  "an unplugged quit does not attempt an unsafe firmware write")
-        manager.isAdapterConnected = true
-        let retry = await manager.prepareForTermination()
-        try check(retry && backend.restoreCount == 1 && !backend.state.active,
-                  "reconnecting AC permits a safe automatic restore and quit")
+        let allowed = await manager.prepareForTermination()
+        try check(allowed && manager.isPreparingToQuit && !manager.isError,
+                  "unplugged normal quit is allowed after durable restoration is queued")
+        try check(backend.restoreCount == 1 && backend.state.active
+                  && backend.state.restorePending && manager.restorePending,
+                  "without AC, the helper retains the original snapshot and the recovery request")
+        backend.acConnected = true
+        _ = try await backend.restoreOriginalState()
+        try check(!backend.state.active && !backend.state.hasOriginalStateSnapshot,
+                  "reconnecting AC allows the queued original-state restore to complete")
+    }
+
+    @MainActor
+    private static func testUnpluggedLegacyQuitQueuesDeactivation() async throws {
+        let backend = FixtureNativeFirmwareBackend()
+        backend.state = FirmwareLimitHelperStateResponse(
+            state: FirmwareLimitState(activationByte: 0x02, upper: 85, lower: 83)
+        )
+        let manager = ChargeManager(backend: backend, autoInstallNativeHelper: false)
+        manager.start()
+        try await wait { manager.isLegacyActive }
+        backend.acConnected = false
+        manager.isAdapterConnected = false
+        let allowed = await manager.prepareForTermination()
+        try check(allowed && backend.pendingLegacyRestore && manager.restorePending,
+                  "unplugged Preview 4 legacy limit may exit while a deactivation request is retained")
+        backend.acConnected = true
+        _ = try await backend.restoreOriginalState()
+        try check(!backend.state.active && backend.state.upper == 85 && backend.state.lower == 83,
+                  "legacy restoration only clears activation and preserves unknown historical thresholds")
+    }
+
+    @MainActor
+    private static func testUnpluggedOneTimeQuitCancelsAndQueuesRestore() async throws {
+        let backend = FixtureNativeFirmwareBackend()
+        let manager = try await activatedManager(backend: backend)
+        manager.beginOneTimeFullCharge()
+        try await wait { backend.beginCount == 1 && backend.pending && !manager.isBusy }
+        backend.acConnected = false
+        manager.isAdapterConnected = false
+        let allowed = await manager.prepareForTermination()
+        try check(allowed && !backend.pending && backend.state.restorePending,
+                  "unplugged quit cancels the one-time task and schedules original-state restore")
+        backend.acConnected = true
+        _ = try await backend.restoreOriginalState()
+        try check(!backend.state.active && !backend.state.hasOriginalStateSnapshot,
+                  "the original state, not the one-time charging limit, is restored after AC returns")
     }
 
     @MainActor

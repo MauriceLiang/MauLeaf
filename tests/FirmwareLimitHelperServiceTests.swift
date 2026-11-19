@@ -75,6 +75,8 @@ private enum FirmwareLimitHelperServiceTests {
             isOnACPower: { onAC },
             isAdministrator: { true },
             batteryObservation: { observation },
+            pmsetReportsBatteryPower: { !onAC },
+            isChargingNow: { false },
             jobURL: jobURL,
             originalStateURL: originalStateURL,
             restoreRequestURL: restoreRequestURL,
@@ -192,9 +194,32 @@ private enum FirmwareLimitHelperServiceTests {
         service.applyLimit(upper: 85, lower: 83, confirmed: true) { _, error in secondApplyError = error }
         precondition(secondApplyError == nil, "a new managed limit can be enabled after restoring the original state")
         onAC = false
+        observation = FirmwareLimitBatteryObservation(percent: 90, fullyCharged: false, externalConnected: false)
+        var offlineRestoredData: NSData?
+        var offlineRestoredError: NSString?
+        service.restoreOriginalState { data, error in
+            offlineRestoredData = data
+            offlineRestoredError = error
+        }
+        precondition(offlineRestoredError == nil && offlineRestoredData != nil,
+                     "validated Mac restores the exact original state on battery power")
+        precondition(!FileManager.default.fileExists(atPath: originalStateURL.path)
+                     && transport.activation == 0 && transport.upper == 80 && transport.lower == 78,
+                     "battery-only full restore removes saved snapshot after verification")
+
+        // An unplugged restore with insufficient charge must NOT discard the
+        // snapshot. Once the battery power check becomes valid again, the
+        // background monitor can finish while still unplugged.
+        onAC = true
+        observation = FirmwareLimitBatteryObservation(percent: 90, fullyCharged: false, externalConnected: true)
+        var thirdApplyError: NSString?
+        service.applyLimit(upper: 85, lower: 83, confirmed: true) { _, error in thirdApplyError = error }
+        precondition(thirdApplyError == nil, "prepare low-battery recovery scenario")
+        onAC = false
+        observation = FirmwareLimitBatteryObservation(percent: 20, fullyCharged: false, externalConnected: false)
         var queuedRestoreError: NSString?
         service.restoreOriginalState { _, error in queuedRestoreError = error }
-        precondition(queuedRestoreError != nil, "restoration refuses to write without AC power")
+        precondition(queuedRestoreError != nil, "low battery blocks offline hardware writes")
         let queuedSnapshot = try JSONDecoder().decode(
             FirmwareLimitOriginalStateSnapshot.self,
             from: Data(contentsOf: originalStateURL)
@@ -202,13 +227,13 @@ private enum FirmwareLimitHelperServiceTests {
         precondition(queuedSnapshot.restoreRequested
                      && FileManager.default.fileExists(atPath: restoreRequestURL.path)
                      && FileManager.default.fileExists(atPath: backgroundRecoveryURL.path),
-                     "a failed unplugged restore keeps the snapshot and unified durable retry marker")
-        onAC = true
+                     "failed offline restore preserves the original state and durable markers")
+        observation = FirmwareLimitBatteryObservation(percent: 90, fullyCharged: false, externalConnected: false)
         service.runOneTimeMonitorTickForTesting()
         precondition(!FileManager.default.fileExists(atPath: originalStateURL.path)
                      && !FileManager.default.fileExists(atPath: backgroundRecoveryURL.path)
                      && transport.activation == 0 && transport.upper == 80 && transport.lower == 78,
-                     "the helper retries and completes the original-state restore after AC returns")
+                     "background monitor restores fully while still unplugged")
 
         let upgradedIdentity = FirmwareLimitDeviceIdentity(
             modelIdentifier: identity.modelIdentifier,

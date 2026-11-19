@@ -5,6 +5,7 @@
 本版本由 main 分支合并后自动构建，仅提供 Apple Silicon arm64 安装包，不再构建或发布 Intel 版本。
 
 - 首次启动默认不启用充电限制；用户点击「启用限制充电」后才写入原生固件。
+- 正常退出 MauLeaf 时会自动恢复启用前的固件配置、清理本次充满任务并再次读回验证，无需手动关闭限充。无法安全恢复或没有连接电源时取消退出并显示错误；强制退出或崩溃无法保证即时恢复。
 - 未启用时，调整滑杆或预设只保存本地设置，不会写入 AppleSMC。
 - 首次启用前，helper 保存 bfF0、bfD0、bfE0 原始值及硬件身份到 root-owned 快照；后续修改上限不会覆盖原始快照。
 - 「关闭限制充电」会恢复原始激活字节、上限和恢复阈值，逐项读回验证后才删除快照。
@@ -23,6 +24,7 @@
 This release is built automatically after changes are merged into main. It ships Apple Silicon arm64 only; Intel builds and release artifacts are discontinued.
 
 - Charging limits are off by default on first launch. The user must click “Enable charging limit” before firmware is changed.
+- Normal app quit automatically restores the original pre-activation firmware state, cancels any one-time full-charge job, and independently verifies the inactive state before exiting. No manual Disable action is required. Missing AC power or failed verification blocks normal quit. Force Quit and crashes cannot guarantee immediate restoration.
 - While disabled, slider and preset changes are saved locally and do not write to AppleSMC.
 - Before the first activation, the helper saves the original bfF0, bfD0, and bfE0 values plus hardware identity in a root-owned snapshot. Later limit changes never overwrite it.
 - “Disable charging limit” restores the original activation byte, upper threshold, and resume threshold, and deletes the snapshot only after read-back verification.

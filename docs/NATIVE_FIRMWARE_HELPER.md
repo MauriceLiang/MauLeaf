@@ -73,6 +73,10 @@ The one-time full-charge job remains separate:
 
 One-time completion restores the current MauLeaf limit; disabling MauLeaf restores the original pre-MauLeaf state instead.
 
+## Normal app quit and uninstallation
+
+Normal app termination is now treated as a verified restore transaction. The app waits for any in-flight firmware operation to finish, invokes the privileged restore operation if a managed snapshot, active limit, or one-time full-charge job exists, and then performs independent state and job read-back. It asks macOS to terminate only when the firmware limit is inactive and both the recovery snapshot and one-time task have been cleared. On failure or missing AC power, the app cancels normal termination and displays an error; the root-owned snapshot and background recovery mechanisms remain available. Legacy Preview 4 states without an original snapshot can only have the activation flag cleared, never historical thresholds reconstructed. Force Quit, crash, and sudden power loss can bypass graceful termination and do not guarantee immediate restoration.
+
 ## Uninstallation
 
 Launch the current Preview 5 app once so it can install the matching native helper, then connect AC power, quit MauLeaf, and run:

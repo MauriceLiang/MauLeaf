@@ -93,4 +93,20 @@ ditto "$APP" "$STAGE/dmg/MauLeaf.app"
 NAME="MauLeaf-$RELEASE_LABEL-macos-arm64.dmg"
 ln -s /Applications "$STAGE/dmg/Applications"
 hdiutil create -quiet -volname "MauLeaf $RELEASE_LABEL" -srcfolder "$STAGE/dmg" -format UDZO -ov "dist/$NAME"
-hdiutil verify "dist/$NAME"
+# DiskImages may briefly retain the newly created DMG on macOS runners.
+# Retry only the verification; never suppress a persistent verification failure.
+verified=false
+for attempt in 1 2 3 4 5; do
+  if hdiutil verify "dist/$NAME"; then
+    verified=true
+    break
+  fi
+  if [[ "$attempt" -lt 5 ]]; then
+    echo "DMG verification attempt $attempt failed; retrying after disk image service settles..." >&2
+    sleep $((attempt * 2))
+  fi
+done
+if [[ "$verified" != true ]]; then
+  echo "DMG verification failed after five attempts: dist/$NAME" >&2
+  exit 1
+fi

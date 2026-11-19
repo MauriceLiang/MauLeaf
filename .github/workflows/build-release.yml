@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
     inputs:
       release_tag:
-        description: 'Existing vX.Y.Z tag to publish (blank = tests only)'
+        description: 'Existing vX.Y.Z or vX.Y.Z-preview.N tag to publish (blank = tests only)'
         required: false
         type: string
 permissions:
@@ -45,15 +45,17 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          [[ "$RELEASE_TAG" =~ ^v([0-9]+)\.([0-9]+)\.([0-9]+)$ ]] || exit 1
+          [[ "$RELEASE_TAG" =~ ^v([0-9]+)\.([0-9]+)\.([0-9]+)(-preview\.([0-9]+))?$ ]] || exit 1
           git ls-remote --exit-code --tags origin "refs/tags/$RELEASE_TAG" >/dev/null
           major="${BASH_REMATCH[1]}"; minor="${BASH_REMATCH[2]}"; patch="${BASH_REMATCH[3]}"
           ((minor < 1000 && patch < 1000)) || exit 1
-          echo "RELEASE_VERSION=${RELEASE_TAG#v}" >> "$GITHUB_ENV"
+          echo "RELEASE_VERSION=${major}.${minor}.${patch}" >> "$GITHUB_ENV"
+          echo "RELEASE_LABEL=${RELEASE_TAG#v}" >> "$GITHUB_ENV"
           echo "BUILD_NUMBER=$((major*1000000+minor*1000+patch))" >> "$GITHUB_ENV"
       - name: Package
         env:
           TARGET_ARCH: ${{ matrix.arch }}
+          RELEASE_LABEL: ${{ inputs.release_tag || github.ref_name }}
         run: bash Scripts/ci/package-macos.sh
       - uses: actions/upload-artifact@v4
         with:
@@ -79,7 +81,7 @@ jobs:
           RELEASE_TAG: ${{ inputs.release_tag || github.ref_name }}
         run: |
           set -euo pipefail
-          [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || exit 1
+          [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-preview\.[0-9]+)?$ ]] || exit 1
           git ls-remote --exit-code --tags origin "refs/tags/$RELEASE_TAG" >/dev/null
           V="${RELEASE_TAG#v}"; F="docs/releases/v$V.md"
           test -s "$F"
@@ -110,6 +112,8 @@ jobs:
             exit 1
           fi
           (cd artifacts && sha256sum *.dmg batt-v0.8.0-source.tar.gz > SHA256SUMS.txt)
+          PRE_FLAG=()
+          if [[ "$RELEASE_TAG" == *-preview.* ]]; then PRE_FLAG+=(--prerelease); fi
           gh release create "$RELEASE_TAG" artifacts/*.dmg artifacts/SHA256SUMS.txt \
             artifacts/batt-v0.8.0-source.tar.gz --verify-tag \
-            --title "MauLeaf $RELEASE_TAG" --notes-file "docs/releases/v$V.md"
+            --title "MauLeaf $RELEASE_TAG" --notes-file "docs/releases/v$V.md" "${PRE_FLAG[@]}"

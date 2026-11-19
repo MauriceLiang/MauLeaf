@@ -19,25 +19,23 @@
   <a href="https://github.com/MauriceLiang/MauLeaf/issues">Report an issue</a>
 </p>
 
-MauLeaf lets you set a charging limit for a Mac that usually stays plugged in, and charge it fully before heading out. A leaf in your menu bar gives you access to charging modes, battery power readings, and options for handling a battery level above your limit, without repeatedly entering terminal commands.
+MauLeaf is a lightweight macOS menu-bar utility focused on two actions: set a daily charging limit, or temporarily charge to 100% once before heading out. The menu bar uses a green leaf by default.
 
-Built with SwiftUI + AppKit, MauLeaf uses the bundled open-source utility [batt](https://github.com/charlie0129/batt) for low-level charging control. Previously named ChargeCap, the app adopts the MauLeaf name starting with v0.7.0.
+Built with SwiftUI + AppKit, v0.8.0-preview.1 still uses the pinned open-source utility [batt](https://github.com/charlie0129/batt) for actual charging control. The in-house AppleSMC backend currently contains read-only probing, policy and transaction code, but real activation and charge-enforcement behavior have not yet been validated on the target Mac; it does not control charging in this preview. Previously named ChargeCap, the app adopts the MauLeaf name starting with v0.7.0.
 
 ## Features
 
 | Feature | What it does |
 | --- | --- |
-| Charging limits | Set a limit between 50% and 95%. Presets apply immediately; slider changes apply automatically after you stop dragging. |
-| Full charging on demand | Charge fully once, then restore your previous limit, or continuously allow charging to 100%. |
-| Above-limit handling | Keep using the power adapter, or actively use the battery until it reaches your limit. The latter requires device support. |
-| Battery power readings | View charging and discharging power with adaptive refresh while the panel is open. Extra power sampling stops when the panel closes. |
-| Launch at login | Opt in or out yourself. No login item is registered by default; the switch reflects system registration. |
-| One-click language switching | Click “English” or “中文” at the bottom of the panel to switch immediately. Your choice is saved. |
-| Compact menu bar interface | Choose a monochrome or green leaf, click outside to dismiss the panel, and see operation feedback at the bottom without shifting controls. |
-| Release control on normal quit | Restore adapter power and remove the charging limit before quitting, with verification. Saved settings are reapplied on the next launch. |
-| Graphical installation and removal | Install the bundled, pinned control component through macOS authorization. A separate uninstaller is included. |
+| Charging limit | Adjust the limit from 50–95%, with quick presets and automatic application after slider changes. |
+| One-time full charge | Temporarily release the limit and restore the saved limit after reaching 100%; cancellation is available. |
+| Battery status | Show the current percentage and power-source state. |
+| Green menu-bar leaf | Always use the green leaf; no percentage text or icon-style setting. |
+| Minimal interface | Remove live power readings, active discharge, permanent full-charge mode, and login-item controls. |
+| Installation and removal | Install the control component when needed; a separate uninstaller is included. |
 
-Active battery discharge has protection for a closed lid, abnormal temperature, invalid safety readings, and timeout. It pauses after a one-time full charge to avoid immediately draining the battery you just charged. See [Charging behavior and operating limits (Chinese)](docs/CHARGING.md) for details.
+> [!IMPORTANT]
+> **This is a feature-simplification preview, not a batt-free release.** The native SMC backend has not yet passed real activation and charging-enforcement tests on the target M1 Pro. To keep charging controls functional, this preview temporarily retains batt v0.8.0 as its actual backend. Do not treat this build as the final native implementation.
 
 ## Requirements
 
@@ -60,7 +58,7 @@ The software is provided **AS IS**, without warranties of Intel compatibility, m
 
 1. From [GitHub Releases](https://github.com/MauriceLiang/MauLeaf/releases/latest), choose `MauLeaf-<version>-macos-arm64.dmg` (supported) or `MauLeaf-<version>-macos-x86_64-EXPERIMENTAL.dmg` (Intel read-only preview).
 2. Open the DMG and drag `MauLeaf.app` to `Applications`. **Only the supported Apple Silicon DMG** also contains `Uninstall MauLeaf.app`; the Intel preview does not include an uninstaller.
-3. The Apple Silicon release can install bundled batt. The Intel preview contains no batt or uninstaller and disables all charging-control operations.
+3. The Apple Silicon preview can install bundled batt. The Intel preview contains no batt or uninstaller and disables all charging-control operations.
 4. On Apple Silicon, you can select charging modes and limits. On the Intel experimental preview, only battery information is visible and charging settings are not available.
 5. The interface defaults to Chinese. Click “English” at the bottom of the panel to switch to English, or “中文” to switch back. Your language choice is remembered on the next launch.
 
@@ -76,24 +74,13 @@ Some internal identifiers and data directories retain the old name for compatibi
 
 ## Everyday use
 
-- **Usually plugged in:** Choose control mode (`控制模式`) and set a limit. If the battery is already above the limit, the default behavior keeps using adapter power and lets the battery level decrease naturally.
-- **Heading out:** Choose full charging → charge fully once (`直接充满 → 仅充满一次`). The previous limit is restored at 100%, and you can cancel at any time.
-- **Always need a full battery:** Choose full charging → continuously allow full charging (`直接充满 → 持续允许充满`). Returning to control mode restores your saved limit.
-- **Actively reduce the battery level:** Select the corresponding strategy in control mode. Adapter power is restored when the target is reached or a protection condition is triggered. You can manually resume after a pause.
+- **Daily limit:** Drag the slider or choose a 70%, 75%, 80%, 85%, 90%, or 95% preset. Slider changes are applied automatically after adjustment; the reported backend state is checked afterward.
+- **One-time full charge:** Select “Charge to 100%”. The current limit is temporarily released and restored after the battery reaches 100%. You can cancel early with “Cancel and restore limit”.
+- **Menu bar:** A green leaf is always shown. Click it to open the panel. Closing the panel does not cancel an active one-time charge task.
 
-The battery ring shows a lightning bolt while charging, a plug when connected to power without charging, and the app’s leaf silhouette in its original orientation while using the battery. Low Power Mode is indicated by the ring color and status text.
+The panel keeps the current battery percentage and power-source state as supporting information, but no longer displays live power readings. Permanent full-charge mode, active discharge, and menu-bar style selection have been removed.
 
-With the panel open, power readings update about every 2 seconds while charging or discharging, and every 5 seconds while idle. Closing the panel stops extra sampling; background status checks and safety monitoring continue. These are battery-side readings, **not charger input power**. A dash (`—`) appears when the system provides no valid data.
-
-**Closing the panel and quitting the app are different actions.** A normal quit waits for ongoing operations, stops tasks, and verifies that charging control has been released. If cleanup fails, the app keeps the error visible and lets you try quitting again. The batt service stays installed with no charging limit.
-
-### Launch at login
-
-Turn “Launch at login” on or off below the menu bar icon settings. The app does not register itself by default; if a registration already exists, its system state is shown. Install MauLeaf in `Applications` before enabling this option.
-
-This launches the app after you log in to your Mac. Quitting normally preserves your choice. If approval is pending, click “Manage Login Items” and allow MauLeaf in System Settings before it can launch automatically. Turn the switch off at any time to unregister it. The app refreshes the status when you return from System Settings.
-
-This uses the native macOS [SMAppService login item API](https://developer.apple.com/documentation/servicemanagement/smappservice).
+**Quitting the app** stops the one-time task and follows the current cleanup procedure. On the next launch, MauLeaf reapplies the saved charging limit. Closing the panel is not the same as quitting the app.
 
 ## Uninstallation
 
@@ -110,7 +97,7 @@ Read the script and keep the Mac connected to power. **Do not run the whole scri
 > [!WARNING]
 > **macOS 26/27: Do not rely on the GUI uninstaller. Read the [emergency removal guide](docs/MACOS_26_27_UNINSTALL.md#english), inspect [Scripts/uninstall-macos26-27.sh](Scripts/uninstall-macos26-27.sh), and run it as a normal user.** It verifies backend ownership and restores adapter power before removing a verified managed service.
 
-If launch at login is enabled, turn it off first. Quit MauLeaf normally, then run `Uninstall MauLeaf.app` from the installation image. The uninstaller first attempts to restore default charging control, then removes the app-managed component, tasks, settings, and both old and new main app names from `/Applications`. You can delete the uninstaller afterward. Externally installed copies of batt are preserved.
+Quit MauLeaf normally, then run `Uninstall MauLeaf.app` from the installation image. If an older version left a login item registered, disable it separately in macOS System Settings → General → Login Items. The uninstaller first attempts to restore default charging control, then removes the app-managed component, tasks, settings, and both old and new main app names from `/Applications`. You can delete the uninstaller afterward. Externally installed copies of batt are preserved.
 
 To remove only the control component while keeping MauLeaf, use the component removal action (`卸载组件`) in the main panel.
 

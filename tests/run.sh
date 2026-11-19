@@ -63,5 +63,10 @@ PLIST
     "$LAYOUT_APP/Contents/MacOS/layouttests" "$ROOT/build/ui-verification"
 fi
 swiftc -frontend -parse "$ROOT/Sources/MauLeaf.swift" "$ROOT/Sources/OnceChargeAgent.swift" "$ROOT/Sources/MauLeafOnceHelper.swift" "$ROOT/Sources/UninstallMauLeaf.swift" "$ROOT/Sources/DischargeControl.swift" "$ROOT/Sources/DischargeAgent.swift" "$ROOT/Sources/PowerRefreshController.swift" "$ROOT/Sources/LoginItemSettings.swift"
+if grep -Eq 'private var (powerSection|menuBarIconStyleSection|loginItemSection|highChargeSection|chargeModeSection)' "$ROOT/Sources/MauLeaf.swift"; then
+    echo "Removed UI sections must not return to the minimal preview" >&2
+    exit 1
+fi
+grep -Fq '@Published private(set) var menuBarLeafStyle: MenuBarLeafStyle = .green' "$ROOT/Sources/MauLeaf.swift"
 bash -n "$ROOT/Scripts/ci/package-macos.sh"
 echo "Source parsing and build script checks passed"

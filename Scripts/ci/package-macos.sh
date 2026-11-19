@@ -4,7 +4,10 @@ cd "$(dirname "$0")/../.."
 : "${RELEASE_VERSION:?missing version}"
 : "${TARGET_ARCH:?missing arch}"
 : "${BUILD_NUMBER:?missing build number}"
+RELEASE_LABEL="${RELEASE_LABEL:-$RELEASE_VERSION}"
+RELEASE_LABEL="${RELEASE_LABEL#v}"
 [[ "$RELEASE_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || exit 2
+[[ "$RELEASE_LABEL" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-preview\.[0-9]+)?$ ]] || exit 2
 [[ "$TARGET_ARCH" == arm64 || "$TARGET_ARCH" == x86_64 ]] || exit 2
 [[ "$(uname -m)" == "$TARGET_ARCH" ]] || exit 2
 STAGE="$RUNNER_TEMP/mauleaf-$TARGET_ARCH"
@@ -60,9 +63,9 @@ if [[ "$TARGET_ARCH" == arm64 ]]; then
 fi
 FLAGS=(-parse-as-library -O -target "$TARGET_ARCH-apple-macos13.0")
 if [[ "$TARGET_ARCH" == x86_64 ]]; then FLAGS+=(-D MAULEAF_INTEL_EXPERIMENTAL); fi
-xcrun swiftc "${FLAGS[@]}" -framework SwiftUI -framework AppKit -framework Combine -framework Foundation -framework IOKit -framework ServiceManagement \
+xcrun swiftc "${FLAGS[@]}" -framework SwiftUI -framework AppKit -framework Combine -framework Foundation -framework IOKit \
  Sources/MauLeaf.swift Sources/ChargeModeCore.swift Sources/AppLocalization.swift Sources/OnceChargeAgent.swift \
- Sources/DischargeControl.swift Sources/DischargeAgent.swift Sources/PowerRefreshController.swift Sources/LoginItemSettings.swift \
+ Sources/DischargeControl.swift Sources/DischargeAgent.swift Sources/PowerRefreshController.swift \
  -o "$APP/Contents/MacOS/MauLeaf"
 if [[ "$TARGET_ARCH" == arm64 ]]; then
   xcrun swiftc "${FLAGS[@]}" -framework SwiftUI -framework AppKit -framework Combine -framework Foundation \
@@ -101,10 +104,10 @@ ditto "$APP" "$STAGE/dmg/MauLeaf.app"
 if [[ "$TARGET_ARCH" == arm64 ]]; then
   codesign --verify --deep --strict "$UNINSTALLER"
   ditto "$UNINSTALLER" "$STAGE/dmg/Uninstall MauLeaf.app"
-  NAME="MauLeaf-$RELEASE_VERSION-macos-arm64.dmg"
+  NAME="MauLeaf-$RELEASE_LABEL-macos-arm64.dmg"
 else
   [[ ! -e "$APP/Contents/Resources/batt" ]] || exit 6
-  NAME="MauLeaf-$RELEASE_VERSION-macos-x86_64-EXPERIMENTAL.dmg"
+  NAME="MauLeaf-$RELEASE_LABEL-macos-x86_64-EXPERIMENTAL.dmg"
   cat > "$STAGE/dmg/INTEL-EXPERIMENTAL-READ-ME.txt" <<'NOTICE'
 Intel EXPERIMENTAL, UNTESTED, READ-ONLY preview / Intel 未测试只读实验版
 
@@ -130,5 +133,5 @@ continue to apply.
 NOTICE
 fi
 ln -s /Applications "$STAGE/dmg/Applications"
-hdiutil create -quiet -volname "MauLeaf $RELEASE_VERSION" -srcfolder "$STAGE/dmg" -format UDZO -ov "dist/$NAME"
+hdiutil create -quiet -volname "MauLeaf $RELEASE_LABEL" -srcfolder "$STAGE/dmg" -format UDZO -ov "dist/$NAME"
 hdiutil verify "dist/$NAME"

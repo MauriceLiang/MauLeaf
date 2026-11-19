@@ -17,7 +17,7 @@ struct FeedbackLayoutTests {
         DischargeAgent.monitor = DischargeMonitor(directory: directory)
         UserDefaults.standard.set(80, forKey: "chargeLimit")
         UserDefaults.standard.set("limited", forKey: "chargeModeV5")
-        UserDefaults.standard.set("adapter", forKey: "highChargePolicy")
+        UserDefaults.standard.set("discharge", forKey: "highChargePolicy")
         UserDefaults.standard.set(false, forKey: "chargeControlReleasedOnQuit")
         guard let leafURL = Bundle.main.url(forResource: "MenuBarLeafTemplate", withExtension: "png"),
               let leaf = NSImage(contentsOf: leafURL), leaf.isValid else {
@@ -31,6 +31,12 @@ struct FeedbackLayoutTests {
         let renderOutput = URL(fileURLWithPath: CommandLine.arguments[1], isDirectory: true)
         try verifyBatteryRingRendering(outputDirectory: renderOutput)
         let manager = ChargeManager(battPath: binary.path)
+        guard manager.menuBarLeafStyle == .green else {
+            fatalError("The menu-bar leaf must default to green without a style preference.")
+        }
+        guard manager.highChargePolicy == .adapter else {
+            fatalError("Legacy active-discharge preferences must migrate to adapter power.")
+        }
         manager.start()
         manager.requestLimit(80, immediate: true)
         let deadline = Date().addingTimeInterval(3)

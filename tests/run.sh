@@ -83,8 +83,8 @@ if grep -Eq 'componentSetupSection|installBackend|uninstallBackend' "$ROOT/Sourc
     echo "The legacy component installer UI must not return" >&2
     exit 1
 fi
-if grep -RniE 'MAULEAF_INTEL_EXPERIMENTAL|x86_64|macos-15-intel|EXPERIMENTAL.dmg' \
-    "$ROOT/Sources" "$ROOT/Scripts/ci/package-macos.sh"; then
+if grep -RniE 'MAULEAF_INTEL_EXPERIMENTAL|x86_64|macos-15-intel|EXPERIMENTAL.dmg|(^|[^[:alnum:]_])batt([^[:alnum:]_]|$)' \
+    "$ROOT/Sources" "$ROOT/Scripts/ci/package-macos.sh" "$ROOT/build.command"; then
     echo "Intel build support must not ship in Preview 5." >&2
     exit 1
 fi
@@ -100,6 +100,7 @@ grep -Fq '启用限制充电' "$ROOT/Sources/MauLeaf.swift"
 grep -Fq '关闭限制充电' "$ROOT/Sources/MauLeaf.swift"
 grep -Fq '@Published private(set) var menuBarLeafStyle: MenuBarLeafStyle = .green' "$ROOT/Sources/MauLeaf.swift"
 bash -n "$ROOT/Scripts/ci/package-macos.sh"
+bash -n "$ROOT/build.command"
 bash -n "$ROOT/Scripts/install-native-firmware-helper.sh"
 bash -n "$ROOT/Scripts/uninstall-native-firmware-helper.sh"
 if [[ "$(uname -s)" == Darwin ]]; then

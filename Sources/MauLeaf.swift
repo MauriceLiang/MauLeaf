@@ -354,14 +354,14 @@ struct ContentView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             batteryCard
-            #if MAULEAF_INTEL_EXPERIMENTAL
-            intelPreviewSection
-            #else
             limitSection
                 .disabled(manager.isPreparingToQuit)
-            oneTimeChargeSection
+            limitControlSection
                 .disabled(manager.isPreparingToQuit)
-            #endif
+            if manager.hasOriginalStateSnapshot || manager.fullOncePending {
+                oneTimeChargeSection
+                    .disabled(manager.isPreparingToQuit)
+            }
             Divider()
             footer
         }
@@ -377,6 +377,14 @@ struct ContentView: View {
             }
         } message: {
             Text(manager.text("此操作会直接修改本机 AppleSMC 固件充电寄存器。仅支持已限定的 MacBookPro18,1、指定固件和 macOS 15，并且必须连接电源。程序会逐项读回校验并在失败时尝试恢复；寄存器写入成功仍不代表实际充电停止点已经验证。"))
+        }
+        .alert(manager.text("检测到旧版充电限制"), isPresented: $manager.showLegacyDisableConfirmation) {
+            Button(manager.text("停用旧版限制"), role: .destructive) {
+                manager.confirmDisableLegacyLimit()
+            }
+            Button(manager.text("取消"), role: .cancel) {}
+        } message: {
+            Text(manager.text("Preview 4 没有保存首次启用前的固件阈值，因此无法恢复原始上限。继续操作只会关闭旧版限充激活标志，并保留当前阈值；这不等于恢复历史原状。"))
         }
         .task { manager.start() }
     }
@@ -437,7 +445,7 @@ struct ContentView: View {
                 in: 50...95,
                 step: 5
             )
-            .disabled(!manager.backendReady || !manager.isAdapterConnected || manager.isBusy || manager.fullOncePending)
+            .disabled(manager.isBusy || manager.isPreparingToQuit || manager.fullOncePending || manager.isLegacyActive)
 
             HStack(spacing: 5) {
                 ForEach(presets, id: \.self) { preset in
@@ -452,14 +460,89 @@ struct ContentView: View {
                             .clipShape(RoundedRectangle(cornerRadius: 6))
                     }
                     .buttonStyle(.plain)
-                    .disabled(!manager.backendReady || !manager.isAdapterConnected || manager.isBusy || manager.fullOncePending)
+                    .disabled(manager.isBusy || manager.isPreparingToQuit || manager.fullOncePending || manager.isLegacyActive)
                 }
             }
-            Text(manager.text("连接电源后自动写入原生固件；本次充满期间暂不可修改上限。"))
+            Text(manager.text("未启用时仅保存上限设置；启用后修改会立即应用。"))
                 .font(.caption2)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
         }
+    }
+
+    private var limitControlSection: some View {
+        VStack(alignment: .leading, spacing: 9) {
+            if manager.isLegacyActive {
+                Label(manager.text("检测到旧版或未托管的固件限充"), systemImage: "exclamationmark.triangle.fill")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.orange)
+                Text(manager.text("没有找到首次启用前的原始固件快照。停用旧版限制只能关闭激活标志，不能恢复未保存的阈值。"))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                Button {
+                    manager.requestLegacyDisableConfirmation()
+                } label: {
+                    Label(manager.text("停用旧版限制"), systemImage: "power")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.bordered)
+                .disabled(!manager.canDisableLegacyLimit)
+            } else if manager.restorePending {
+                Label(manager.text("正在等待恢复原始固件配置"), systemImage: "arrow.triangle.2.circlepath")
+                    .font(.subheadline.weight(.semibold))
+                Text(manager.text("原始配置快照已保留。接入电源后，后台服务会继续恢复；也可以手动重试。"))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                Button {
+                    manager.disableLimit()
+                } label: {
+                    Label(manager.text("重试恢复原始配置"), systemImage: "arrow.clockwise")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.bordered)
+                .disabled(!manager.canRetryOriginalRestore)
+            } else if manager.hasOriginalStateSnapshot {
+                HStack {
+                    Label(manager.text("限制充电已启用"), systemImage: "checkmark.circle.fill")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.green)
+                    Spacer()
+                    Text(manager.text("上限 \\(manager.limit)%"))
+                        .font(.subheadline.monospacedDigit().weight(.semibold))
+                }
+                Text(manager.text("MauLeaf 已保存启用前的固件配置。关闭时会逐项恢复并验证原始值。"))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                Button {
+                    manager.disableLimit()
+                } label: {
+                    Label(manager.text("关闭限制充电"), systemImage: "power")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.bordered)
+                .disabled(!manager.canDisableLimit)
+            } else {
+                Label(manager.text("限制充电尚未启用"), systemImage: "leaf")
+                    .font(.subheadline.weight(.semibold))
+                Text(manager.text("当前不会向固件写入充电上限。启用时会先保存原始配置，之后可随时关闭并恢复。"))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                Button {
+                    manager.enableLimit()
+                } label: {
+                    Label(manager.text("启用限制充电"), systemImage: "leaf.fill")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(!manager.canEnableLimit)
+            }
+        }
+        .padding(12)
+        .background(Color.primary.opacity(0.035), in: RoundedRectangle(cornerRadius: 11))
     }
 
     private var oneTimeChargeSection: some View {
@@ -512,24 +595,6 @@ struct ContentView: View {
         .padding(12)
         .background(Color.primary.opacity(0.035), in: RoundedRectangle(cornerRadius: 11))
     }
-
-    #if MAULEAF_INTEL_EXPERIMENTAL
-    private var intelPreviewSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text(manager.language == .english ? "Intel experimental preview" : "Intel 实验预览版")
-                .font(.subheadline.weight(.semibold))
-            Text(manager.language == .english
-                 ? "Unverified Intel preview: the developer has no Intel Mac and has not tested launching or running this build on Intel hardware. Actual operation, accuracy and stability are unknown. Battery information only; native charging controls are unavailable. Provided AS IS, at your own risk."
-                 : "未经实机测试的 Intel 实验预览版：开发者没有 Intel Mac，未在 Intel 设备上安装、启动或运行本版本。实际运行情况、数据准确性与稳定性均未知。仅展示电池信息，不提供原生充电控制；软件按现状提供，风险由使用者自行评估。")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-        }
-        .padding(11)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.orange.opacity(0.075), in: RoundedRectangle(cornerRadius: 10))
-    }
-    #endif
 
     private var footer: some View {
         HStack(spacing: 12) {

@@ -68,6 +68,28 @@ struct LocalizationTests {
               "both quit component lifecycle choices have bilingual labels")
         check(translations["固件已恢复，但后台组件未处理完成"] != nil,
               "component cleanup failure is distinguished from unverified firmware")
+        // Native privileged helper responses are English technical audit
+        // strings. The UI must use a short translated message, not that raw
+        // response, in either language. Check all four user actions.
+        let confirmation: AppText = "充电上限已设为 \(85)%，固件写入已验证。"
+        check(confirmation.source == "充电上限已设为 85%，固件写入已验证。"
+              && confirmation.localized(in: .english) == "Charging limit set to 85%. Firmware write verified.",
+              "successful limit write is localizable with a numeric threshold")
+        for key in [
+            "已恢复启用前的原始固件配置。",
+            "已关闭限制充电，原始固件配置已恢复。",
+            "已关闭旧版限充，历史阈值未知。",
+            "限充未启用，已核对固件状态。",
+            "已请求取消本次充满，等待恢复充电上限。",
+            "已取消本次充满，原充电上限已恢复。",
+            "本次充满已开启，固件限充暂时关闭。"
+        ] {
+            check(chinese[key] == key
+                  && translations[key] != nil
+                  && translations[key] != key,
+                  "native operation success has distinct Chinese and English translations: \(key)")
+        }
+
 
         print("LocalizationTests: PASS (\(checks) checks; real bundled string tables)")
     }

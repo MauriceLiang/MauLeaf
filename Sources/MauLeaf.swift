@@ -718,7 +718,12 @@ struct OperationFeedbackView: View {
                         }
                         Text(manager.text(manager.isBusy || errorVisible ? manager.statusMessage : successMessage ?? ""))
                             .font(.caption)
-                            .lineLimit(2)
+                            // Never truncate a successful operation. Long
+                            // errors are summarized in up to three lines;
+                            // View details reveals their complete diagnostics.
+                            .lineLimit(errorVisible ? 3 : nil)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .layoutPriority(1)
                             .frame(maxWidth: .infinity, alignment: .leading)
                         if errorVisible {
                             Button {
@@ -1166,6 +1171,8 @@ final class ChargeManager: ObservableObject {
 
     private func restoreOriginalFirmwareState() async {
         guard !isBusy, !isPreparingToQuit else { return }
+        let hadOriginalSnapshot = hasOriginalStateSnapshot
+        let hadLegacyLimit = isLegacyActive
         isBusy = true
         isError = false
         statusMessage = "正在恢复启用前的原始固件配置…"
@@ -1180,7 +1187,18 @@ final class ChargeManager: ObservableObject {
             modeText = response.state.active
                 ? "检测到未托管的固件限充"
                 : "限制充电未启用"
-            statusMessage = AppText(verbatim: response.message)
+            // The root helper speaks English and may include a long audit
+            // explanation. Keep it for diagnostics, not the user-facing toast.
+            NSLog("MauLeaf original-state restore: %@", response.message)
+            if response.state.active {
+                statusMessage = "已恢复启用前的原始固件配置。"
+            } else if hadOriginalSnapshot {
+                statusMessage = "已关闭限制充电，原始固件配置已恢复。"
+            } else if hadLegacyLimit {
+                statusMessage = "已关闭旧版限充，历史阈值未知。"
+            } else {
+                statusMessage = "限充未启用，已核对固件状态。"
+            }
             isError = false
         } catch {
             isBusy = false
@@ -1253,7 +1271,10 @@ final class ChargeManager: ObservableObject {
                 modeText = response.oneTimePending
                     ? "等待接电后恢复原生充电上限"
                     : "原生固件限充至 \(response.state.upper)%"
-                statusMessage = AppText(verbatim: response.message)
+                NSLog("MauLeaf one-time charge cancellation: %@", response.message)
+                statusMessage = response.oneTimePending
+                    ? "已请求取消本次充满，等待恢复充电上限。"
+                    : "已取消本次充满，原充电上限已恢复。"
                 isError = false
             } catch {
                 statusMessage = "取消本次充满失败：\(AppText(error: error))"
@@ -1282,7 +1303,8 @@ final class ChargeManager: ObservableObject {
             fullOnceCancelRequested = false
             modeText = "限制充电已启用 · 上限 \(value)%"
             autoApplyFeedback = "已写入并读回 \(value)%"
-            statusMessage = AppText(verbatim: response.message)
+            NSLog("MauLeaf firmware limit apply: %@", response.message)
+            statusMessage = "充电上限已设为 \(response.state.upper)%，固件写入已验证。"
             isError = false
         } catch {
             autoApplyFeedback = "原生固件写入失败：\(AppText(error: error))"
@@ -1310,7 +1332,8 @@ final class ChargeManager: ObservableObject {
             fullOncePending = response.oneTimePending
             fullOnceCancelRequested = false
             modeText = "本次充满进行中 · 原上限 \(limit)%"
-            statusMessage = AppText(verbatim: response.message)
+            NSLog("MauLeaf one-time full charge: %@", response.message)
+            statusMessage = "本次充满已开启，固件限充暂时关闭。"
             isError = false
         } catch {
             statusMessage = "启动本次充满失败：\(AppText(error: error))"

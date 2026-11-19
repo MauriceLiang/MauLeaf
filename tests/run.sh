@@ -79,6 +79,13 @@ if grep -RniE 'BattCommand|BattStatus|invokeBatt|locateBatt|batt-version|BATT-LI
     echo "Legacy batt backend references must not ship in the native-only preview" >&2
     exit 1
 fi
+# A raw English response.message from the privileged helper must not leak to
+# the user-facing operation toast; preserve the helper text only for logging.
+if grep -Fq 'AppText(verbatim: response.message)' "$ROOT/Sources/MauLeaf.swift"; then
+    echo "Native helper audit messages must not be shown directly in the UI" >&2
+    exit 1
+fi
+
 if grep -Eq 'componentSetupSection|installBackend|uninstallBackend' "$ROOT/Sources/MauLeaf.swift"; then
     echo "The legacy component installer UI must not return" >&2
     exit 1

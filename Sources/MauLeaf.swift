@@ -851,17 +851,17 @@ final class ChargeManager: ObservableObject {
     }
 
     var canDisableLimit: Bool {
-        restoreReady && hasOriginalStateSnapshot && isAdapterConnected
+        restoreReady && hasOriginalStateSnapshot
             && !isBusy && !isPreparingToQuit
     }
 
     var canRetryOriginalRestore: Bool {
-        restoreReady && restorePending && isAdapterConnected
+        restoreReady && restorePending
             && !isBusy && !isPreparingToQuit
     }
 
     var canDisableLegacyLimit: Bool {
-        restoreReady && isLegacyActive && isAdapterConnected
+        restoreReady && isLegacyActive
             && !isBusy && !isPreparingToQuit
     }
 
@@ -1147,9 +1147,15 @@ final class ChargeManager: ObservableObject {
             isError = false
         } catch {
             isBusy = false
-            statusMessage = "恢复原始固件配置失败：\(AppText(error: error))"
-            isError = true
             await refreshNativeState(allowInstall: false)
+            if restorePending && !fullOncePending {
+                modeText = "等待接电后恢复固件配置"
+                statusMessage = "已提交持久恢复请求，接入电源后后台服务会自动恢复。"
+                isError = false
+            } else {
+                statusMessage = "恢复原始固件配置失败：\(AppText(error: error))"
+                isError = true
+            }
         }
     }
 

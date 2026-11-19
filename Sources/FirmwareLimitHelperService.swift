@@ -53,8 +53,10 @@ final class FirmwareLimitHelperService: NSObject, FirmwareLimitHelperProtocol {
 
     func readState(withReply reply: @escaping (NSData?, NSString?) -> Void) {
         do {
+            let identity = identityProvider()
             let response = FirmwareLimitHelperStateResponse(
-                state: try withHardwareWatchdog { try controller.readState() }
+                state: try withHardwareWatchdog { try controller.readState() },
+                identity: identity
             )
             reply(try JSONEncoder().encode(response) as NSData, nil)
         } catch {

@@ -298,93 +298,9 @@ enum BatteryRingIcon: Hashable {
     case battery
 }
 
-enum MenuBarLeafStyle: String, CaseIterable, Identifiable {
+enum MenuBarLeafStyle {
     case monochrome
     case green
-
-    var id: String { rawValue }
-    var title: String {
-        switch self {
-        case .monochrome: return "单色叶子"
-        case .green: return "绿色叶子"
-        }
-    }
-}
-
-/// A larger, native-looking battery glyph for the main status card.
-/// State priority: critical battery (<20%) > charging > Low Power Mode > normal.
-private struct MenuBarBatteryIcon: View {
-    let percent: Int?
-    let isCharging: Bool
-    let isAdapterConnected: Bool
-    let lowPowerMode: Bool?
-    var scale: CGFloat = 1
-    @Environment(\.colorScheme) private var colorScheme
-
-    private var tint: Color {
-        if let percent, percent < 20 { return .red }
-        if isCharging { return .green }
-        if lowPowerMode == true { return .yellow }
-        return .primary
-    }
-
-    var body: some View {
-        let level = max(0, min(100, percent ?? 0))
-        ZStack {
-            RoundedRectangle(cornerRadius: 3.2, style: .continuous)
-                .stroke(Color.primary.opacity(0.92), lineWidth: 1.05)
-                .frame(width: 22, height: 13)
-                .offset(x: -1.5)
-
-            RoundedRectangle(cornerRadius: 1.5, style: .continuous)
-                .fill(tint)
-                .frame(width: max(1, 17 * CGFloat(level) / 100), height: 8)
-                .offset(x: -1.5)
-
-            RoundedRectangle(cornerRadius: 1, style: .continuous)
-                .fill(Color.primary.opacity(0.92))
-                .frame(width: 2.5, height: 4.8)
-                .offset(x: 11.8)
-
-            if isCharging {
-                Image(systemName: "bolt.fill")
-                    .font(.system(size: 9, weight: .black))
-                    .foregroundStyle(.white)
-                    .shadow(color: .black.opacity(0.18), radius: 0.4)
-                    .offset(x: -1.5)
-            } else if isAdapterConnected {
-                Image(systemName: "powerplug.fill")
-                    .font(.system(size: 8, weight: .semibold))
-                    .foregroundStyle(plugContrast)
-                    .offset(x: -1.5)
-            } else if lowPowerMode == true && (percent ?? 100) >= 20 {
-                Image(systemName: "leaf.fill")
-                    .font(.system(size: 7, weight: .bold))
-                    .foregroundStyle(Color.black.opacity(0.82))
-                    .offset(x: -1.5)
-            }
-        }
-        .frame(width: 28, height: 19)
-        .scaleEffect(scale)
-        .frame(width: 28 * scale, height: 19 * scale)
-        .accessibilityElement()
-        .accessibilityLabel(accessibilityText)
-    }
-
-    private var plugContrast: Color {
-        if let percent, percent < 20 { return .white }
-        if isCharging { return .white }
-        if lowPowerMode == true { return .black }
-        return colorScheme == .dark ? .black : .white
-    }
-
-    private var accessibilityText: String {
-        let level = percent.map { "\($0) percent" } ?? "Battery level unavailable"
-        if let percent, percent < 20 { return "\(level), low battery" }
-        if isCharging { return "\(level), charging" }
-        if lowPowerMode == true { return "\(level), Low Power Mode" }
-        return level
-    }
 }
 
 /// Kept as a small view so tests render the same ring displayed in the panel.
@@ -738,14 +654,12 @@ final class ChargeManager: ObservableObject {
     @Published var isBusy = false
     @Published private(set) var isPreparingToQuit = false
     @Published var isError = false
-    @Published var lowPowerMode: Bool?
     @Published var showNativeWriteConfirmation = false
 
     private let backend: NativeFirmwareBackend
     private let autoInstallNativeHelper: Bool
     private var helperInstallAttempted = false
     private var started = false
-    private var panelVisible = false
     private var refreshTimer: Timer?
     private var limitDebounce: Task<Void, Never>?
     private var currentState: FirmwareLimitHelperStateResponse?
@@ -776,7 +690,6 @@ final class ChargeManager: ObservableObject {
     var batteryTint: Color {
         if let batteryPercent, batteryPercent < 20 { return .red }
         if batteryStateText == "正在充电" { return .green }
-        if lowPowerMode == true { return .yellow }
         return .primary
     }
 
@@ -790,9 +703,7 @@ final class ChargeManager: ObservableObject {
     }
 
     var batteryDisplayText: AppText {
-        let state = AppText(key: batteryStateText)
-        if lowPowerMode == true { return "\(state)，低电量模式" }
-        return state
+        AppText(key: batteryStateText)
     }
 
     var batteryStateSymbol: String {
@@ -804,15 +715,6 @@ final class ChargeManager: ObservableObject {
         }
     }
 
-    var menuBarSymbol: String {
-        guard let percent = batteryPercent else { return "battery.0percent" }
-        switch percent {
-        case 0..<20: return "battery.25percent"
-        case 20..<45: return "battery.50percent"
-        case 45..<70: return "battery.75percent"
-        default: return "battery.100percent"
-        }
-    }
 
     var menuBarAccessibilityText: AppText {
         let level: AppText = batteryPercent.map { value -> AppText in "电量 \(value)%" } ?? "电量未知"
@@ -846,7 +748,6 @@ final class ChargeManager: ObservableObject {
     }
 
     func setPanelVisible(_ visible: Bool) {
-        panelVisible = visible
         if visible { refresh() }
     }
 
@@ -1194,7 +1095,6 @@ final class ChargeManager: ObservableObject {
 private enum NativeControlError: LocalizedError {
     case missingBundledHelper
     case authorizationFailed(String)
-    case batteryReadFailed
 
     var errorDescription: String? {
         switch self {
@@ -1202,8 +1102,6 @@ private enum NativeControlError: LocalizedError {
             return "应用包中缺少 MauLeaf 原生固件服务文件，请重新安装预览版。"
         case .authorizationFailed(let detail):
             return detail
-        case .batteryReadFailed:
-            return "无法读取 macOS 电池状态。"
         }
     }
 }

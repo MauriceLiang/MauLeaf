@@ -1391,6 +1391,15 @@ final class ChargeManager: ObservableObject {
                 && !verifiedOneTime.pending
             let queued = verified.restorePending && !verifiedOneTime.pending
 
+            // Publish the observed pending-restore state even when normal quit
+            // is denied, so the UI accurately reports the retained snapshot
+            // instead of incorrectly showing the pre-exit state.
+            currentState = verified
+            fullOncePending = verifiedOneTime.pending
+            fullOnceCancelRequested = verifiedOneTime.cancelRequested
+            backendReady = verified.writeSupported
+            restoreReady = verified.restoreSupported
+
             // macOS users normally trash the app after quitting it. Never
             // treat "recovery queued" as the success path for an ordinary
             // quit: this may be the last chance for the app to restore its

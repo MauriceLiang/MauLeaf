@@ -510,7 +510,7 @@ struct ContentView: View {
                 }
                 .buttonStyle(.bordered)
                 .disabled(!manager.canDisableLimit)
-            } else if manager.hasOriginalStateSnapshot {
+            } else if manager.hasOriginalStateSnapshot && manager.currentState?.active == true {
                 HStack {
                     Label(manager.text("限制充电已启用"), systemImage: "checkmark.circle.fill")
                         .font(.subheadline.weight(.semibold))
@@ -527,6 +527,21 @@ struct ContentView: View {
                     manager.disableLimit()
                 } label: {
                     Label(manager.text("关闭限制充电"), systemImage: "power")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.bordered)
+                .disabled(!manager.canDisableLimit)
+            } else if manager.hasOriginalStateSnapshot {
+                Label(manager.text("原始快照仍保留，但当前限充未启用"), systemImage: "exclamationmark.triangle")
+                    .font(.subheadline.weight(.semibold))
+                Text(manager.text("当前固件状态与 MauLeaf 保存的限充状态不一致。建议恢复原始配置，避免遗留快照。"))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                Button {
+                    manager.disableLimit()
+                } label: {
+                    Label(manager.text("恢复原始配置"), systemImage: "arrow.uturn.backward")
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.bordered)
@@ -821,7 +836,7 @@ final class ChargeManager: ObservableObject {
 
     var canEnableLimit: Bool {
         backendReady && currentState != nil && currentState?.active == false
-            && !restorePending && isAdapterConnected
+            && !hasOriginalStateSnapshot && !restorePending && isAdapterConnected
             && !isBusy && !isPreparingToQuit && !fullOncePending
     }
 

@@ -1,48 +1,56 @@
-# MauLeaf privileged firmware helper — P3
+# MauLeaf privileged native firmware helper
 
-## Scope
+## Purpose
 
-This stage adds a small, on-demand LaunchDaemon and XPC boundary for the native firmware-limit subsystem.
+The helper is the only process allowed to perform AppleSMC firmware writes. It is built from this repository and bundled inside:
 
-The helper currently exports only two read-only operations:
+`MauLeaf.app/Contents/Resources/MauLeafNativeControl/`
 
-- \`readState\`: read \`bfF0\`, \`bfD0\`, and \`bfE0\`, then return the observed state.
-- \`makePlan\`: validate a requested 50–95% upper threshold and return the ordered transaction plan without executing it.
+It runs as root through the LaunchDaemon `com.local.chargecap.firmware-helper`. The XPC client accepts only the code-signing identifier `com.local.chargecap`.
 
-There is intentionally no XPC method for applying, activating, or deactivating a firmware limit.
+## Installation
 
-## Process model
+On first app launch, MauLeaf checks the native helper connection. If the service is missing or an older read-only helper is installed, the app runs the bundled installer with one administrator authorization prompt. The old “install control component” panel is not part of the UI.
 
-- Launchd owns the Mach service \`com.local.chargecap.firmware-helper\`.
-- The helper runs as root from \`/Library/PrivilegedHelperTools\`.
-- Only a client whose code-signing identifier is \`com.local.chargecap\` is accepted.
-- The client uses one XPC connection per request.
-- When the last client disconnects, the helper exits after 20 seconds; launchd starts it again on the next request.
-- The app does not yet connect to this helper, and the existing charging UI/backend are unchanged.
+The installer validates the helper's code-signing identifier and existing LaunchDaemon metadata. It upgrades only an existing helper whose label, path, and signing identifier all match MauLeaf; unrelated same-name services are not overwritten.
 
-## Install / uninstall
+## XPC surface
 
-After downloading and extracting the helper artifact, run:
+The helper exports only the operations required by MauLeaf:
 
-~~~bash
-sudo ./install-native-firmware-helper.sh
-~~~
+- `readState`: read and validate `bfF0`, `bfD0`, and `bfE0`.
+- `makePlan`: return the transaction plan without writing.
+- `applyLimit`: apply an explicit upper/lower pair after target, AC-power and confirmation checks.
+- `beginOneTimeCharge`: persist the restore job, then deactivate the current limit.
+- `cancelOneTimeCharge`: persist cancellation and restore when AC power is available.
+- `oneTimeChargeStatus`: report whether a restore job is pending.
 
-To remove this read-only helper:
+There is no arbitrary key/value write API.
 
-~~~bash
-sudo ./uninstall-native-firmware-helper.sh
-~~~
+## Persistent one-time restore
 
-These scripts refuse to overwrite an existing helper and validate the launchd label before removal.
+The helper stores the restore job at:
 
-## Safety boundary
+`/Library/Application Support/MauLeaf/one-time-charge.json`
 
-- The helper has no exported write operation.
-- The XPC protocol contains no generic SMC-key write method.
-- The current app UI cannot trigger firmware writes.
-- The helper's status and plan methods are read-only.
-- The firmware transaction engine remains separately guarded by the exact device/firmware, administrator, AC-power, controller-conflict, and explicit-confirmation permit.
-- No helper was installed or run on the user's Mac as part of this change.
+The file is root-owned with mode 0600. The LaunchDaemon uses PathState on this file to remain alive while a task is pending and restart after a crash or reboot. The helper polls battery state every 20 seconds, restores at 100%, on cancellation, or at the 10-hour deadline, and waits for AC power before performing the restore write.
 
-The helper is deliberately a read-only integration milestone. Do not add a mutating XPC method or connect a UI action to \`FirmwareLimitController.configure\` until real write/read-back and charging-enforcement behavior have been verified on the target MacBookPro18,1 while connected to AC power.
+If telemetry is unavailable while AC is connected, the helper restores the saved limit rather than leaving the limit disabled. If restore fails, it retains the job and retries.
+
+## Uninstallation
+
+Run the bundled script as administrator:
+
+```bash
+sudo "/Applications/MauLeaf.app/Contents/Resources/MauLeafNativeControl/uninstall-native-firmware-helper.sh"
+```
+
+The script refuses to remove the service while a one-time restore job remains. It removes only the MauLeaf LaunchDaemon and helper and does not rewrite the current firmware setting.
+
+## Safety and validation
+
+- The helper checks the exact target identity and AC power immediately before each write.
+- Each SMC write is read back and verified.
+- Transactions are serialized and guarded by a watchdog.
+- CI uses an in-memory fake transport only. No hardware writes occur in automated tests.
+- Actual charge-stop and resume behavior on the target M1 Pro remains to be observed on AC power.

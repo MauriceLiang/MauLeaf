@@ -6,49 +6,46 @@ trap 'rm -rf "$TMP"' EXIT
 cp -R "$ROOT/Resources/en.lproj" "$ROOT/Resources/zh-Hans.lproj" "$TMP/"
 export CLANG_MODULE_CACHE_PATH="${CLANG_MODULE_CACHE_PATH:-$TMP/ModuleCache}"
 export SWIFT_MODULECACHE_PATH="${SWIFT_MODULECACHE_PATH:-$TMP/ModuleCache}"
-swiftc "$ROOT/Sources/ChargeModeCore.swift" "$ROOT/Sources/AppLocalization.swift" "$ROOT/Sources/ChargeModeCoreTests.swift" -o "$TMP/coretests"
-"$TMP/coretests"
+
+swiftc "$ROOT/Sources/BatteryStatusReader.swift" "$ROOT/tests/BatteryStatusReaderTests.swift" -o "$TMP/batterystatusreadertests"
+"$TMP/batterystatusreadertests"
+
 swiftc "$ROOT/Sources/FirmwareLimitCore.swift" "$ROOT/tests/FirmwareLimitCoreTests.swift" -o "$TMP/firmwarelimitcoretests"
 "$TMP/firmwarelimitcoretests"
-swiftc "$ROOT/Sources/ChargeModeCore.swift" "$ROOT/Sources/AppLocalization.swift" \
-    "$ROOT/Sources/FirmwareLimitCore.swift" "$ROOT/Sources/FirmwareLimitPolicyAdapter.swift" "$ROOT/tests/FirmwareLimitPolicyAdapterTests.swift" \
-    -o "$TMP/firmwarepolicytests"
-swiftc "$ROOT/Sources/ChargeModeCore.swift" "$ROOT/Sources/AppLocalization.swift" \
-    "$ROOT/Sources/FirmwareLimitCore.swift" "$ROOT/Sources/FirmwareLimitPolicyAdapter.swift" \
-    "$ROOT/Sources/FirmwareLimitReconciliation.swift" "$ROOT/tests/FirmwareLimitReconciliationTests.swift" \
-    -o "$TMP/firmwarereconciliationtests"
+
+swiftc "$ROOT/Sources/FirmwareLimitCore.swift" "$ROOT/Sources/FirmwareLimitReconciliation.swift" \
+    "$ROOT/tests/FirmwareLimitReconciliationTests.swift" -o "$TMP/firmwarereconciliationtests"
 "$TMP/firmwarereconciliationtests"
-"$TMP/firmwarepolicytests"
-swiftc -parse-as-library "$ROOT/Sources/ChargeModeCore.swift" "$ROOT/Sources/AppLocalization.swift" \
+
+swiftc -parse-as-library "$ROOT/Sources/AppLocalization.swift" \
     "$ROOT/tests/LocalizationTests.swift" -o "$TMP/localizationtests"
 "$TMP/localizationtests"
-swiftc "$ROOT/Sources/ChargeModeCore.swift" "$ROOT/Sources/AppLocalization.swift" "$ROOT/Sources/DischargeControl.swift" \
-    "$ROOT/tests/DischargeControlTests.swift" -o "$TMP/dischargetests"
-"$TMP/dischargetests"
+
 if [[ "$(uname -s)" == Darwin ]]; then
     swiftc -parse-as-library -framework IOKit -framework Security \
-        "$ROOT/Sources/FirmwareLimitCore.swift" "$ROOT/Sources/FirmwareLimitSMCTransport.swift" \
-        "$ROOT/Sources/FirmwareLimitHelperProtocol.swift" "$ROOT/Sources/FirmwareLimitHelperService.swift" \
-        "$ROOT/Sources/FirmwareLimitHelperClient.swift" "$ROOT/tests/FirmwareLimitHelperServiceTests.swift" \
+        "$ROOT/Sources/BatteryStatusReader.swift" "$ROOT/Sources/FirmwareLimitCore.swift" \
+        "$ROOT/Sources/FirmwareLimitReconciliation.swift" \
+        "$ROOT/Sources/FirmwareLimitRuntime.swift" \
+        "$ROOT/Sources/FirmwareLimitSMCTransport.swift" \
+        "$ROOT/Sources/FirmwareLimitHelperProtocol.swift" \
+        "$ROOT/Sources/FirmwareLimitHelperService.swift" \
+        "$ROOT/tests/FirmwareLimitHelperServiceTests.swift" \
         -o "$TMP/firmwarehelpertests"
     "$TMP/firmwarehelpertests"
-    swiftc -parse-as-library -emit-module -emit-library -module-name MauLeafFirmwareLimit \
-        -framework IOKit "$ROOT/Sources/FirmwareLimitCore.swift" "$ROOT/Sources/FirmwareLimitSMCTransport.swift" \
-        -emit-module-path "$TMP/MauLeafFirmwareLimit.swiftmodule" -o "$TMP/libMauLeafFirmwareLimit.dylib"
+
+    swiftc -parse-as-library -D MAULEAF_TESTING \
+        -framework SwiftUI -framework AppKit -framework Combine \
+        "$ROOT/Sources/MauLeaf.swift" "$ROOT/Sources/AppLocalization.swift" \
+        "$ROOT/Sources/BatteryStatusReader.swift" "$ROOT/Sources/FirmwareLimitCore.swift" "$ROOT/Sources/FirmwareLimitHelperProtocol.swift" \
+        "$ROOT/Sources/FirmwareLimitHelperClient.swift" \
+        "$ROOT/tests/NativeFirmwareBackendFixture.swift" "$ROOT/tests/ChargeManagerTests.swift" \
+        -o "$TMP/managertests"
+    "$TMP/managertests"
+
     swift "$ROOT/Scripts/GenerateAppIcon.swift" "$ROOT/Assets/MauLeafIcon-1024.png" "$TMP/AppIcon.iconset"
     swiftc -parse-as-library "$ROOT/tests/AppIconTests.swift" -o "$TMP/appicontests"
     "$TMP/appicontests" "$TMP/AppIcon.iconset"
-    swiftc -parse-as-library -framework ServiceManagement "$ROOT/Sources/ChargeModeCore.swift" "$ROOT/Sources/AppLocalization.swift" \
-        "$ROOT/Sources/LoginItemSettings.swift" "$ROOT/tests/LoginItemSettingsTests.swift" -o "$TMP/loginitemtests"
-    "$TMP/loginitemtests"
-    swiftc -parse-as-library -D MAULEAF_TESTING \
-        "$ROOT/Sources/MauLeaf.swift" "$ROOT/Sources/ChargeModeCore.swift" "$ROOT/Sources/AppLocalization.swift" \
-        "$ROOT/Sources/DischargeControl.swift" "$ROOT/Sources/PowerRefreshController.swift" "$ROOT/Sources/LoginItemSettings.swift" \
-        "$ROOT/tests/ChargeManagerTests.swift" -o "$TMP/managertests"
-    "$TMP/managertests"
-    swiftc -parse-as-library "$ROOT/Sources/ChargeModeCore.swift" "$ROOT/Sources/AppLocalization.swift" "$ROOT/Sources/PowerRefreshController.swift" \
-        "$ROOT/tests/PowerRefreshTests.swift" -o "$TMP/powertests"
-    "$TMP/powertests"
+
     LAYOUT_APP="$TMP/LayoutTests.app"
     mkdir -p "$LAYOUT_APP/Contents/MacOS" "$LAYOUT_APP/Contents/Resources"
     cp -R "$ROOT/Resources/en.lproj" "$ROOT/Resources/zh-Hans.lproj" "$LAYOUT_APP/Contents/Resources/"
@@ -57,16 +54,39 @@ if [[ "$(uname -s)" == Darwin ]]; then
 <?xml version="1.0" encoding="UTF-8"?><plist version="1.0"><dict><key>CFBundleIdentifier</key><string>dev.mauriceliang.MauLeafLayoutTests</string><key>CFBundleExecutable</key><string>layouttests</string><key>CFBundlePackageType</key><string>APPL</string></dict></plist>
 PLIST
     swiftc -parse-as-library -D MAULEAF_TESTING -D MAULEAF_LAYOUT_TESTING \
-        "$ROOT/Sources/MauLeaf.swift" "$ROOT/Sources/ChargeModeCore.swift" "$ROOT/Sources/AppLocalization.swift" \
-        "$ROOT/Sources/DischargeControl.swift" "$ROOT/Sources/PowerRefreshController.swift" "$ROOT/Sources/LoginItemSettings.swift" \
-        "$ROOT/tests/ChargeManagerTests.swift" "$ROOT/tests/FeedbackLayoutTests.swift" "$ROOT/tests/BatteryRingRenderingTests.swift" -o "$LAYOUT_APP/Contents/MacOS/layouttests"
+        -framework SwiftUI -framework AppKit -framework Combine \
+        "$ROOT/Sources/MauLeaf.swift" "$ROOT/Sources/AppLocalization.swift" \
+        "$ROOT/Sources/BatteryStatusReader.swift" "$ROOT/Sources/FirmwareLimitCore.swift" "$ROOT/Sources/FirmwareLimitHelperProtocol.swift" \
+        "$ROOT/Sources/FirmwareLimitHelperClient.swift" \
+        "$ROOT/tests/NativeFirmwareBackendFixture.swift" "$ROOT/tests/FeedbackLayoutTests.swift" \
+        "$ROOT/tests/BatteryRingRenderingTests.swift" -o "$LAYOUT_APP/Contents/MacOS/layouttests"
     "$LAYOUT_APP/Contents/MacOS/layouttests" "$ROOT/build/ui-verification"
 fi
-swiftc -frontend -parse "$ROOT/Sources/MauLeaf.swift" "$ROOT/Sources/OnceChargeAgent.swift" "$ROOT/Sources/MauLeafOnceHelper.swift" "$ROOT/Sources/UninstallMauLeaf.swift" "$ROOT/Sources/DischargeControl.swift" "$ROOT/Sources/DischargeAgent.swift" "$ROOT/Sources/PowerRefreshController.swift" "$ROOT/Sources/LoginItemSettings.swift"
-if grep -Eq 'private var (powerSection|menuBarIconStyleSection|loginItemSection|highChargeSection|chargeModeSection)' "$ROOT/Sources/MauLeaf.swift"; then
-    echo "Removed UI sections must not return to the minimal preview" >&2
+
+swiftc -frontend -parse \
+    "$ROOT/Sources/MauLeaf.swift" "$ROOT/Sources/AppLocalization.swift" \
+    "$ROOT/Sources/BatteryStatusReader.swift" "$ROOT/Sources/FirmwareLimitCore.swift" "$ROOT/Sources/FirmwareLimitReconciliation.swift" \
+    "$ROOT/Sources/FirmwareLimitRuntime.swift" "$ROOT/Sources/FirmwareLimitSMCTransport.swift" \
+    "$ROOT/Sources/FirmwareLimitHelperProtocol.swift" "$ROOT/Sources/FirmwareLimitHelperClient.swift" \
+    "$ROOT/Sources/FirmwareLimitHelperService.swift" "$ROOT/Sources/FirmwareLimitHelperMain.swift"
+
+if grep -RniE 'BattCommand|BattStatus|invokeBatt|locateBatt|batt-version|BATT-LICENSE|/usr/local/bin/batt|batt-v0\\.8' \
+    "$ROOT/Sources" "$ROOT/Scripts/ci/package-macos.sh" \
+    "$ROOT/Scripts/install-native-firmware-helper.sh" \
+    "$ROOT/Scripts/uninstall-native-firmware-helper.sh" \
+    "$ROOT/.github/workflows/build-release.yml" "$ROOT/Support"; then
+    echo "Legacy batt backend references must not ship in the native-only preview" >&2
+    exit 1
+fi
+if grep -Eq 'componentSetupSection|installBackend|uninstallBackend' "$ROOT/Sources/MauLeaf.swift"; then
+    echo "The legacy component installer UI must not return" >&2
     exit 1
 fi
 grep -Fq '@Published private(set) var menuBarLeafStyle: MenuBarLeafStyle = .green' "$ROOT/Sources/MauLeaf.swift"
 bash -n "$ROOT/Scripts/ci/package-macos.sh"
-echo "Source parsing and build script checks passed"
+bash -n "$ROOT/Scripts/install-native-firmware-helper.sh"
+bash -n "$ROOT/Scripts/uninstall-native-firmware-helper.sh"
+if [[ "$(uname -s)" == Darwin ]]; then
+    plutil -lint "$ROOT/Support/com.local.chargecap.firmware-helper.plist"
+fi
+echo "Native-only source parsing, tests and packaging checks passed"

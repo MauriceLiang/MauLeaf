@@ -4,21 +4,27 @@ import SwiftUI
 @main
 struct FeedbackLayoutTests {
     @MainActor
-    static func main() throws {
+    static func main() async throws {
         _ = NSApplication.shared
         NSApp.setActivationPolicy(.prohibited)
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent("mauleaf-layout-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: directory) }
-        let binary = directory.appendingPathComponent("batt")
-        try "#!/bin/sh\necho 'Upper limit: 80%'\necho 'Use power adapter: true'\necho 'Power adapter control: false'\n"
-            .write(to: binary, atomically: true, encoding: .utf8)
-        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: binary.path)
-        DischargeAgent.monitor = DischargeMonitor(directory: directory)
+
         UserDefaults.standard.set(80, forKey: "chargeLimit")
-        UserDefaults.standard.set("limited", forKey: "chargeModeV5")
-        UserDefaults.standard.set("discharge", forKey: "highChargePolicy")
-        UserDefaults.standard.set(false, forKey: "chargeControlReleasedOnQuit")
+        UserDefaults.standard.set(true, forKey: "nativeFirmwareWriteConfirmed")
+        let backend = FixtureNativeFirmwareBackend()
+        let manager = ChargeManager(backend: backend, autoInstallNativeHelper: false)
+        manager.start()
+        try await wait { manager.backendReady }
+        manager.isAdapterConnected = true
+        manager.batteryPercent = 80
+        manager.requestLimit(80, immediate: true)
+        try await wait { backend.applyCount == 1 && !manager.isBusy }
+
+        guard manager.menuBarLeafStyle == .green else {
+            fatalError("The menu-bar leaf must remain fixed to green.")
+        }
         guard let leafURL = Bundle.main.url(forResource: "MenuBarLeafTemplate", withExtension: "png"),
               let leaf = NSImage(contentsOf: leafURL), leaf.isValid else {
             fatalError("The actual brand leaf template must be bundled for UI tests")
@@ -28,25 +34,10 @@ struct FeedbackLayoutTests {
         guard try Data(contentsOf: leafURL) == Data(contentsOf: sourceLeaf) else {
             fatalError("Bundled leaf must match the canonical brand template")
         }
+
         let renderOutput = URL(fileURLWithPath: CommandLine.arguments[1], isDirectory: true)
         try verifyBatteryRingRendering(outputDirectory: renderOutput)
-        let manager = ChargeManager(battPath: binary.path)
-        guard manager.menuBarLeafStyle == .green else {
-            fatalError("The menu-bar leaf must default to green without a style preference.")
-        }
-        guard manager.highChargePolicy == .adapter else {
-            fatalError("Legacy active-discharge preferences must migrate to adapter power.")
-        }
-        manager.start()
-        manager.requestLimit(80, immediate: true)
-        let deadline = Date().addingTimeInterval(3)
-        while manager.autoApplyFeedback.source != "已自动应用 80%", Date() < deadline {
-            RunLoop.main.run(until: Date().addingTimeInterval(0.01))
-        }
-        guard manager.autoApplyFeedback.source == "已自动应用 80%" else {
-            fputs("FAIL: fixture limit operation did not complete\n", stderr)
-            exit(1)
-        }
+
         for language in AppLanguage.allCases {
             manager.language = language
             manager.isBusy = false
@@ -54,7 +45,9 @@ struct FeedbackLayoutTests {
             manager.statusMessage = ""
             let host = NSHostingView(rootView: ContentView(manager: manager).frame(width: 360))
             let overlay = NSHostingView(rootView: ContentView(manager: manager).frame(width: 360)
-                .overlay(alignment: .bottom) { OperationFeedbackView(manager: manager).padding(.horizontal, 16).padding(.bottom, 44) }
+                .overlay(alignment: .bottom) {
+                    OperationFeedbackView(manager: manager).padding(.horizontal, 16).padding(.bottom, 44)
+                }
                 .environment(\.colorScheme, .dark))
             let toast = NSHostingView(rootView: OperationFeedbackView(manager: manager).frame(width: 328))
 
@@ -67,15 +60,15 @@ struct FeedbackLayoutTests {
             }
             let normal = measure()
             let normalToastHeight = toast.fittingSize.height
-            manager.statusMessage = "正在应用充电上限 \(85)%…"
+            manager.statusMessage = "正在写入原生固件充电上限 85%…"
             manager.isBusy = true
             let busy = measure()
             let busyToastHeight = toast.fittingSize.height
             manager.isBusy = false
             manager.isError = true
             manager.statusMessage = AppText(verbatim: String(repeating: language == .english
-                ? "The control command failed. Check the service and retry. "
-                : "控制程序执行失败，请检查服务后重试。", count: 12))
+                ? "The native firmware write failed. Check AC power and retry. "
+                : "原生固件写入失败，请检查电源和设备状态后重试。", count: 12))
             manager.autoApplyFeedback = manager.statusMessage
             let failure = measure()
             let failureToastHeight = toast.fittingSize.height
@@ -87,7 +80,19 @@ struct FeedbackLayoutTests {
                 fputs("FAIL: feedback layout: normal=\(normal), busy=\(busy), failure=\(failure); toast heights=\(normalToastHeight), \(busyToastHeight), \(failureToastHeight)\n", stderr)
                 exit(1)
             }
-            print("FeedbackLayoutTests: PASS (\(language.rawValue); content and overlay height \(normal.0) pt unchanged in normal, busy and long-error states; offscreen views)")
+            print("FeedbackLayoutTests: PASS (\(language.rawValue); content and overlay height \(normal.0) pt unchanged)")
         }
+        _ = await manager.prepareForTermination()
+        UserDefaults.standard.removeObject(forKey: "nativeFirmwareWriteConfirmed")
+    }
+
+    @MainActor
+    static func wait(_ predicate: () -> Bool) async throws {
+        for _ in 0..<300 {
+            if predicate() { return }
+            try await Task.sleep(nanoseconds: 10_000_000)
+        }
+        throw NSError(domain: "FeedbackLayoutTests", code: 1,
+                      userInfo: [NSLocalizedDescriptionKey: "Timed out waiting for fixture backend"])
     }
 }

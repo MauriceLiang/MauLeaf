@@ -1,5 +1,13 @@
 import Foundation
 
+protocol NativeFirmwareBackend {
+    func readState() async throws -> FirmwareLimitHelperStateResponse
+    func applyLimit(upper: Int, lower: Int, confirmed: Bool) async throws -> FirmwareLimitHelperOperationResponse
+    func beginOneTimeCharge(upper: Int, lower: Int, confirmed: Bool) async throws -> FirmwareLimitHelperOperationResponse
+    func cancelOneTimeCharge() async throws -> FirmwareLimitHelperOperationResponse
+    func oneTimeChargeStatus() async throws -> FirmwareLimitHelperOneTimeStatusResponse
+}
+
 enum FirmwareLimitHelperClientError: Error, LocalizedError {
     case connectionInvalidated
     case serviceUnavailable
@@ -9,30 +17,40 @@ enum FirmwareLimitHelperClientError: Error, LocalizedError {
 
     var errorDescription: String? {
         switch self {
-        case .connectionInvalidated: return "The privileged firmware helper connection was invalidated."
-        case .serviceUnavailable: return "The privileged firmware helper is unavailable."
-        case .missingResponse: return "The privileged firmware helper returned no response."
-        case .timedOut: return "The privileged firmware helper did not respond before the timeout."
+        case .connectionInvalidated: return "The native firmware helper connection was invalidated."
+        case .serviceUnavailable: return "The native firmware helper is unavailable."
+        case .missingResponse: return "The native firmware helper returned no response."
+        case .timedOut: return "The native firmware helper did not respond before the timeout."
         case .remote(let message): return message
         }
     }
 }
 
-/// Small, one-request-per-connection XPC client. The service exits after its
-/// last client disconnects, keeping its background memory footprint bounded.
-final class FirmwareLimitHelperClient {
+final class FirmwareLimitHelperClient: NativeFirmwareBackend {
     private let serviceName = "com.local.chargecap.firmware-helper"
 
     func readState() async throws -> FirmwareLimitHelperStateResponse {
+        try await request { proxy, reply in proxy.readState(withReply: reply) }
+    }
+
+    func applyLimit(upper: Int, lower: Int, confirmed: Bool) async throws -> FirmwareLimitHelperOperationResponse {
         try await request { proxy, reply in
-            proxy.readState(withReply: reply)
+            proxy.applyLimit(upper: upper, lower: lower, confirmed: confirmed, withReply: reply)
         }
     }
 
-    func makePlan(upper: Int, lower: Int) async throws -> FirmwareLimitHelperPlanResponse {
+    func beginOneTimeCharge(upper: Int, lower: Int, confirmed: Bool) async throws -> FirmwareLimitHelperOperationResponse {
         try await request { proxy, reply in
-            proxy.makePlan(upper: upper, lower: lower, withReply: reply)
+            proxy.beginOneTimeCharge(upper: upper, lower: lower, confirmed: confirmed, withReply: reply)
         }
+    }
+
+    func cancelOneTimeCharge() async throws -> FirmwareLimitHelperOperationResponse {
+        try await request { proxy, reply in proxy.cancelOneTimeCharge(withReply: reply) }
+    }
+
+    func oneTimeChargeStatus() async throws -> FirmwareLimitHelperOneTimeStatusResponse {
+        try await request { proxy, reply in proxy.oneTimeChargeStatus(withReply: reply) }
     }
 
     private func request<Response: Decodable>(
@@ -58,8 +76,8 @@ final class FirmwareLimitHelperClient {
                 connectionBox.connection.invalidate()
             }
 
-            let proxyObject = connection.remoteObjectProxyWithErrorHandler { error in
-                delivery.deliver(.failure(error))
+            let proxyObject = connection.remoteObjectProxyWithErrorHandler { _ in
+                delivery.deliver(.failure(FirmwareLimitHelperClientError.serviceUnavailable))
                 connection.invalidate()
             }
             guard let proxy = proxyObject as? FirmwareLimitHelperProtocol else {
@@ -114,11 +132,7 @@ private final class FirmwareLimitXPCDelivery<Value>: @unchecked Sendable {
     }
 }
 
-
 private final class FirmwareLimitXPCConnectionBox: @unchecked Sendable {
     let connection: NSXPCConnection
-
-    init(_ connection: NSXPCConnection) {
-        self.connection = connection
-    }
+    init(_ connection: NSXPCConnection) { self.connection = connection }
 }

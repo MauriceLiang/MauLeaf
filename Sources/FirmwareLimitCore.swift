@@ -45,8 +45,6 @@ struct FirmwareLimitDeviceIdentity: Equatable {
 struct FirmwareLimitWriteContext: Equatable {
     let isAdministrator: Bool
     let isOnACPower: Bool
-    let mauLeafRunning: Bool
-    let battRunning: Bool
     let userConfirmed: Bool
 }
 
@@ -55,30 +53,34 @@ struct FirmwareLimitWriteContext: Equatable {
 struct FirmwareLimitWritePermit {
     private init() {}
 
+    static func targetBlockReason(identity: FirmwareLimitDeviceIdentity) -> String? {
+        guard identity.modelIdentifier == "MacBookPro18,1" else {
+            return "Expected MacBookPro18,1; found \(identity.modelIdentifier)."
+        }
+        guard identity.systemFirmware == "mBoot-20457.41.3" else {
+            return "Unverified system firmware: \(identity.systemFirmware)."
+        }
+        guard identity.macOSMajorVersion == 15 else {
+            return "Expected macOS 15; found macOS \(identity.macOSMajorVersion)."
+        }
+        guard identity.architecture == "arm64" else {
+            return "Expected arm64; found \(identity.architecture)."
+        }
+        return nil
+    }
+
     static func authorize(
         identity: FirmwareLimitDeviceIdentity,
         context: FirmwareLimitWriteContext
     ) throws -> FirmwareLimitWritePermit {
-        guard identity.modelIdentifier == "MacBookPro18,1" else {
-            throw FirmwareLimitCoreError.unsupportedTarget("Expected MacBookPro18,1; found \(identity.modelIdentifier).")
-        }
-        guard identity.systemFirmware == "mBoot-20457.41.3" else {
-            throw FirmwareLimitCoreError.unsupportedTarget("Unverified system firmware: \(identity.systemFirmware).")
-        }
-        guard identity.macOSMajorVersion == 15 else {
-            throw FirmwareLimitCoreError.unsupportedTarget("Expected macOS 15; found macOS \(identity.macOSMajorVersion).")
-        }
-        guard identity.architecture == "arm64" else {
-            throw FirmwareLimitCoreError.unsupportedTarget("Expected arm64; found \(identity.architecture).")
+        if let reason = targetBlockReason(identity: identity) {
+            throw FirmwareLimitCoreError.unsupportedTarget(reason)
         }
         guard context.isAdministrator else {
             throw FirmwareLimitCoreError.administratorRequired
         }
         guard context.isOnACPower else {
             throw FirmwareLimitCoreError.externalPowerRequired
-        }
-        guard !context.mauLeafRunning, !context.battRunning else {
-            throw FirmwareLimitCoreError.controllerConflict
         }
         guard context.userConfirmed else {
             throw FirmwareLimitCoreError.confirmationRequired
@@ -144,7 +146,6 @@ enum FirmwareLimitCoreError: Error, Equatable, LocalizedError {
     case unsupportedTarget(String)
     case administratorRequired
     case externalPowerRequired
-    case controllerConflict
     case confirmationRequired
     case invalidRequestedBand(upper: Int, lower: Int)
     case unexpectedKeyShape(key: String, size: Int, type: String)
@@ -160,7 +161,6 @@ enum FirmwareLimitCoreError: Error, Equatable, LocalizedError {
         case .unsupportedTarget(let reason): return reason
         case .administratorRequired: return "Administrator privileges are required."
         case .externalPowerRequired: return "Connect the Mac to AC power before changing firmware charging settings."
-        case .controllerConflict: return "Quit MauLeaf and stop batt before changing firmware charging settings."
         case .confirmationRequired: return "The explicit hardware-write confirmation was not provided."
         case .invalidRequestedBand(let upper, let lower):
             return "Invalid requested charge band: upper \(upper)%, lower \(lower)%."

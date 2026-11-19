@@ -118,8 +118,6 @@ private enum FirmwareLimitCoreTests {
             context: FirmwareLimitWriteContext(
                 isAdministrator: true,
                 isOnACPower: true,
-                mauLeafRunning: false,
-                battRunning: false,
                 userConfirmed: true
             )
         )
@@ -212,7 +210,7 @@ private enum FirmwareLimitCoreTests {
         )
         let base = FirmwareLimitWriteContext(
             isAdministrator: true, isOnACPower: true,
-            mauLeafRunning: false, battRunning: false, userConfirmed: true
+            userConfirmed: true
         )
         _ = try FirmwareLimitWritePermit.authorize(identity: identity, context: base)
         expectThrows({
@@ -220,7 +218,7 @@ private enum FirmwareLimitCoreTests {
                 identity: identity,
                 context: FirmwareLimitWriteContext(
                     isAdministrator: true, isOnACPower: false,
-                    mauLeafRunning: false, battRunning: false, userConfirmed: true
+                    userConfirmed: true
                 )
             )
         }, "no AC power blocks write authorization")
@@ -228,26 +226,8 @@ private enum FirmwareLimitCoreTests {
             _ = try FirmwareLimitWritePermit.authorize(
                 identity: identity,
                 context: FirmwareLimitWriteContext(
-                    isAdministrator: true, isOnACPower: true,
-                    mauLeafRunning: true, battRunning: false, userConfirmed: true
-                )
-            )
-        }, "running MauLeaf blocks write authorization")
-        expectThrows({
-            _ = try FirmwareLimitWritePermit.authorize(
-                identity: identity,
-                context: FirmwareLimitWriteContext(
-                    isAdministrator: true, isOnACPower: true,
-                    mauLeafRunning: false, battRunning: true, userConfirmed: true
-                )
-            )
-        }, "running batt blocks write authorization")
-        expectThrows({
-            _ = try FirmwareLimitWritePermit.authorize(
-                identity: identity,
-                context: FirmwareLimitWriteContext(
                     isAdministrator: false, isOnACPower: true,
-                    mauLeafRunning: false, battRunning: false, userConfirmed: true
+                    userConfirmed: true
                 )
             )
         }, "non-administrator blocks write authorization")
@@ -256,7 +236,7 @@ private enum FirmwareLimitCoreTests {
                 identity: identity,
                 context: FirmwareLimitWriteContext(
                     isAdministrator: true, isOnACPower: true,
-                    mauLeafRunning: false, battRunning: false, userConfirmed: false
+                    userConfirmed: false
                 )
             )
         }, "missing typed confirmation blocks write authorization")

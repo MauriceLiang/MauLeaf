@@ -1,45 +1,5 @@
 import Foundation
 
-enum FirmwareLimitReconciliationAction: Equatable {
-    case noChange
-    case configure(FirmwareLimitRequest)
-    case deactivate
-    case unsupported(String)
-}
-
-/// Reconciles the observed firmware registers with the action selected by
-/// MauLeaf settings. Safe to run after app launch or wake because it is pure.
-enum FirmwareLimitReconciliationPolicy {
-    static func action(
-        for desired: FirmwareLimitPolicyAction,
-        observed: FirmwareLimitState
-    ) -> FirmwareLimitReconciliationAction {
-        switch desired {
-        case .configure(let request):
-            if observed.isActive,
-               observed.upper == request.upper,
-               observed.lower == request.lower {
-                return .noChange
-            }
-            return .configure(request)
-
-        case .configureAndEnableAdapterCut:
-            return .unsupported("Adapter-cut semantics have not been validated on this hardware.")
-
-        case .deactivate:
-            return observed.isActive ? .deactivate : .noChange
-
-        case .oneTimeFullCharge:
-            // The one-time coordinator owns the restore job. During the
-            // temporary full-charge window the firmware limit should be off.
-            return observed.isActive ? .deactivate : .noChange
-
-        case .unsupported(let reason):
-            return .unsupported(reason)
-        }
-    }
-}
-
 enum FirmwareLimitOnceJobError: Error, LocalizedError {
     case invalidMetadata
 
@@ -53,8 +13,14 @@ struct FirmwareLimitOnceJob: Codable, Equatable {
     let restoreUpper: Int
     let restoreLower: Int
     let deadlineUnixSeconds: Double
+    var cancelRequested: Bool
 
-    init(jobID: String, restore: FirmwareLimitRequest, deadline: Date) throws {
+    init(
+        jobID: String,
+        restore: FirmwareLimitRequest,
+        deadline: Date,
+        cancelRequested: Bool = false
+    ) throws {
         guard !jobID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
               deadline.timeIntervalSince1970.isFinite else {
             throw FirmwareLimitOnceJobError.invalidMetadata
@@ -63,6 +29,7 @@ struct FirmwareLimitOnceJob: Codable, Equatable {
         restoreUpper = restore.upper
         restoreLower = restore.lower
         deadlineUnixSeconds = deadline.timeIntervalSince1970
+        self.cancelRequested = cancelRequested
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -70,6 +37,7 @@ struct FirmwareLimitOnceJob: Codable, Equatable {
         case restoreUpper
         case restoreLower
         case deadlineUnixSeconds
+        case cancelRequested
     }
 
     init(from decoder: Decoder) throws {
@@ -87,6 +55,7 @@ struct FirmwareLimitOnceJob: Codable, Equatable {
         restoreUpper = upper
         restoreLower = lower
         deadlineUnixSeconds = deadline
+        cancelRequested = try container.decodeIfPresent(Bool.self, forKey: .cancelRequested) ?? false
     }
 
     var restoreRequest: FirmwareLimitRequest? {
@@ -118,9 +87,8 @@ enum FirmwareLimitOnceDecision: Equatable {
     case waitForAC(FirmwareLimitOnceRestoreReason)
 }
 
-/// Pure state machine for the existing "charge to 100% once" setting.
-/// The caller persists the job and invokes this policy after battery refresh,
-/// wake, app relaunch, or cancellation.
+/// Pure state machine used by the privileged helper after battery refresh,
+/// wake, relaunch, cancellation, and the 10-hour safety deadline.
 enum FirmwareLimitOneTimeChargeCoordinator {
     static func decision(
         job: FirmwareLimitOnceJob,
@@ -129,7 +97,7 @@ enum FirmwareLimitOneTimeChargeCoordinator {
         cancelRequested: Bool = false
     ) -> FirmwareLimitOnceDecision {
         let terminalReason: FirmwareLimitOnceRestoreReason?
-        if cancelRequested {
+        if cancelRequested || job.cancelRequested {
             terminalReason = .cancelled
         } else if job.isExpired(at: now) {
             terminalReason = .deadlineExpired

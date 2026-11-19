@@ -66,15 +66,6 @@ struct AppText: ExpressibleByStringLiteral, ExpressibleByStringInterpolation, Ha
     }
 
     init(error: Error) {
-        guard let charging = error as? ChargingError else {
-            self.init(key: error.localizedDescription)
-            return
-        }
-        switch charging {
-        case .notInstalled: self = "找不到 batt 控制程序"
-        case .command(let detail): self = "batt 执行失败：\(AppText(verbatim: detail.trimmingCharacters(in: .whitespacesAndNewlines)))"
-        case .verification(let detail): self = "状态校验失败：\(detail)"
-        case .helper(let detail): self = "后台恢复服务不可用：\(detail)"
-        }
+        self.init(key: error.localizedDescription)
     }
 }

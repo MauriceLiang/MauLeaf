@@ -18,9 +18,15 @@
         <true/>
     </dict>
     <key>RunAtLoad</key>
-    <false/>
+    <true/>
     <key>KeepAlive</key>
-    <false/>
+    <dict>
+        <key>PathState</key>
+        <dict>
+            <key>/Library/Application Support/MauLeaf/one-time-charge.json</key>
+            <true/>
+        </dict>
+    </dict>
     <key>ProcessType</key>
     <string>Background</string>
     <key>ThrottleInterval</key>

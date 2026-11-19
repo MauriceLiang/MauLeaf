@@ -7,4 +7,4 @@ The AppleSMC user-client structure and IOKit call convention were independently 
 
 The files in this directory do not copy the implementation source of SMCKit. The attribution is retained because the low-level structure layout and selector convention were cross-checked against that project's published implementation.
 
-This directory is not derived from the GPL-2.0 batt source code.
+The current MauLeaf preview includes only the project's own native AppleSMC controller and privileged helper; no third-party charging-control executable or firmware bundle is shipped.

@@ -9,6 +9,8 @@ struct UnpluggedRestoreConditions {
     let isAdministrator: Bool
     let externalConnected: Bool?
     let pmsetReportsBatteryPower: Bool
+    let batteryPercent: Int?
+    let batteryIsCharging: Bool
     let conflictingProcess: String?
     let explicitlyConfirmed: Bool
 }
@@ -18,6 +20,7 @@ enum UnpluggedRestoreProbeError: Error, LocalizedError, Equatable {
     case administratorRequired
     case powerStateUncertain
     case requiresUnpluggedMac
+    case insufficientBattery
     case conflictingController(String)
     case missingOriginalInactiveSnapshot
     case snapshotIdentityMismatch
@@ -32,6 +35,7 @@ enum UnpluggedRestoreProbeError: Error, LocalizedError, Equatable {
         case .administratorRequired: return "Use sudo for the experimental SMC write."
         case .powerStateUncertain: return "Cannot independently confirm battery-only power from IOKit and pmset."
         case .requiresUnpluggedMac: return "Unplug every external power source before running this test."
+        case .insufficientBattery: return "Battery capacity must be readable and at least 30%, and the battery must not be charging."
         case .conflictingController(let name): return "A conflicting charging controller is running: \(name)."
         case .missingOriginalInactiveSnapshot:
             return "A valid MauLeaf original-state snapshot with bfF0=0x00 is required. The test refuses legacy/no-snapshot cases."
@@ -58,6 +62,11 @@ enum UnpluggedRestorePolicy {
         }
         guard !connected, context.pmsetReportsBatteryPower else {
             throw UnpluggedRestoreProbeError.requiresUnpluggedMac
+        }
+        guard let percent = context.batteryPercent,
+              (30...100).contains(percent),
+              !context.batteryIsCharging else {
+            throw UnpluggedRestoreProbeError.insufficientBattery
         }
         if let process = context.conflictingProcess {
             throw UnpluggedRestoreProbeError.conflictingController(process)

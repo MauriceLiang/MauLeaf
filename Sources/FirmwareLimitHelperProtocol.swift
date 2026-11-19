@@ -11,7 +11,12 @@ import Foundation
     func oneTimeChargeStatus(withReply reply: @escaping (NSData?, NSString?) -> Void)
 }
 
+enum FirmwareLimitHelperProtocolVersion {
+    static let current = 2
+}
+
 struct FirmwareLimitHelperStateResponse: Codable, Equatable {
+    let helperVersion: Int
     let activationByte: UInt8
     let active: Bool
     let upper: Int
@@ -20,6 +25,7 @@ struct FirmwareLimitHelperStateResponse: Codable, Equatable {
     let writeBlockReason: String?
 
     init(state: FirmwareLimitState, identity: FirmwareLimitDeviceIdentity? = nil) {
+        helperVersion = FirmwareLimitHelperProtocolVersion.current
         activationByte = state.activationByte
         active = state.isActive
         upper = state.upper
@@ -34,11 +40,13 @@ struct FirmwareLimitHelperStateResponse: Codable, Equatable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case activationByte, active, upper, lower, writeSupported, writeBlockReason
+        case helperVersion, activationByte, active, upper, lower, writeSupported, writeBlockReason
     }
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
+        // Missing helperVersion identifies a previously installed helper.
+        helperVersion = try container.decodeIfPresent(Int.self, forKey: .helperVersion) ?? 0
         activationByte = try container.decode(UInt8.self, forKey: .activationByte)
         active = try container.decode(Bool.self, forKey: .active)
         upper = try container.decode(Int.self, forKey: .upper)

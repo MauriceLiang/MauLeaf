@@ -36,6 +36,21 @@ private final class HelperFakeTransport: FirmwareLimitTransport {
 @main
 private enum FirmwareLimitHelperServiceTests {
     static func main() throws {
+        precondition(
+            SystemFirmwareReader.decode("mBoot-20457.41.3") == "mBoot-20457.41.3",
+            "firmware version strings are preserved"
+        )
+        precondition(
+            SystemFirmwareReader.decode(Data("mBoot-20457.41.3".utf8) + Data([0, 0])) == "mBoot-20457.41.3",
+            "CFData-style firmware values are decoded and trailing NUL bytes removed"
+        )
+        precondition(SystemFirmwareReader.decode(Data([0xFF, 0x00])) == nil,
+                     "invalid firmware bytes are rejected")
+        let legacyState = Data(#"{ "activationByte": 0, "active": false, "upper": 80, "lower": 78 }"#.utf8)
+        let legacyResponse = try JSONDecoder().decode(FirmwareLimitHelperStateResponse.self, from: legacyState)
+        precondition(legacyResponse.helperVersion == 0,
+                     "a response from the previously installed helper is detected as outdated")
+
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent("mauleaf-native-helper-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)

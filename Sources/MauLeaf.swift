@@ -768,7 +768,8 @@ final class ChargeManager: ObservableObject {
         return
         #endif
         do {
-            let state = try await backend.readState()
+            let initialState = try await backend.readState()
+            let state = try await ensureCurrentNativeHelper(initialState, allowInstall: allowInstall)
             let oneTime = try await backend.oneTimeChargeStatus()
             currentState = state
             fullOncePending = oneTime.pending
@@ -837,6 +838,32 @@ final class ChargeManager: ObservableObject {
             statusMessage = AppText(error: error)
             isError = true
         }
+    }
+
+    private func ensureCurrentNativeHelper(
+        _ state: FirmwareLimitHelperStateResponse,
+        allowInstall: Bool
+    ) async throws -> FirmwareLimitHelperStateResponse {
+        let required = FirmwareLimitHelperProtocolVersion.current
+        guard state.helperVersion < required else { return state }
+        guard allowInstall, autoInstallNativeHelper, !helperInstallAttempted else {
+            throw NativeControlError.outdatedHelper(found: state.helperVersion, required: required)
+        }
+
+        helperInstallAttempted = true
+        isBusy = true
+        statusMessage = "检测到旧版 MauLeaf 原生固件服务，正在更新，需要管理员授权…"
+        defer { isBusy = false }
+        try await installNativeHelper()
+
+        let updated = try await backend.readState()
+        guard updated.helperVersion >= required else {
+            throw NativeControlError.helperUpgradeFailed(
+                found: updated.helperVersion,
+                required: required
+            )
+        }
+        return updated
     }
 
     private func isHelperUnavailable(_ error: Error) -> Bool {
@@ -1095,6 +1122,8 @@ final class ChargeManager: ObservableObject {
 private enum NativeControlError: LocalizedError {
     case missingBundledHelper
     case authorizationFailed(String)
+    case outdatedHelper(found: Int, required: Int)
+    case helperUpgradeFailed(found: Int, required: Int)
 
     var errorDescription: String? {
         switch self {
@@ -1102,6 +1131,10 @@ private enum NativeControlError: LocalizedError {
             return "应用包中缺少 MauLeaf 原生固件服务文件，请重新安装预览版。"
         case .authorizationFailed(let detail):
             return detail
+        case .outdatedHelper(let found, let required):
+            return "MauLeaf 原生固件服务版本过旧（当前协议版本 \(found)，需要 \(required)），请重新启动应用并允许更新服务。"
+        case .helperUpgradeFailed(let found, let required):
+            return "MauLeaf 原生固件服务更新未生效（当前协议版本 \(found)，需要 \(required)）。请退出应用后重新启动，再尝试更新。"
         }
     }
 }

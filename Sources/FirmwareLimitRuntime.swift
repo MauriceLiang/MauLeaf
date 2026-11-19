@@ -10,28 +10,7 @@ enum FirmwareLimitRuntime {
         _ = sysctlbyname("hw.model", &modelBuffer, &modelSize, nil, 0)
         let model = String(cString: modelBuffer)
 
-        let firmware: String
-        let root = IORegistryEntryFromPath(kIOMainPortDefault, "IODeviceTree:/")
-        if root != 0 {
-            defer { IOObjectRelease(root) }
-            if let value = IORegistryEntryCreateCFProperty(
-                root, "system-firmware-version" as CFString, kCFAllocatorDefault, 0
-            )?.takeRetainedValue() {
-                if let text = value as? String {
-                    firmware = text.trimmingCharacters(in: .whitespacesAndNewlines)
-                } else if let data = value as? Data {
-                    firmware = String(decoding: data, as: UTF8.self)
-                        .trimmingCharacters(in: .whitespacesAndNewlines.union(.controlCharacters))
-                } else {
-                    firmware = ""
-                }
-            } else {
-                firmware = ""
-            }
-        } else {
-            firmware = ""
-        }
-
+        let firmware = SystemFirmwareReader.read() ?? ""
         #if arch(arm64)
         let architecture = "arm64"
         #elseif arch(x86_64)

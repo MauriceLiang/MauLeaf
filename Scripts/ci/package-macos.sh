@@ -54,7 +54,7 @@ if [[ "$TARGET_ARCH" == arm64 ]]; then
   xcrun swiftc -O -parse-as-library -target arm64-apple-macos13.0 \
     -framework IOKit -framework Security \
     Sources/FirmwareLimitCore.swift Sources/FirmwareLimitReconciliation.swift \
-    Sources/BatteryStatusReader.swift Sources/FirmwareLimitRuntime.swift Sources/FirmwareLimitSMCTransport.swift \
+    Sources/BatteryStatusReader.swift Sources/SystemFirmwareReader.swift Sources/FirmwareLimitRuntime.swift Sources/FirmwareLimitSMCTransport.swift \
     Sources/FirmwareLimitHelperProtocol.swift Sources/FirmwareLimitHelperService.swift \
     Sources/FirmwareLimitHelperMain.swift \
     -o "$NATIVE/MauLeafFirmwareHelper"

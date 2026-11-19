@@ -213,6 +213,17 @@ private enum FirmwareLimitCoreTests {
             userConfirmed: true
         )
         _ = try FirmwareLimitWritePermit.authorize(identity: identity, context: base)
+        let missingFirmware = FirmwareLimitDeviceIdentity(
+            modelIdentifier: identity.modelIdentifier,
+            systemFirmware: "",
+            macOSMajorVersion: 15,
+            architecture: "arm64"
+        )
+        expect(
+            FirmwareLimitWritePermit.targetBlockReason(identity: missingFirmware)
+                == "Unable to read system-firmware-version from the IODeviceTree; firmware writes are blocked.",
+            "missing firmware metadata is reported explicitly and remains write-blocked"
+        )
         expectThrows({
             _ = try FirmwareLimitWritePermit.authorize(
                 identity: identity,

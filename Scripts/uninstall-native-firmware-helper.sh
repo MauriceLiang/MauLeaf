@@ -8,6 +8,9 @@ SUPPORT_DIR="/Library/Application Support/MauLeaf"
 JOB="$SUPPORT_DIR/one-time-charge.json"
 SNAPSHOT="$SUPPORT_DIR/original-firmware-state.json"
 RESTORE_REQUEST="$SUPPORT_DIR/restore-original-state.pending"
+LEGACY_RESTORE="$SUPPORT_DIR/legacy-restore.json"
+DEFERRED_UNINSTALL="$SUPPORT_DIR/deferred-uninstall.pending"
+DEFERRED_SCRIPT="$SUPPORT_DIR/complete-deferred-uninstall.sh"
 BACKGROUND_RECOVERY="$SUPPORT_DIR/background-recovery.pending"
 
 if [[ "$EUID" -ne 0 ]]; then
@@ -55,19 +58,36 @@ if RESTORE_OUTPUT=$("$TARGET" --restore-original-state 2>&1); then
   printf '%s\n' "$RESTORE_OUTPUT"
 else
   printf '%s\n' "$RESTORE_OUTPUT" >&2
-  if [[ -e "$RESTORE_REQUEST" ]]; then
-    echo "当前无法完成恢复请求。已保留原始快照，并重新启动后台恢复服务；接入电源后会自动重试。" >&2
-    /bin/mkdir -p "$SUPPORT_DIR"
+  # The user is allowed to remove MauLeaf.app immediately, even without
+  # AC power. Retain only the small root-owned helper, recovery data, and
+  # independent finalizer until firmware recovery has been verified.
+  if [[ -e "$RESTORE_REQUEST" || -e "$LEGACY_RESTORE" ]]; then
+    if [[ ! -x "$DEFERRED_SCRIPT" ]]; then
+      echo "缺少独立卸载收尾程序；请重新安装当前版本后重试。主应用可自行移除，但后台恢复数据仍将保留。" >&2
+      /bin/launchctl bootstrap system "$PLIST_TARGET" >/dev/null 2>&1 || true
+      exit 5
+    fi
+    /usr/bin/touch "$DEFERRED_UNINSTALL"
+    /bin/chmod 600 "$DEFERRED_UNINSTALL"
     /usr/bin/touch "$BACKGROUND_RECOVERY"
-    /bin/launchctl bootstrap system "$PLIST_TARGET" >/dev/null 2>&1 || true
+    /bin/chmod 600 "$BACKGROUND_RECOVERY"
+    if ! /bin/launchctl bootstrap system "$PLIST_TARGET" >/dev/null 2>&1; then
+      if ! /bin/launchctl print "system/$LABEL" >/dev/null 2>&1; then
+        echo "恢复服务暂时无法启动，已保留快照和服务文件；可以移除主应用，但请检查系统后台服务。" >&2
+        exit 5
+      fi
+    fi
     /bin/launchctl kickstart -k "system/$LABEL" >/dev/null 2>&1 || true
-  else
-    echo "恢复未通过验证。原始快照、Helper 和 LaunchDaemon 均已保留；请排查原因后重新运行卸载脚本。" >&2
+    echo "已排队恢复固件：即使未连接电源，也可以立即删除 MauLeaf.app。"
+    echo "重新接电后后台服务会验证固件状态并自动清除自身。当前并未声称已恢复固件。"
+    exit 0
   fi
+  echo "恢复未通过验证，相关恢复数据与特权服务已保留；可以移除主应用，但可能需要手动恢复。" >&2
+  /bin/launchctl bootstrap system "$PLIST_TARGET" >/dev/null 2>&1 || true
   exit 5
 fi
 
-if [[ -e "$SNAPSHOT" || -e "$RESTORE_REQUEST" || -e "$BACKGROUND_RECOVERY" || -e "$JOB" ]]; then
+if [[ -e "$SNAPSHOT" || -e "$RESTORE_REQUEST" || -e "$BACKGROUND_RECOVERY" || -e "$LEGACY_RESTORE" || -e "$DEFERRED_UNINSTALL" || -e "$JOB" ]]; then
   echo "恢复命令已返回，但仍存在持久化恢复数据；为避免丢失恢复能力，拒绝删除服务。" >&2
   /bin/launchctl bootstrap system "$PLIST_TARGET" >/dev/null 2>&1 || true
   exit 6
@@ -80,6 +100,7 @@ if /bin/launchctl print "system/$LABEL" >/dev/null 2>&1; then
 fi
 
 /bin/rm -f "$PLIST_TARGET" "$TARGET"
+/bin/rm -f "$DEFERRED_SCRIPT"
 /bin/rmdir "$SUPPORT_DIR" >/dev/null 2>&1 || true
 
 if [[ "$RESTORE_OUTPUT" == *"Legacy limit disabled."* ]]; then

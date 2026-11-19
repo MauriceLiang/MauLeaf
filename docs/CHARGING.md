@@ -46,7 +46,7 @@ MauLeaf Preview 5 只通过自研 AppleSMC 固件控制器管理充电上限。�
 
 ## 卸载行为
 
-卸载脚本会先停止 MauLeaf，再以 root 身份调用 helper 的独立恢复命令。只有恢复原始三个寄存器并读回验证成功，才会删除 LaunchDaemon、helper 和快照。
+卸载脚本要求已安装的 helper 与当前应用内的签名 helper 二进制一致（避免调用不支持独立恢复命令的旧版 helper）；若不匹配则先启动新版应用自动升级 helper，退出后重试。脚本会先停止 MauLeaf，再以 root 身份调用 helper 的独立恢复命令。只有恢复原始三个寄存器并读回验证成功，才会删除 LaunchDaemon、helper 和快照。
 
 - 没有 AC 电源：记录恢复请求并保留服务；LaunchDaemon 根据恢复标记保持 helper 运行，接电后自动重试。
 - SMC 写入或读回失败：保留快照和服务，卸载返回失败，不会报告已完成。

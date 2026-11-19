@@ -86,7 +86,7 @@ MauLeaf Preview 5 只通过自研 AppleSMC 固件控制器管理充电上限。�
 - 用户取消时写入持久取消标记；若当时没有 AC，任务等待重新接电。
 - 到达 10 小时 deadline 时恢复当前 MauLeaf 上限。
 - 电池遥测不可用但 AC 正常时，为避免限充长期处于关闭状态，恢复当前 MauLeaf 上限。
-- LaunchDaemon 通过任务文件的 PathState 保持 helper 存活；重启后若任务文件仍存在，会重新加载并继续恢复。
+- 本次充满和原始状态恢复共用 background-recovery.pending 持久标记；LaunchDaemon 仅对该标记配置 PathState，任一后台恢复任务存在时都会保持 helper 存活并在重启后重新加载。
 - 恢复写入失败时保留任务并重试，不会提前删除恢复记录。
 
 系统睡眠期间用户态 helper 无法保证在电量到达 100% 的瞬间执行。恢复会在 helper 再次运行并读取到电量状态后完成；10 小时期限是额外兜底，不是实时保证。

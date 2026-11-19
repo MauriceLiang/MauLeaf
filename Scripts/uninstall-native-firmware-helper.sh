@@ -121,6 +121,13 @@ fi
 # On next launch, MauLeaf automatically re-installs/re-bootstraps the helper,
 # with administrator authorization if macOS requires it.
 if [[ "$MODE" == "keep" ]]; then
+  if [[ -e "$SNAPSHOT" || -e "$JOB" || -e "$RESTORE_REQUEST" \
+        || -e "$LEGACY_RESTORE" || -e "$BACKGROUND_RECOVERY" \
+        || -e "$DEFERRED_UNINSTALL" ]]; then
+    echo "存在未完成的恢复或延期卸载任务，不能安全停止所有后台组件。保留恢复服务。" >&2
+    /bin/launchctl bootstrap system "$PLIST_TARGET" >/dev/null 2>&1 || true
+    exit 6
+  fi
   echo "原始固件状态恢复并二次验证成功；后台 Helper 已停止。安装文件已保留供下次启动使用。"
   exit 0
 fi

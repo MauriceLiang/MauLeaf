@@ -118,8 +118,6 @@ private enum FirmwareLimitCoreTests {
             context: FirmwareLimitWriteContext(
                 isAdministrator: true,
                 isOnACPower: true,
-                mauLeafRunning: false,
-                battRunning: false,
                 userConfirmed: true
             )
         )

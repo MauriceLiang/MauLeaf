@@ -22,8 +22,17 @@ final class FixtureNativeFirmwareBackend: NativeFirmwareBackend {
     var cancelCount = 0
     var restoreCount = 0
     var failNextApply = false
+    var failNextRestore = false
+    var failNextRead = false
+    var falselyReportRestoreSuccess = false
 
-    func readState() async throws -> FirmwareLimitHelperStateResponse { state }
+    func readState() async throws -> FirmwareLimitHelperStateResponse {
+        if failNextRead {
+            failNextRead = false
+            throw FixtureBackendError.injected
+        }
+        return state
+    }
 
     func applyLimit(upper: Int, lower: Int, confirmed: Bool) async throws -> FirmwareLimitHelperOperationResponse {
         applyCount += 1
@@ -90,6 +99,22 @@ final class FixtureNativeFirmwareBackend: NativeFirmwareBackend {
 
     func restoreOriginalState() async throws -> FirmwareLimitHelperOperationResponse {
         restoreCount += 1
+        if failNextRestore {
+            failNextRestore = false
+            throw FixtureBackendError.injected
+        }
+        if falselyReportRestoreSuccess {
+            falselyReportRestoreSuccess = false
+            let fabricated = FirmwareLimitHelperStateResponse(
+                state: FirmwareLimitState(activationByte: 0x00, upper: 80, lower: 78),
+                identity: identity
+            )
+            return FirmwareLimitHelperOperationResponse(
+                state: fabricated,
+                oneTimePending: false,
+                message: "Fault-injected false restore acknowledgment."
+            )
+        }
         if let originalSnapshot {
             state = FirmwareLimitHelperStateResponse(
                 state: originalSnapshot.state,

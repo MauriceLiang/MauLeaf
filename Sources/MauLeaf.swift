@@ -152,14 +152,24 @@ private final class MauLeafMenuController: NSObject {
 
     func prepareForTermination() async -> Bool {
         let allowed = await manager.prepareForTermination()
-        if !allowed {
-            positionPanel()
-            panel.makeKeyAndOrderFront(nil)
-            NSApp.activate(ignoringOtherApps: true)
-            startOutsideClickMonitoring()
-            manager.setPanelVisible(true)
-        }
-        return allowed
+        guard !allowed else { return true }
+
+        positionPanel()
+        panel.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+        startOutsideClickMonitoring()
+        manager.setPanelVisible(true)
+
+        // Never hold a user hostage in a menu-bar utility. If even a durable
+        // recovery request could not be written, warn clearly but allow them
+        // to choose to quit anyway (without claiming restoration happened).
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = manager.text("无法验证充电限制恢复")
+        alert.informativeText = manager.text("后台恢复请求无法得到确认。仍然退出可能暂时保留固件限充；请在方便时重新接电或使用恢复脚本。")
+        alert.addButton(withTitle: manager.text("仍然退出"))
+        alert.addButton(withTitle: manager.text("返回应用"))
+        return alert.runModal() == .alertFirstButtonReturn
     }
 
     @objc private func togglePanel() {
@@ -1290,8 +1300,6 @@ final class ChargeManager: ObservableObject {
         isPreparingToQuit = true
         limitDebounce?.cancel()
         limitDebounce = nil
-        // Do not leave any pre-quit "Retry" action that could reapply a limit
-        // after restoration failed. The next explicit Quit retries recovery.
         pendingAction = nil
         lastAction = nil
         showNativeWriteConfirmation = false
@@ -1300,62 +1308,46 @@ final class ChargeManager: ObservableObject {
         let deadline = Date().addingTimeInterval(30)
         while isBusy {
             guard Date() < deadline else {
-                isPreparingToQuit = false
-                statusMessage = "当前原生固件操作尚未结束，已取消退出；请重试。"
-                isError = true
-                return false
+                return cancelTermination("原生固件操作仍在进行；无法确认恢复状态。")
             }
             try? await Task.sleep(nanoseconds: 50_000_000)
         }
 
         isBusy = true
         isError = false
-        statusMessage = "退出前正在核对并恢复固件充电状态…"
+        statusMessage = "退出前正在核对固件状态并提交恢复请求…"
 
         do {
-            // Always re-read the root helper: a prior UI refresh may be stale.
-            // A Preview 4 helper must be upgraded before its legacy activation
-            // flag can be safely cleared by the Preview 5 restore operation.
             let initial = try await backend.readState()
             let state = try await ensureCurrentNativeHelper(initial, allowInstall: true)
             let oneTime = try await backend.oneTimeChargeStatus()
-
-            let needsRestore = state.active
-                || state.hasOriginalStateSnapshot
-                || state.restorePending
-                || oneTime.pending
+            let needsRestore = state.active || state.hasOriginalStateSnapshot
+                || state.restorePending || oneTime.pending
 
             if needsRestore {
                 guard state.restoreSupported else {
-                    return cancelTermination(
-                        "当前设备不支持安全恢复：\(state.restoreBlockReason ?? "硬件身份校验失败")。已取消退出，请勿直接删除 MauLeaf."
-                    )
+                    return cancelTermination("当前硬件无法安全恢复：\(state.restoreBlockReason ?? "身份校验失败")")
                 }
-                guard isAdapterConnected else {
-                    return cancelTermination("请先连接电源，再退出 MauLeaf；当前限充尚未恢复。")
-                }
-
-                // This also cancels a pending one-time full-charge task.
-                // A legacy Preview 4 state has no snapshot, so the helper
-                // clears only bfF0 and does not invent historical thresholds.
-                let result = try await backend.restoreOriginalState()
-                guard !result.state.active,
-                      !result.state.hasOriginalStateSnapshot,
-                      !result.state.restorePending,
-                      !result.oneTimePending else {
-                    return cancelTermination("原始固件恢复未完成，已取消退出；请接电后重试。")
+                // On battery, the helper atomically persists a recovery request
+                // and returns an AC-power requirement error. We accept exit
+                // after verifying the durable request, without blocking users.
+                do {
+                    _ = try await backend.restoreOriginalState()
+                } catch {
+                    NSLog("MauLeaf immediate restore unavailable; checking durable recovery: %@", error.localizedDescription)
                 }
             }
 
-            // A successful XPC response is insufficient: confirm the helper
-            // independently reads back an inactive, task-free state.
             let verified = try await backend.readState()
             let verifiedOneTime = try await backend.oneTimeChargeStatus()
-            guard !verified.active,
-                  !verified.hasOriginalStateSnapshot,
-                  !verified.restorePending,
-                  !verifiedOneTime.pending else {
-                return cancelTermination("固件状态复查未通过，已取消退出；恢复数据已保留。")
+            let restored = !verified.active
+                && !verified.hasOriginalStateSnapshot
+                && !verified.restorePending
+                && !verifiedOneTime.pending
+            let queued = verified.restorePending && !verifiedOneTime.pending
+
+            guard restored || queued else {
+                return cancelTermination("无法确认固件恢复或后台恢复请求已保存。")
             }
 
             currentState = verified
@@ -1363,15 +1355,17 @@ final class ChargeManager: ObservableObject {
             fullOnceCancelRequested = false
             backendReady = verified.writeSupported
             restoreReady = verified.restoreSupported
-            modeText = "限制充电未启用"
-            statusMessage = "退出前已确认限制充电关闭。"
+            modeText = queued ? "等待接电后恢复固件配置" : "限制充电未启用"
+            statusMessage = queued
+                ? "恢复任务已安全保存；MauLeaf 可以立即退出，接电后后台服务会继续恢复。"
+                : "退出前已确认充电限制关闭。"
             isError = false
             isBusy = false
             refreshTimer?.invalidate()
             refreshTimer = nil
             return true
         } catch {
-            return cancelTermination("退出前恢复固件失败：\(AppText(error: error))；已取消退出，请保持接电并重试。")
+            return cancelTermination("退出时无法确认固件恢复状态：\(AppText(error: error))")
         }
     }
 

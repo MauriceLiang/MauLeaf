@@ -53,21 +53,28 @@ struct FirmwareLimitWriteContext: Equatable {
 struct FirmwareLimitWritePermit {
     private init() {}
 
+    static func targetBlockReason(identity: FirmwareLimitDeviceIdentity) -> String? {
+        guard identity.modelIdentifier == "MacBookPro18,1" else {
+            return "Expected MacBookPro18,1; found \(identity.modelIdentifier)."
+        }
+        guard identity.systemFirmware == "mBoot-20457.41.3" else {
+            return "Unverified system firmware: \(identity.systemFirmware)."
+        }
+        guard identity.macOSMajorVersion == 15 else {
+            return "Expected macOS 15; found macOS \(identity.macOSMajorVersion)."
+        }
+        guard identity.architecture == "arm64" else {
+            return "Expected arm64; found \(identity.architecture)."
+        }
+        return nil
+    }
+
     static func authorize(
         identity: FirmwareLimitDeviceIdentity,
         context: FirmwareLimitWriteContext
     ) throws -> FirmwareLimitWritePermit {
-        guard identity.modelIdentifier == "MacBookPro18,1" else {
-            throw FirmwareLimitCoreError.unsupportedTarget("Expected MacBookPro18,1; found \(identity.modelIdentifier).")
-        }
-        guard identity.systemFirmware == "mBoot-20457.41.3" else {
-            throw FirmwareLimitCoreError.unsupportedTarget("Unverified system firmware: \(identity.systemFirmware).")
-        }
-        guard identity.macOSMajorVersion == 15 else {
-            throw FirmwareLimitCoreError.unsupportedTarget("Expected macOS 15; found macOS \(identity.macOSMajorVersion).")
-        }
-        guard identity.architecture == "arm64" else {
-            throw FirmwareLimitCoreError.unsupportedTarget("Expected arm64; found \(identity.architecture).")
+        if let reason = targetBlockReason(identity: identity) {
+            throw FirmwareLimitCoreError.unsupportedTarget(reason)
         }
         guard context.isAdministrator else {
             throw FirmwareLimitCoreError.administratorRequired

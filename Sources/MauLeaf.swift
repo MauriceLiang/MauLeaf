@@ -1011,9 +1011,20 @@ final class ChargeManager: ObservableObject {
         guard !isPreparingToQuit, (50...95).contains(value) else { return }
         limit = value
         limitDebounce?.cancel()
-        autoApplyFeedback = "等待自动应用 \(value)%…"
+
+        guard currentState?.active == true, hasOriginalStateSnapshot else {
+            autoApplyFeedback = "已保存设置；启用限制充电后生效"
+            statusMessage = "当前限制充电未启用，此次调整仅保存在 MauLeaf 中。"
+            isError = false
+            return
+        }
+        guard !fullOncePending else {
+            statusMessage = "本次充满进行中，暂不可修改充电上限。"
+            isError = true
+            return
+        }
         guard backendReady else {
-            statusMessage = "原生固件控制尚未就绪。"
+            statusMessage = "当前系统或硬件配置不允许写入新的充电上限。"
             isError = true
             return
         }
@@ -1022,6 +1033,7 @@ final class ChargeManager: ObservableObject {
             isError = true
             return
         }
+        autoApplyFeedback = "等待自动应用 \(value)%…"
         if !UserDefaults.standard.bool(forKey: "nativeFirmwareWriteConfirmed") {
             pendingAction = .limit(value)
             showNativeWriteConfirmation = true
@@ -1032,6 +1044,68 @@ final class ChargeManager: ObservableObject {
             if !immediate { try? await Task.sleep(nanoseconds: 450_000_000) }
             guard !Task.isCancelled else { return }
             await self?.applyLimit(value)
+        }
+    }
+
+    func enableLimit() {
+        guard canEnableLimit else {
+            statusMessage = isAdapterConnected
+                ? "当前设备暂时不能启用限制充电。"
+                : "请先连接电源，再启用限制充电。"
+            isError = true
+            return
+        }
+        if !UserDefaults.standard.bool(forKey: "nativeFirmwareWriteConfirmed") {
+            pendingAction = .enable
+            showNativeWriteConfirmation = true
+            return
+        }
+        lastAction = .enable
+        Task { await applyLimit(limit) }
+    }
+
+    func disableLimit() {
+        guard (canDisableLimit || canRetryOriginalRestore) else { return }
+        lastAction = nil
+        Task { await restoreOriginalFirmwareState() }
+    }
+
+    func requestLegacyDisableConfirmation() {
+        guard canDisableLegacyLimit else { return }
+        showLegacyDisableConfirmation = true
+    }
+
+    func confirmDisableLegacyLimit() {
+        showLegacyDisableConfirmation = false
+        guard canDisableLegacyLimit else { return }
+        Task { await restoreOriginalFirmwareState() }
+    }
+
+    private func restoreOriginalFirmwareState() async {
+        guard !isBusy, !isPreparingToQuit else { return }
+        isBusy = true
+        isError = false
+        statusMessage = "正在恢复启用前的原始固件配置…"
+        defer { isBusy = false }
+        do {
+            let response = try await backend.restoreOriginalState()
+            currentState = response.state
+            fullOncePending = false
+            fullOnceCancelRequested = false
+            backendReady = response.state.writeSupported
+            restoreReady = response.state.restoreSupported
+            modeText = response.state.active
+                ? "检测到未托管的固件限充"
+                : "限制充电未启用"
+            statusMessage = AppText(verbatim: response.message)
+            isError = false
+        } catch {
+            statusMessage = "恢复原始固件配置失败：\(AppText(error: error))"
+            isError = true
+            if restorePending {
+                // The root helper retains the snapshot and retries in the background.
+                modeText = "等待恢复原始固件配置"
+            }
         }
     }
 
@@ -1052,6 +1126,9 @@ final class ChargeManager: ObservableObject {
         guard let action = pendingAction else { return }
         pendingAction = nil
         switch action {
+        case .enable:
+            lastAction = .enable
+            Task { await applyLimit(limit) }
         case .limit(let value):
             lastAction = .limit(value)
             Task { await applyLimit(value) }
@@ -1063,8 +1140,12 @@ final class ChargeManager: ObservableObject {
 
     func cancelNativeWrite() {
         showNativeWriteConfirmation = false
+        let action = pendingAction
         pendingAction = nil
-        if let currentState, (50...95).contains(currentState.upper) { limit = currentState.upper }
+        if case .limit = action, currentState?.active == true,
+           let currentState, (50...95).contains(currentState.upper) {
+            limit = currentState.upper
+        }
     }
 
     func cancelFullOnce() {
@@ -1078,6 +1159,8 @@ final class ChargeManager: ObservableObject {
             do {
                 let response = try await backend.cancelOneTimeCharge()
                 currentState = response.state
+                backendReady = response.state.writeSupported
+                restoreReady = response.state.restoreSupported
                 fullOncePending = response.oneTimePending
                 fullOnceCancelRequested = response.oneTimePending
                 modeText = response.oneTimePending
@@ -1106,9 +1189,11 @@ final class ChargeManager: ObservableObject {
                 confirmed: true
             )
             currentState = response.state
+            backendReady = response.state.writeSupported
+            restoreReady = response.state.restoreSupported
             fullOncePending = response.oneTimePending
             fullOnceCancelRequested = false
-            modeText = "原生固件限充寄存器：\(value)%"
+            modeText = "限制充电已启用 · 上限 \(value)%"
             autoApplyFeedback = "已写入并读回 \(value)%"
             statusMessage = AppText(verbatim: response.message)
             isError = false
@@ -1133,6 +1218,8 @@ final class ChargeManager: ObservableObject {
                 confirmed: true
             )
             currentState = response.state
+            backendReady = response.state.writeSupported
+            restoreReady = response.state.restoreSupported
             fullOncePending = response.oneTimePending
             fullOnceCancelRequested = false
             modeText = "本次充满进行中 · 原上限 \(limit)%"
@@ -1152,6 +1239,7 @@ final class ChargeManager: ObservableObject {
             return
         }
         switch lastAction {
+        case .enable: Task { await applyLimit(limit) }
         case .limit(let value): Task { await applyLimit(value) }
         case .full:
             if fullOncePending { cancelFullOnce() }

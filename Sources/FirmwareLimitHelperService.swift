@@ -129,7 +129,14 @@ final class FirmwareLimitHelperService: NSObject, FirmwareLimitHelperProtocol {
                         message: "The native limit is temporarily disabled. The helper will restore the saved limit at 100%, on cancellation, or after 10 hours."
                     )
                 } catch {
-                    if case FirmwareLimitCoreError.transactionFailed(_, let recovery) = error,
+                    let recovery: String?
+                    if let coreError = error as? FirmwareLimitCoreError,
+                       case .transactionFailed(_, let detail) = coreError {
+                        recovery = detail
+                    } else {
+                        recovery = nil
+                    }
+                    if let recovery,
                        !recovery.contains("previous firmware state was restored and verified") {
                         var recoveryJob = job
                         recoveryJob.cancelRequested = true

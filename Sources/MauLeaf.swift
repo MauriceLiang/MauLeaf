@@ -718,11 +718,12 @@ struct OperationFeedbackView: View {
                         }
                         Text(manager.text(manager.isBusy || errorVisible ? manager.statusMessage : successMessage ?? ""))
                             .font(.caption)
-                            // Successful operations use compact localized
-                            // messages. Errors may use three lines; the full
-                            // diagnostic remains available via View details.
-                            .lineLimit(3)
+                            // Never truncate a successful operation. Long
+                            // errors are summarized in up to three lines;
+                            // View details reveals their complete diagnostics.
+                            .lineLimit(errorVisible ? 3 : nil)
                             .fixedSize(horizontal: false, vertical: true)
+                            .layoutPriority(1)
                             .frame(maxWidth: .infinity, alignment: .leading)
                         if errorVisible {
                             Button {

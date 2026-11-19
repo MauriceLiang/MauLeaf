@@ -5,11 +5,11 @@
 本版本由 main 分支合并后自动构建，仅提供 Apple Silicon arm64 安装包，不再构建或发布 Intel 版本。
 
 - 首次启动默认不启用充电限制；用户点击「启用限制充电」后才写入原生固件。
-- 正常退出 MauLeaf：插电立即恢复；在经过真机验证的 M1 Pro/macOS 15/固件配置上，不插电也能恢复全部原始寄存器。若离线恢复条件不满足，保留持久恢复请求和 Helper 并允许退出，但不声称已安全卸载；极端异常时用户也可选择「仍然退出」，而不能把此操作当作卸载。
+- 正常退出新增「是否保留控制组件」：可选择「保留组件并退出」「移除组件并退出」「取消」。两种退出方式都立即恢复原始固件并验证；保留时停止后台 Helper、保留文件下次使用，移除时停止 Helper 并删除系统级脚本/服务，App 由用户在 Finder 删除。恢复或清理失败会取消正常退出；紧急「仍然退出」不代表成功恢复。
 - 未启用时，调整滑杆或预设只保存本地设置，不会写入 AppleSMC。
 - 首次启用前，helper 保存 bfF0、bfD0、bfE0 原始值及硬件身份到 root-owned 快照；后续修改上限不会覆盖原始快照。
 - 「关闭限制充电」会恢复原始激活字节、上限和恢复阈值，逐项读回验证后才删除快照。
-- 安全完整卸载：无论接电或满足验证条件的电池供电，脚本必须先恢复启用前的全部三个寄存器、确认限充关闭且没有待恢复任务，之后才删除 MauLeaf.app、Helper、LaunchDaemon、快照及所有安装/卸载/收尾脚本；任何验证失败都保留文件并返回错误。
+- 保留备用终端完整卸载命令，可在 App 正常关闭后独立删除 App 与系统组件。应用内「移除组件并退出」只删除系统 Helper、LaunchDaemon、恢复记录、脚本及日志；不会在运行过程中删除应用包。
 - 「本次充满」仍只临时关闭当前 MauLeaf 限充，结束后恢复当前上限；用户关闭限充时则恢复首次启用前的原始状态。
 - 删除危险的无恢复强制卸载模式；离线恢复严格限定 MacBookPro18,1 / mBoot-20457.41.3 / macOS 15 / arm64，要求 IOKit 与 pmset 双重确认电池供电、电量至少 30%、原始快照有效且原始激活字节为 0。
 
@@ -26,11 +26,11 @@
 This release is built automatically after changes are merged into main. It ships Apple Silicon arm64 only; Intel builds and release artifacts are discontinued.
 
 - Charging limits are off by default on first launch. The user must click “Enable charging limit” before firmware is changed.
-- Normal app quit restores immediately on AC or under the verified M1 Pro battery-only conditions. When battery restoration is blocked, the helper retains a durable recovery request; Quit anyway does not mean a verified full uninstall.
+- On normal Quit, users choose Keep components and quit, Remove components and quit, or Cancel. Both valid exit choices restore the original firmware on AC or validated battery power and stop the background Helper. Keep preserves the installed files for the next launch; Remove deletes system-level Helper, LaunchDaemon, scripts, recovery state and logs. The user then moves the App to Trash.
 - While disabled, slider and preset changes are saved locally and do not write to AppleSMC.
 - Before the first activation, the helper saves the original bfF0, bfD0, and bfE0 values plus hardware identity in a root-owned snapshot. Later limit changes never overwrite it.
 - “Disable charging limit” restores the original activation byte, upper threshold, and resume threshold, and deletes the snapshot only after read-back verification.
-- Complete uninstall is a single fail-closed transaction: restore all original firmware registers, independently verify normal SMC state, then remove the application, Helper, LaunchDaemon, snapshots, and installed scripts. A failed restore retains the app and recovery components.
+- A failed firmware restore or helper cleanup cancels normal quit; the emergency Quit anyway option explicitly warns that full recovery/removal is unverified. A standalone command-line complete uninstaller is retained as a backup.
 - The dangerous force-remove-without-restore option is removed. Unplugged complete restore is restricted to exact verified M1 Pro hardware, macOS 15 and matching firmware, with dual battery-source checks, >=30% charge and an inactive original snapshot.
 - “One-time full charge” still temporarily disables the current MauLeaf limit and restores that limit afterward. Disabling MauLeaf restores the original pre-activation firmware state.
 - The menu bar always displays the green leaf.

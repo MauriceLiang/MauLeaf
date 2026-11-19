@@ -83,7 +83,7 @@ jobs:
           source = Path("Tools/MauLeafUnpluggedRestoreProbe/UnpluggedRestorePolicy.swift").read_text()
           cli = Path("Tools/MauLeafUnpluggedRestoreProbe/MauLeafUnpluggedRestoreProbe.swift").read_text()
           assert 'transport.write(.activation, bytes: [0x00])' in source
-          assert source.count('transport.write(') == 1
+          assert source.count('transport.write(') == 2
           assert 'FirmwareLimitWritePermit.targetBlockReason' in source
           assert 'originalSnapshot' in source
           assert 'pmsetOnBattery()' in cli
@@ -91,6 +91,9 @@ jobs:
           assert 'readOriginalSnapshot()' in cli
           assert 'isatty(STDIN_FILENO) == 1' in cli
           assert 'case "test-unplugged-deactivation":' in cli
+          assert 'case "test-unplugged-full-restore":' in cli
+          assert 'preflight(expected)' in source
+          assert 'let upperFirst = original.upper > before.lower' in source
           assert 'try? transport.write' not in source
           PY
 

@@ -749,7 +749,9 @@ final class FirmwareLimitHelperService: NSObject, FirmwareLimitHelperProtocol {
     /// independently verified restore. The script is installed outside the
     /// app bundle and remains available after the user removes MauLeaf.app.
     private func triggerDeferredUninstallIfReady() {
-        guard isAdministrator(),
+        // Standalone CLI uninstallation owns its own cleanup; only the
+        // long-lived launchd helper may spawn deferred self-removal.
+        guard monitorEnabled, isAdministrator(),
               !deferredUninstallLaunched,
               FileManager.default.fileExists(atPath: deferredUninstallURL.path),
               FileManager.default.isExecutableFile(atPath: deferredUninstallScriptURL.path) else {

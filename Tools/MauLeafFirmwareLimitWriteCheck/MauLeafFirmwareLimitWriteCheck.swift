@@ -324,8 +324,14 @@ private enum FirmwareLimitWriteCheck {
     static func readState(using smc: SMCClient) throws -> FirmwareState {
         for (key, expectedSize, expectedType) in keys {
             let info = try smc.keyInfo(key)
-            guard info.size == expectedSize,
-                  fourCCString(info.type) == expectedType.trimmingCharacters(in: .whitespaces) else {
+            let actualType = info.type == 0
+                ? ""
+                : fourCCString(info.type).trimmingCharacters(in: .whitespacesAndNewlines)
+            let expectedTypeName = expectedType.trimmingCharacters(in: .whitespacesAndNewlines)
+            let metadataMatches = info.size == 0
+                ? (actualType.isEmpty || actualType == expectedTypeName)
+                : (info.size == expectedSize && actualType == expectedTypeName)
+            guard metadataMatches else {
                 throw ValidationError.unexpectedKeyShape(key)
             }
         }

@@ -15,7 +15,7 @@ private final class FakeFirmwareLimitTransport: FirmwareLimitTransport {
     var lower = 78
     var writes: [String] = []
     var writeCount = 0
-    var failOnceAtWrite: Int?
+    var failuresRemainingByKey: [FirmwareLimitKey: Int] = [:]
     var mismatchedReadKey: FirmwareLimitKey?
 
     func metadata(for key: FirmwareLimitKey) throws -> FirmwareLimitKeyMetadata {
@@ -41,8 +41,8 @@ private final class FakeFirmwareLimitTransport: FirmwareLimitTransport {
     func write(_ key: FirmwareLimitKey, bytes: [UInt8]) throws {
         writeCount += 1
         writes.append("\(key.rawValue)=\(bytes.map { String(format: "%02X", $0) }.joined())")
-        if failOnceAtWrite == writeCount {
-            failOnceAtWrite = nil
+        if let remaining = failuresRemainingByKey[key], remaining > 0 {
+            failuresRemainingByKey[key] = remaining - 1
             throw FakeTransportError.injectedWriteFailure
         }
         switch key {
@@ -69,10 +69,11 @@ private enum FirmwareLimitCoreTests {
 
     static func main() throws {
         try testRequestValidation()
-        try testMetadataPolicy()
-        try testEncoding()
+        testMetadataPolicy()
+        testEncoding()
         try testReadOnlyPlan()
         try testConfigureSequence()
+        try testTransientWriteFailureRetries()
         try testNoOp()
         try testDeactivate()
         try testSafetyPermit()
@@ -167,6 +168,19 @@ private enum FirmwareLimitCoreTests {
         expect(transport.writes == [
             "bfF0=00", "bfD0=55000000", "bfE0=53000000", "bfF0=02"
         ], "writes follow the firmware-required order")
+    }
+
+    private static func testTransientWriteFailureRetries() throws {
+        let transport = FakeFirmwareLimitTransport()
+        transport.failuresRemainingByKey[.lower] = 1
+        let final = try controller(transport).configure(
+            FirmwareLimitRequest(upper: 85, lower: 83),
+            permit: permit()
+        )
+        expect(final == FirmwareLimitState(activationByte: 2, upper: 85, lower: 83),
+               "a transient write failure is retried and verified")
+        expect(transport.writes.filter { $0 == "bfE0=53000000" }.count == 2,
+               "a failed lower-threshold write is retried once")
     }
 
     private static func testNoOp() throws {
@@ -306,7 +320,7 @@ private enum FirmwareLimitCoreTests {
     private static func testRollbackRestoresPreviousState() throws {
         let transport = FakeFirmwareLimitTransport()
         transport.activation = 0x02
-        transport.failOnceAtWrite = 3
+        transport.failuresRemainingByKey[.lower] = 3
         expectThrows({ _ = try controller(transport).configure(
             FirmwareLimitRequest(upper: 85, lower: 83),
             permit: permit()

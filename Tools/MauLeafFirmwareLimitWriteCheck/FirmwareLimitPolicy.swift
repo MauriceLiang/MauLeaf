@@ -32,6 +32,10 @@ enum FirmwareLimitPolicy {
 
     static func hasExpectedShape(key: String, size: Int, type: String) -> Bool {
         guard let expected = requiredKeyShapes[key] else { return false }
-        return expected.size == size && expected.type == type.trimmingCharacters(in: .whitespaces)
+        let normalizedType = type.trimmingCharacters(in: .whitespacesAndNewlines)
+        if size == 0 {
+            return normalizedType.isEmpty || normalizedType == expected.type
+        }
+        return expected.size == size && expected.type == normalizedType
     }
 }

@@ -85,12 +85,15 @@ final class FirmwareLimitHelperService: NSObject, FirmwareLimitHelperProtocol {
             // A corrupt snapshot cannot be retried automatically, but is kept
             // intact for diagnostics and must still block uninstallation.
             try? FileManager.default.removeItem(at: restoreRequestURL)
-            if pendingJob != nil {
+            if pendingJob != nil || legacyRestoreRequest != nil
+                || FileManager.default.fileExists(atPath: deferredUninstallURL.path) {
                 try? persistBackgroundRecoveryMarker()
             } else {
                 try? FileManager.default.removeItem(at: backgroundRecoveryURL)
             }
-        } else if originalStateSnapshot == nil && pendingJob == nil {
+        } else if originalStateSnapshot == nil && pendingJob == nil
+                    && legacyRestoreRequest == nil
+                    && !FileManager.default.fileExists(atPath: deferredUninstallURL.path) {
             try? FileManager.default.removeItem(at: restoreRequestURL)
             try? FileManager.default.removeItem(at: backgroundRecoveryURL)
         } else if pendingJob != nil {
@@ -370,7 +373,10 @@ final class FirmwareLimitHelperService: NSObject, FirmwareLimitHelperProtocol {
             state: state,
             identity: identityProvider(),
             snapshot: snapshot,
-            legacyRestorePending: legacyPending
+            legacyRestorePending: legacyPending,
+            durableRecoveryRecorded: FileManager.default.fileExists(
+                atPath: backgroundRecoveryURL.path
+            )
         )
     }
 
@@ -507,10 +513,12 @@ final class FirmwareLimitHelperService: NSObject, FirmwareLimitHelperProtocol {
         try FileManager.default.setAttributes(
             [.posixPermissions: 0o600], ofItemAtPath: legacyRestoreURL.path
         )
+        // KeepAlive persistence must succeed before the XPC caller can
+        // observe/acknowledge an unplugged background restore request.
+        try persistBackgroundRecoveryMarker()
         stateLock.lock()
         legacyRestoreRequest = request
         stateLock.unlock()
-        try persistBackgroundRecoveryMarker()
     }
 
     private func loadLegacyRestoreRequest() -> FirmwareLimitLegacyRestoreRequest? {

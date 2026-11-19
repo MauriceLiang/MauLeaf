@@ -392,7 +392,7 @@ final class FirmwareLimitHelperService: NSObject, FirmwareLimitHelperProtocol {
         removePersistedJob()
         let current = try controller.readState()
         if current.isActive {
-            let permit = try writePermit(confirmed: true)
+            let permit = try writeLegacyDisablePermit()
             let inactive = try controller.deactivate(permit: permit)
             return FirmwareLimitHelperOperationResponse(
                 state: stateResponse(inactive),
@@ -404,6 +404,22 @@ final class FirmwareLimitHelperService: NSObject, FirmwareLimitHelperProtocol {
             state: stateResponse(current),
             oneTimePending: false,
             message: "No MauLeaf original-state snapshot exists and the firmware limit is already inactive. No register values were changed."
+        )
+    }
+
+    /// Legacy Preview 4 state has no original threshold snapshot. This
+    /// permit can only clear bfF0 on the exact validated hardware identity;
+    /// it never writes or invents bfD0/bfE0 values.
+    private func writeLegacyDisablePermit() throws -> FirmwareLimitWritePermit {
+        let identity = identityProvider()
+        return try FirmwareLimitWritePermit.authorizeRestore(
+            identity: identity,
+            snapshotIdentity: identity,
+            context: FirmwareLimitWriteContext(
+                isAdministrator: isAdministrator(),
+                isOnACPower: isOnACPower(),
+                userConfirmed: true
+            )
         )
     }
 

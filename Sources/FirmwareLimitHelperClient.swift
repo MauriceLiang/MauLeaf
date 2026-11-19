@@ -4,6 +4,7 @@ enum FirmwareLimitHelperClientError: Error, LocalizedError {
     case connectionInvalidated
     case serviceUnavailable
     case missingResponse
+    case timedOut
     case remote(String)
 
     var errorDescription: String? {
@@ -11,6 +12,7 @@ enum FirmwareLimitHelperClientError: Error, LocalizedError {
         case .connectionInvalidated: return "The privileged firmware helper connection was invalidated."
         case .serviceUnavailable: return "The privileged firmware helper is unavailable."
         case .missingResponse: return "The privileged firmware helper returned no response."
+        case .timedOut: return "The privileged firmware helper did not respond before the timeout."
         case .remote(let message): return message
         }
     }
@@ -50,6 +52,10 @@ final class FirmwareLimitHelperClient {
                 delivery.deliver(.failure(FirmwareLimitHelperClientError.serviceUnavailable))
             }
             connection.resume()
+            DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + 20) {
+                delivery.deliver(.failure(FirmwareLimitHelperClientError.timedOut))
+                connection.invalidate()
+            }
 
             let proxyObject = connection.remoteObjectProxyWithErrorHandler { error in
                 delivery.deliver(.failure(error))

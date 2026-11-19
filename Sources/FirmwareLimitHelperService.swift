@@ -7,15 +7,53 @@ import Darwin
 /// activation and enforcement have been verified on the target Mac.
 final class FirmwareLimitHelperService: NSObject, FirmwareLimitHelperProtocol {
     private let controller: FirmwareLimitController
+    private let hardwareLock = NSLock()
+    private let watchdogLock = NSLock()
+    private var operationSequence = 0
+    private var activeOperation: Int?
+    private let watchdogTimeout: TimeInterval = 15
 
     init(transport: FirmwareLimitTransport) {
         controller = FirmwareLimitController(transport: transport)
         super.init()
     }
 
+    /// SMC calls are synchronous kernel calls with no cancellation API. If one
+    /// wedges, terminate this helper process so launchd can start a clean
+    /// instance on the next request rather than leaving the app blocked.
+    private func withHardwareWatchdog<T>(_ body: () throws -> T) throws -> T {
+        hardwareLock.lock()
+        defer { hardwareLock.unlock() }
+
+        watchdogLock.lock()
+        operationSequence += 1
+        let token = operationSequence
+        activeOperation = token
+        watchdogLock.unlock()
+
+        DispatchQueue.global(qos: .userInitiated).asyncAfter(
+            deadline: .now() + watchdogTimeout
+        ) { [weak self] in
+            guard let self else { return }
+            self.watchdogLock.lock()
+            let shouldTerminate = self.activeOperation == token
+            self.watchdogLock.unlock()
+            if shouldTerminate { exit(3) }
+        }
+
+        defer {
+            watchdogLock.lock()
+            if activeOperation == token { activeOperation = nil }
+            watchdogLock.unlock()
+        }
+        return try body()
+    }
+
     func readState(withReply reply: @escaping (NSData?, NSString?) -> Void) {
         do {
-            let response = FirmwareLimitHelperStateResponse(state: try controller.readState())
+            let response = FirmwareLimitHelperStateResponse(
+                state: try withHardwareWatchdog { try controller.readState() }
+            )
             reply(try JSONEncoder().encode(response) as NSData, nil)
         } catch {
             reply(nil, error.localizedDescription as NSString)
@@ -25,7 +63,9 @@ final class FirmwareLimitHelperService: NSObject, FirmwareLimitHelperProtocol {
     func makePlan(upper: Int, lower: Int, withReply reply: @escaping (NSData?, NSString?) -> Void) {
         do {
             let request = try FirmwareLimitRequest(upper: upper, lower: lower)
-            let response = FirmwareLimitHelperPlanResponse(plan: try controller.makePlan(for: request))
+            let response = FirmwareLimitHelperPlanResponse(
+                plan: try withHardwareWatchdog { try controller.makePlan(for: request) }
+            )
             reply(try JSONEncoder().encode(response) as NSData, nil)
         } catch {
             reply(nil, error.localizedDescription as NSString)

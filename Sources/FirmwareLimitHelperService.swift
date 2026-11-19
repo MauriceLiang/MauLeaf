@@ -132,7 +132,7 @@ final class FirmwareLimitHelperService: NSObject, FirmwareLimitHelperProtocol {
                     do {
                         let restorePermit = try writeRestorePermit(for: snapshot)
                         _ = try controller.restore(snapshot.state, permit: restorePermit)
-                        removePersistedOriginalStateSnapshot()
+                        try removePersistedOriginalStateSnapshot()
                     } catch {
                         var pending = snapshot
                         pending.restoreRequested = true
@@ -367,7 +367,7 @@ final class FirmwareLimitHelperService: NSObject, FirmwareLimitHelperProtocol {
 
             let permit = try writeRestorePermit(for: requested)
             let restored = try controller.restore(requested.state, permit: permit)
-            removePersistedOriginalStateSnapshot()
+            try removePersistedOriginalStateSnapshot()
             stopMonitoringIfIdle()
             return FirmwareLimitHelperOperationResponse(
                 state: stateResponse(restored),
@@ -430,8 +430,8 @@ final class FirmwareLimitHelperService: NSObject, FirmwareLimitHelperProtocol {
                 [.posixPermissions: 0o600],
                 ofItemAtPath: restoreRequestURL.path
             )
-        } else {
-            try? FileManager.default.removeItem(at: restoreRequestURL)
+        } else if FileManager.default.fileExists(atPath: restoreRequestURL.path) {
+            try FileManager.default.removeItem(at: restoreRequestURL)
         }
         stateLock.lock()
         originalStateSnapshot = snapshot
@@ -452,9 +452,13 @@ final class FirmwareLimitHelperService: NSObject, FirmwareLimitHelperProtocol {
         }
     }
 
-    private func removePersistedOriginalStateSnapshot() {
-        try? FileManager.default.removeItem(at: originalStateURL)
-        try? FileManager.default.removeItem(at: restoreRequestURL)
+    private func removePersistedOriginalStateSnapshot() throws {
+        if FileManager.default.fileExists(atPath: restoreRequestURL.path) {
+            try FileManager.default.removeItem(at: restoreRequestURL)
+        }
+        if FileManager.default.fileExists(atPath: originalStateURL.path) {
+            try FileManager.default.removeItem(at: originalStateURL)
+        }
         stateLock.lock()
         originalStateSnapshot = nil
         stateLock.unlock()
@@ -500,7 +504,7 @@ final class FirmwareLimitHelperService: NSObject, FirmwareLimitHelperProtocol {
             do {
                 let permit = try writeRestorePermit(for: snapshot)
                 _ = try controller.restore(snapshot.state, permit: permit)
-                removePersistedOriginalStateSnapshot()
+                try removePersistedOriginalStateSnapshot()
                 setPendingJob(nil)
                 removePersistedJob()
                 stopMonitoringIfIdle()

@@ -443,16 +443,24 @@ final class FirmwareLimitHelperService: NSObject, FirmwareLimitHelperProtocol {
             removePersistedJob()
             startMonitoring()
 
-            let permit = try writeRestorePermit(for: requested)
-            let restored = try controller.restore(
-                requested.state,
-                permit: permit,
-                preflight: { [self] in
-                    // Re-evaluate the original snapshot and external power
-                    // immediately before every SMC write attempt.
-                    _ = try writeRestorePermit(for: requested)
-                }
-            )
+            let current = try controller.readState()
+            let restored: FirmwareLimitState
+            if current == requested.state {
+                // All keys already match: verification requires no write
+                // permit or external power, even below the 30% write floor.
+                restored = current
+            } else {
+                let permit = try writeRestorePermit(for: requested)
+                restored = try controller.restore(
+                    requested.state,
+                    permit: permit,
+                    preflight: { [self] in
+                        // Re-evaluate model, snapshot and power before
+                        // every SMC write attempt, including retries.
+                        _ = try writeRestorePermit(for: requested)
+                    }
+                )
+            }
             try removePersistedOriginalStateSnapshot()
             stopMonitoringIfIdle()
             triggerDeferredUninstallIfReady()
@@ -687,14 +695,17 @@ final class FirmwareLimitHelperService: NSObject, FirmwareLimitHelperProtocol {
 
         if let snapshot, snapshot.restoreRequested {
             do {
-                let permit = try writeRestorePermit(for: snapshot)
-                _ = try controller.restore(
-                    snapshot.state,
-                    permit: permit,
-                    preflight: { [self] in
-                        _ = try writeRestorePermit(for: snapshot)
-                    }
-                )
+                let current = try controller.readState()
+                if current != snapshot.state {
+                    let permit = try writeRestorePermit(for: snapshot)
+                    _ = try controller.restore(
+                        snapshot.state,
+                        permit: permit,
+                        preflight: { [self] in
+                            _ = try writeRestorePermit(for: snapshot)
+                        }
+                    )
+                }
                 try removePersistedOriginalStateSnapshot()
                 setPendingJob(nil)
                 removePersistedJob()

@@ -5,6 +5,7 @@ protocol NativeFirmwareBackend {
     func applyLimit(upper: Int, lower: Int, confirmed: Bool) async throws -> FirmwareLimitHelperOperationResponse
     func beginOneTimeCharge(upper: Int, lower: Int, confirmed: Bool) async throws -> FirmwareLimitHelperOperationResponse
     func cancelOneTimeCharge() async throws -> FirmwareLimitHelperOperationResponse
+    func restoreOriginalState() async throws -> FirmwareLimitHelperOperationResponse
     func oneTimeChargeStatus() async throws -> FirmwareLimitHelperOneTimeStatusResponse
 }
 
@@ -47,6 +48,10 @@ final class FirmwareLimitHelperClient: NativeFirmwareBackend {
 
     func cancelOneTimeCharge() async throws -> FirmwareLimitHelperOperationResponse {
         try await request { proxy, reply in proxy.cancelOneTimeCharge(withReply: reply) }
+    }
+
+    func restoreOriginalState() async throws -> FirmwareLimitHelperOperationResponse {
+        try await request { proxy, reply in proxy.restoreOriginalState(withReply: reply) }
     }
 
     func oneTimeChargeStatus() async throws -> FirmwareLimitHelperOneTimeStatusResponse {

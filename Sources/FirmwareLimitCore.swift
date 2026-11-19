@@ -57,6 +57,9 @@ struct FirmwareLimitWritePermit {
         guard identity.modelIdentifier == "MacBookPro18,1" else {
             return "Expected MacBookPro18,1; found \(identity.modelIdentifier)."
         }
+        guard !identity.systemFirmware.isEmpty else {
+            return "Unable to read system-firmware-version from the IODeviceTree; firmware writes are blocked."
+        }
         guard identity.systemFirmware == "mBoot-20457.41.3" else {
             return "Unverified system firmware: \(identity.systemFirmware)."
         }

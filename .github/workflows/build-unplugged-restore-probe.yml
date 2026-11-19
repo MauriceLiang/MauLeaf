@@ -29,16 +29,17 @@ permissions:
 jobs:
   test-and-build:
     name: Validate fake transport and build macOS 15 arm64
-    runs-on: macos-15-arm64
+    # Build the arm64 binary with the macOS 15 SDK; the host runner can be Intel.
+    # This keeps the isolated diagnostics build independent of ARM runner scarcity.
+    runs-on: macos-15
     timeout-minutes: 20
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
 
-      - name: Confirm Apple Silicon runner
+      - name: Confirm macOS 15 toolchain
         run: |
           set -euo pipefail
-          test "$(uname -m)" = "arm64"
           sw_vers
           swift --version
 

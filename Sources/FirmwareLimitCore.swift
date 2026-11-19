@@ -455,7 +455,8 @@ struct FirmwareLimitController {
     /// snapshot; the privileged helper can retry it later.
     func restore(
         _ original: FirmwareLimitState,
-        permit: FirmwareLimitWritePermit
+        permit: FirmwareLimitWritePermit,
+        preflight: () throws -> Void = {}
     ) throws -> FirmwareLimitState {
         guard original.isValid else { throw FirmwareLimitCoreError.invalidOriginalSnapshot }
         try validateKeyMetadata()
@@ -468,26 +469,26 @@ struct FirmwareLimitController {
             // Conversely (75/73 -> 80/78), write the UPPER bound first.
             let previous = try readState()
             if previous.isActive {
-                try writeAndVerify(.activation, bytes: [0x00])
+                try writeAndVerify(.activation, bytes: [0x00], preflight: preflight)
             }
             let upperFirst = original.upper > previous.lower
             if upperFirst {
                 if previous.upper != original.upper {
-                    try writeAndVerify(.upper, bytes: FirmwareLimitPolicy.encodeUInt32LittleEndian(original.upper))
+                    try writeAndVerify(.upper, bytes: FirmwareLimitPolicy.encodeUInt32LittleEndian(original.upper), preflight: preflight)
                 }
                 if previous.lower != original.lower {
-                    try writeAndVerify(.lower, bytes: FirmwareLimitPolicy.encodeUInt32LittleEndian(original.lower))
+                    try writeAndVerify(.lower, bytes: FirmwareLimitPolicy.encodeUInt32LittleEndian(original.lower), preflight: preflight)
                 }
             } else {
                 if previous.lower != original.lower {
-                    try writeAndVerify(.lower, bytes: FirmwareLimitPolicy.encodeUInt32LittleEndian(original.lower))
+                    try writeAndVerify(.lower, bytes: FirmwareLimitPolicy.encodeUInt32LittleEndian(original.lower), preflight: preflight)
                 }
                 if previous.upper != original.upper {
-                    try writeAndVerify(.upper, bytes: FirmwareLimitPolicy.encodeUInt32LittleEndian(original.upper))
+                    try writeAndVerify(.upper, bytes: FirmwareLimitPolicy.encodeUInt32LittleEndian(original.upper), preflight: preflight)
                 }
             }
             if original.activationByte != 0x00 {
-                try writeAndVerify(.activation, bytes: [original.activationByte])
+                try writeAndVerify(.activation, bytes: [original.activationByte], preflight: preflight)
             }
             let restored = try readState()
             guard restored == original else {
@@ -501,7 +502,7 @@ struct FirmwareLimitController {
         } catch {
             // Prefer an inactive controller state while the exact original
             // snapshot remains persisted for the next restoration attempt.
-            try? writeAndVerify(.activation, bytes: [0x00])
+            try? writeAndVerify(.activation, bytes: [0x00], preflight: preflight)
             throw FirmwareLimitCoreError.transactionFailed(
                 primary: String(describing: error),
                 recovery: "the original-state snapshot was retained; restoration must be retried"
@@ -548,9 +549,16 @@ struct FirmwareLimitController {
         }
     }
 
-    private func writeAndVerify(_ key: FirmwareLimitKey, bytes: [UInt8]) throws {
+    private func writeAndVerify(
+        _ key: FirmwareLimitKey,
+        bytes: [UInt8],
+        preflight: () throws -> Void = {}
+    ) throws {
         var lastFailure = "no read-back result"
         for _ in 0..<attempts {
+            // Power source, identity and snapshot must be rechecked on
+            // every retry, not just once at the start of the transaction.
+            try preflight()
             do {
                 try transport.write(key, bytes: bytes)
                 wait(0.12)

@@ -28,19 +28,19 @@ IDENTIFIER=$(/usr/bin/codesign -dv --verbose=2 "$HELPER" 2>&1 | /usr/bin/sed -n 
 # capability if firmware is still active or any snapshot/job is present.
 "$HELPER" --verify-clean-and-inactive
 
-# The marker is retained until the final verification and system unload.
-if /bin/launchctl print "system/$LABEL" >/dev/null 2>&1; then
-  /bin/launchctl bootout "system/$LABEL"
-fi
-if /bin/launchctl print "system/$LABEL" >/dev/null 2>&1; then
-  echo "MauLeaf: could not unload the deferred recovery helper" >&2
-  exit 5
-fi
-
+# The cleanup script runs as an independent child of the helper. Remove
+# fully verified files first, then unload launchd LAST: bootout may terminate
+# descendants of the launchd job, including this finalizer process.
 /bin/rm -f "$DAEMON" "$HELPER"
 # No pending restore is possible at this point (verified above).
 /bin/rm -f "$RECOVERY" "$MARKER"
 # Delete only MauLeaf-owned cleanup files. Keep any unrelated files intact.
 /bin/rm -f "$SCRIPT"
 /bin/rmdir "$SUPPORT" >/dev/null 2>&1 || true
+
+# The running daemon still has an open image; unload it after all files are
+# removed. A crash here leaves no persisted helper or startup configuration.
+if /bin/launchctl print "system/$LABEL" >/dev/null 2>&1; then
+  /bin/launchctl bootout "system/$LABEL"
+fi
 echo "MauLeaf deferred firmware recovery and helper removal completed."

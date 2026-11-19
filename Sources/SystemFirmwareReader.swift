@@ -28,8 +28,8 @@ enum SystemFirmwareReader {
             kIODeviceTreePlane,
             propertyName as CFString,
             kCFAllocatorDefault,
-            kIORegistryIterateRecursively
-        )?.takeRetainedValue() else {
+            IOOptionBits(kIORegistryIterateRecursively)
+        ) else {
             return nil
         }
         return decode(nested)

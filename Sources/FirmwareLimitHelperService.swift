@@ -15,6 +15,8 @@ final class FirmwareLimitHelperService: NSObject, FirmwareLimitHelperProtocol {
     private let isOnACPower: () -> Bool
     private let isAdministrator: () -> Bool
     private let batteryObservation: () -> FirmwareLimitBatteryObservation
+    private let pmsetReportsBatteryPower: () -> Bool
+    private let isChargingNow: () -> Bool
     private let jobURL: URL
     private let originalStateURL: URL
     private let restoreRequestURL: URL
@@ -44,6 +46,8 @@ final class FirmwareLimitHelperService: NSObject, FirmwareLimitHelperProtocol {
         isOnACPower: @escaping () -> Bool = FirmwareLimitRuntime.isOnACPower,
         isAdministrator: @escaping () -> Bool = { FirmwareLimitRuntime.isAdministrator },
         batteryObservation: @escaping () -> FirmwareLimitBatteryObservation = FirmwareLimitRuntime.batteryObservation,
+        pmsetReportsBatteryPower: @escaping () -> Bool = FirmwareLimitRuntime.pmsetReportsBatteryPower,
+        isChargingNow: @escaping () -> Bool = { MauLeafBatteryStatusReader.read().isCharging },
         jobURL: URL = URL(fileURLWithPath: "/Library/Application Support/MauLeaf/one-time-charge.json"),
         originalStateURL: URL = URL(fileURLWithPath: "/Library/Application Support/MauLeaf/original-firmware-state.json"),
         restoreRequestURL: URL = URL(fileURLWithPath: "/Library/Application Support/MauLeaf/restore-original-state.pending"),
@@ -59,6 +63,8 @@ final class FirmwareLimitHelperService: NSObject, FirmwareLimitHelperProtocol {
         self.isOnACPower = isOnACPower
         self.isAdministrator = isAdministrator
         self.batteryObservation = batteryObservation
+        self.pmsetReportsBatteryPower = pmsetReportsBatteryPower
+        self.isChargingNow = isChargingNow
         self.jobURL = jobURL
         self.originalStateURL = originalStateURL
         self.restoreRequestURL = restoreRequestURL
@@ -438,7 +444,15 @@ final class FirmwareLimitHelperService: NSObject, FirmwareLimitHelperProtocol {
             startMonitoring()
 
             let permit = try writeRestorePermit(for: requested)
-            let restored = try controller.restore(requested.state, permit: permit)
+            let restored = try controller.restore(
+                requested.state,
+                permit: permit,
+                preflight: { [self] in
+                    // Re-evaluate the original snapshot and external power
+                    // immediately before every SMC write attempt.
+                    _ = try writeRestorePermit(for: requested)
+                }
+            )
             try removePersistedOriginalStateSnapshot()
             stopMonitoringIfIdle()
             triggerDeferredUninstallIfReady()
@@ -564,12 +578,34 @@ final class FirmwareLimitHelperService: NSObject, FirmwareLimitHelperProtocol {
     private func writeRestorePermit(
         for snapshot: FirmwareLimitOriginalStateSnapshot
     ) throws -> FirmwareLimitWritePermit {
-        try FirmwareLimitWritePermit.authorizeRestore(
-            identity: identityProvider(),
-            snapshotIdentity: snapshot.deviceIdentity,
-            context: FirmwareLimitWriteContext(
+        let identity = identityProvider()
+        if isOnACPower() {
+            // Existing, compatible AC restore path remains available even
+            // after macOS upgrades. Only firmware identity must still match.
+            return try FirmwareLimitWritePermit.authorizeRestore(
+                identity: identity,
+                snapshotIdentity: snapshot.deviceIdentity,
+                context: FirmwareLimitWriteContext(
+                    isAdministrator: isAdministrator(),
+                    isOnACPower: true,
+                    userConfirmed: true
+                )
+            )
+        }
+
+        // A special, separately proven offline path. Other machines,
+        // unknown power readings, old active snapshots, and low battery
+        // fail closed and retain the original state for future recovery.
+        let battery = batteryObservation()
+        return try FirmwareLimitWritePermit.authorizeOfflineRestore(
+            identity: identity,
+            snapshot: snapshot,
+            context: FirmwareLimitOfflineRestoreContext(
                 isAdministrator: isAdministrator(),
-                isOnACPower: isOnACPower(),
+                externalConnected: battery.externalConnected,
+                pmsetReportsBatteryPower: pmsetReportsBatteryPower(),
+                batteryPercent: battery.percent,
+                isCharging: isChargingNow(),
                 userConfirmed: true
             )
         )
@@ -650,10 +686,15 @@ final class FirmwareLimitHelperService: NSObject, FirmwareLimitHelperProtocol {
         stateLock.unlock()
 
         if let snapshot, snapshot.restoreRequested {
-            guard isOnACPower() else { return }
             do {
                 let permit = try writeRestorePermit(for: snapshot)
-                _ = try controller.restore(snapshot.state, permit: permit)
+                _ = try controller.restore(
+                    snapshot.state,
+                    permit: permit,
+                    preflight: { [self] in
+                        _ = try writeRestorePermit(for: snapshot)
+                    }
+                )
                 try removePersistedOriginalStateSnapshot()
                 setPendingJob(nil)
                 removePersistedJob()

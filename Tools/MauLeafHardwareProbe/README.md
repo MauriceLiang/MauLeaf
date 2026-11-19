@@ -18,7 +18,7 @@ The GitHub Actions workflow builds an arm64 executable targeting macOS 15 on a G
 
 For a local build with Xcode Command Line Tools, run:
 
-swiftc -O -framework IOKit -framework CoreFoundation MauLeafHardwareProbe.swift -o MauLeafHardwareProbe
+swiftc -O -framework IOKit -framework CoreFoundation SystemFirmwareReader.swift MauLeafHardwareProbe.swift -o MauLeafHardwareProbe
 
 ## Run
 
@@ -40,4 +40,4 @@ Do not run a different SMC utility alongside this diagnostic. The probe does not
 - Alternate SMC candidate: CHTE is readable with its expected shape.
 - No known candidate: none of the above groups could be confirmed. Do not substitute adapter-input control keys.
 
-The report includes the model identifier, chip string when exposed by macOS, OS version/build, SMC key metadata, and raw read-only key bytes.
+The report includes the model identifier, chip string when exposed by macOS, system firmware version (read recursively from IODeviceTree), OS version/build, SMC key metadata, and raw read-only key bytes.

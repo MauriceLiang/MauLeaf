@@ -26,6 +26,9 @@ final class FixtureNativeFirmwareBackend: NativeFirmwareBackend {
     var failNextRead = false
     var falselyReportRestoreSuccess = false
     var acConnected = true
+    // Simulates the verified target machine with a safe, readable battery
+    // supply. Fail-closed scenarios set this to false.
+    var offlineRestoreAllowed = true
     var pendingLegacyRestore = false
 
     func readState() async throws -> FirmwareLimitHelperStateResponse {
@@ -105,7 +108,7 @@ final class FixtureNativeFirmwareBackend: NativeFirmwareBackend {
             failNextRestore = false
             throw FixtureBackendError.injected
         }
-        if !acConnected {
+        if !acConnected && (originalSnapshot == nil || !offlineRestoreAllowed) {
             if var snapshot = originalSnapshot {
                 snapshot.restoreRequested = true
                 originalSnapshot = snapshot

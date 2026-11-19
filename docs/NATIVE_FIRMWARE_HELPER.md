@@ -61,13 +61,17 @@ A pending restore marker is stored at:
 
     /Library/Application Support/MauLeaf/restore-original-state.pending
 
-The LaunchDaemon uses PathState on the marker so the helper stays alive while a restore is pending and restarts after a crash or reboot. The helper retries every 20 seconds when AC power is available. It removes the marker only after all three original values are read back successfully.
+Both one-time full-charge jobs and original-state restoration create one unified keepalive marker:
+
+    /Library/Application Support/MauLeaf/background-recovery.pending
+
+The LaunchDaemon uses PathState only on this unified marker, so either type of background recovery keeps the helper alive and restarts it after a crash or reboot. The helper retries every 20 seconds when AC power is available. The marker is removed only when no background recovery remains.
 
 The one-time full-charge job remains separate:
 
     /Library/Application Support/MauLeaf/one-time-charge.json
 
-The LaunchDaemon also uses PathState on this file. One-time completion restores the current MauLeaf limit; disabling MauLeaf restores the original pre-MauLeaf state instead.
+One-time completion restores the current MauLeaf limit; disabling MauLeaf restores the original pre-MauLeaf state instead.
 
 ## Uninstallation
 

@@ -106,6 +106,14 @@ bash -n "$ROOT/Scripts/ci/package-macos.sh"
 bash -n "$ROOT/build.command"
 bash -n "$ROOT/Scripts/install-native-firmware-helper.sh"
 bash -n "$ROOT/Scripts/uninstall-native-firmware-helper.sh"
+# Normal quit must restore first, then stop or remove the native daemon.
+grep -Fq -- '--keep-components' "$ROOT/Scripts/uninstall-native-firmware-helper.sh"
+grep -Fq -- '--remove-components' "$ROOT/Scripts/uninstall-native-firmware-helper.sh"
+grep -Fq 'MODE="keep"' "$ROOT/Scripts/uninstall-native-firmware-helper.sh"
+grep -Fq 'MODE="remove"' "$ROOT/Scripts/uninstall-native-firmware-helper.sh"
+grep -Fq 'launchctl bootout' "$ROOT/Scripts/uninstall-native-firmware-helper.sh"
+grep -A1 '<key>RunAtLoad</key>' "$ROOT/Support/com.local.chargecap.firmware-helper.plist" | grep -Fq '<false/>'
+
 bash -n "$ROOT/Scripts/complete-deferred-uninstall.sh"
 grep -Fq 'complete-deferred-uninstall.sh' "$ROOT/Scripts/install-native-firmware-helper.sh"
 grep -Fq 'complete-deferred-uninstall.sh' "$ROOT/Scripts/ci/package-macos.sh"

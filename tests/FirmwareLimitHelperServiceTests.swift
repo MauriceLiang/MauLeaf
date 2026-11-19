@@ -125,7 +125,8 @@ private enum FirmwareLimitHelperServiceTests {
         )
         precondition(savedSnapshot.state == FirmwareLimitState(activationByte: 0, upper: 80, lower: 78),
                      "the helper persists the exact original activation flag and thresholds before writing")
-        precondition((try FileManager.default.attributesOfItem(atPath: originalStateURL.path)[.posixPermissions] as? NSNumber)?.intValue == 0o600,
+        let snapshotPermissions = try FileManager.default.attributesOfItem(atPath: originalStateURL.path)[.posixPermissions] as? NSNumber
+        precondition(snapshotPermissions?.intValue == 0o600,
                      "the original-state snapshot is owner-only")
 
         var unconfirmedData: NSData?

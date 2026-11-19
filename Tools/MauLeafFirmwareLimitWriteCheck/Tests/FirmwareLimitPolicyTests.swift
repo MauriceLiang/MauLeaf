@@ -45,6 +45,18 @@ private enum FirmwareLimitPolicyTests {
             "bfD0 requires four-byte ui32 metadata"
         )
         expect(
+            FirmwareLimitPolicy.hasExpectedShape(key: "bfE0", size: 0, type: ""),
+            "zero-size unpopulated metadata is accepted for direct-read validation"
+        )
+        expect(
+            FirmwareLimitPolicy.hasExpectedShape(key: "bfE0", size: 0, type: "ui32"),
+            "zero-size metadata with expected type is accepted"
+        )
+        expect(
+            !FirmwareLimitPolicy.hasExpectedShape(key: "bfE0", size: 0, type: "ui64"),
+            "zero-size metadata with a conflicting type is rejected"
+        )
+        expect(
             !FirmwareLimitPolicy.hasExpectedShape(key: "CH0I", size: 1, type: "ui8"),
             "adapter-input keys are not accepted as charge-limit keys"
         )

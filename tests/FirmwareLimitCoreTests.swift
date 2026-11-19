@@ -1,0 +1,342 @@
+import Foundation
+
+private enum FakeTransportError: Error {
+    case injectedWriteFailure
+}
+
+private final class FakeFirmwareLimitTransport: FirmwareLimitTransport {
+    var metadataValues: [FirmwareLimitKey: FirmwareLimitKeyMetadata] = [
+        .activation: FirmwareLimitKeyMetadata(size: 1, type: "ui8 "),
+        .upper: FirmwareLimitKeyMetadata(size: 4, type: "ui32"),
+        .lower: FirmwareLimitKeyMetadata(size: 4, type: "ui32")
+    ]
+    var activation: UInt8 = 0x00
+    var upper = 80
+    var lower = 78
+    var writes: [String] = []
+    var writeCount = 0
+    var failuresRemainingByKey: [FirmwareLimitKey: Int] = [:]
+    var mismatchedReadKey: FirmwareLimitKey?
+
+    func metadata(for key: FirmwareLimitKey) throws -> FirmwareLimitKeyMetadata {
+        guard let value = metadataValues[key] else { throw FakeTransportError.injectedWriteFailure }
+        return value
+    }
+
+    func read(_ key: FirmwareLimitKey, count: Int) throws -> [UInt8] {
+        let bytes: [UInt8]
+        switch key {
+        case .activation: bytes = [activation]
+        case .upper: bytes = FirmwareLimitPolicy.encodeUInt32LittleEndian(upper)
+        case .lower: bytes = FirmwareLimitPolicy.encodeUInt32LittleEndian(lower)
+        }
+        if mismatchedReadKey == key {
+            var changed = bytes
+            if !changed.isEmpty { changed[0] ^= 0x01 }
+            return Array(changed.prefix(count))
+        }
+        return Array(bytes.prefix(count))
+    }
+
+    func write(_ key: FirmwareLimitKey, bytes: [UInt8]) throws {
+        writeCount += 1
+        writes.append("\(key.rawValue)=\(bytes.map { String(format: "%02X", $0) }.joined())")
+        if let remaining = failuresRemainingByKey[key], remaining > 0 {
+            failuresRemainingByKey[key] = remaining - 1
+            throw FakeTransportError.injectedWriteFailure
+        }
+        switch key {
+        case .activation:
+            guard bytes.count == 1 else { throw FakeTransportError.injectedWriteFailure }
+            activation = bytes[0]
+        case .upper:
+            guard let value = FirmwareLimitPolicy.decodeUInt32LittleEndian(bytes) else {
+                throw FakeTransportError.injectedWriteFailure
+            }
+            upper = value
+        case .lower:
+            guard let value = FirmwareLimitPolicy.decodeUInt32LittleEndian(bytes) else {
+                throw FakeTransportError.injectedWriteFailure
+            }
+            lower = value
+        }
+    }
+}
+
+@main
+private enum FirmwareLimitCoreTests {
+    private static var checks = 0
+
+    static func main() throws {
+        try testRequestValidation()
+        testMetadataPolicy()
+        testEncoding()
+        try testReadOnlyPlan()
+        try testConfigureSequence()
+        try testTransientWriteFailureRetries()
+        try testNoOp()
+        try testDeactivate()
+        try testSafetyPermit()
+        try testInvalidStateRefusesWrites()
+        try testUnexpectedMetadataRefusesWrites()
+        try testRollbackRestoresPreviousState()
+        try testRollbackFallsBackToInactive()
+        print("FirmwareLimitCoreTests: PASS (\(checks) assertions; no hardware writes)")
+    }
+
+    private static func expect(_ condition: @autoclosure () -> Bool, _ message: String) {
+        checks += 1
+        if !condition() {
+            fputs("FAIL: \(message)\n", stderr)
+            exit(1)
+        }
+    }
+
+    private static func expectThrows(_ body: () throws -> Void, _ message: String) {
+        checks += 1
+        do {
+            try body()
+            fputs("FAIL: \(message)\n", stderr)
+            exit(1)
+        } catch {
+            // Expected.
+        }
+    }
+
+    private static func controller(_ transport: FakeFirmwareLimitTransport) -> FirmwareLimitController {
+        FirmwareLimitController(transport: transport, wait: { _ in })
+    }
+
+    private static func permit() throws -> FirmwareLimitWritePermit {
+        try FirmwareLimitWritePermit.authorize(
+            identity: FirmwareLimitDeviceIdentity(
+                modelIdentifier: "MacBookPro18,1",
+                systemFirmware: "mBoot-20457.41.3",
+                macOSMajorVersion: 15,
+                architecture: "arm64"
+            ),
+            context: FirmwareLimitWriteContext(
+                isAdministrator: true,
+                isOnACPower: true,
+                mauLeafRunning: false,
+                battRunning: false,
+                userConfirmed: true
+            )
+        )
+    }
+
+    private static func testRequestValidation() throws {
+        let standard = try FirmwareLimitRequest.standard(upper: 80)
+        let expected = try FirmwareLimitRequest(upper: 80, lower: 78)
+        expect(standard == expected, "default resume threshold is two points below upper")
+        expectThrows({ _ = try FirmwareLimitRequest(upper: 49, lower: 47) }, "upper below MauLeaf's 50% floor is rejected")
+        expectThrows({ _ = try FirmwareLimitRequest(upper: 96, lower: 94) }, "upper above MauLeaf's 95% ceiling is rejected")
+        expectThrows({ _ = try FirmwareLimitRequest(upper: 80, lower: 80) }, "lower must be below upper")
+        expectThrows({ _ = try FirmwareLimitRequest(upper: 80, lower: 4) }, "lower below 5% is rejected")
+    }
+
+    private static func testMetadataPolicy() {
+        expect(FirmwareLimitPolicy.accepts(.init(size: 1, type: "ui8 "), for: .activation), "bfF0 accepts ui8 metadata")
+        expect(FirmwareLimitPolicy.accepts(.init(size: 4, type: "ui32"), for: .upper), "bfD0 accepts ui32 metadata")
+        expect(FirmwareLimitPolicy.accepts(.init(size: 0, type: ""), for: .lower), "unpopulated metadata is accepted for direct-read validation")
+        expect(FirmwareLimitPolicy.accepts(.init(size: 0, type: "ui32"), for: .lower), "zero-size metadata with expected type is accepted")
+        expect(!FirmwareLimitPolicy.accepts(.init(size: 1, type: "ui32"), for: .activation), "wrong activation type is rejected")
+        expect(!FirmwareLimitPolicy.accepts(.init(size: 8, type: "ui32"), for: .upper), "wrong register width is rejected")
+    }
+
+    private static func testEncoding() {
+        expect(FirmwareLimitPolicy.encodeUInt32LittleEndian(80) == [0x50, 0, 0, 0], "80% is encoded little-endian")
+        expect(FirmwareLimitPolicy.decodeUInt32LittleEndian([0x4E, 0, 0, 0]) == 78, "78% is decoded little-endian")
+        expect(FirmwareLimitPolicy.decodeUInt32LittleEndian([0x4E, 0, 0]) == nil, "short uint32 payload is rejected")
+    }
+
+    private static func testReadOnlyPlan() throws {
+        let transport = FakeFirmwareLimitTransport()
+        let plan = try controller(transport).makePlan(for: FirmwareLimitRequest(upper: 85, lower: 83))
+        expect(plan.previous == FirmwareLimitState(activationByte: 0, upper: 80, lower: 78), "plan records the actual pre-write state")
+        expect(plan.steps == [.deactivate, .writeUpper(85), .writeLower(83), .activate], "plan uses required deactivate/upper/lower/activate order")
+        expect(transport.writes.isEmpty, "planning never writes SMC")
+    }
+
+    private static func testConfigureSequence() throws {
+        let transport = FakeFirmwareLimitTransport()
+        let final = try controller(transport).configure(
+            FirmwareLimitRequest(upper: 85, lower: 83),
+            permit: permit()
+        )
+        expect(final == FirmwareLimitState(activationByte: 2, upper: 85, lower: 83), "configure returns verified active state")
+        expect(transport.writes == [
+            "bfF0=00", "bfD0=55000000", "bfE0=53000000", "bfF0=02"
+        ], "writes follow the firmware-required order")
+    }
+
+    private static func testTransientWriteFailureRetries() throws {
+        let transport = FakeFirmwareLimitTransport()
+        transport.failuresRemainingByKey[.lower] = 1
+        let final = try controller(transport).configure(
+            FirmwareLimitRequest(upper: 85, lower: 83),
+            permit: permit()
+        )
+        expect(final == FirmwareLimitState(activationByte: 2, upper: 85, lower: 83),
+               "a transient write failure is retried and verified")
+        expect(transport.writes.filter { $0 == "bfE0=53000000" }.count == 2,
+               "a failed lower-threshold write is retried once")
+    }
+
+    private static func testNoOp() throws {
+        let transport = FakeFirmwareLimitTransport()
+        transport.activation = 0x02
+        let final = try controller(transport).configure(
+            FirmwareLimitRequest(upper: 80, lower: 78),
+            permit: permit()
+        )
+        expect(final.isActive, "already matching active state is returned")
+        expect(transport.writes.isEmpty, "matching state does not cause redundant writes")
+    }
+
+    private static func testDeactivate() throws {
+        let transport = FakeFirmwareLimitTransport()
+        transport.activation = 0x02
+        let final = try controller(transport).deactivate(permit: permit())
+        expect(final.activationByte == 0, "deactivate confirms firmware limit is off")
+        expect(final.upper == 80 && final.lower == 78, "deactivate leaves both thresholds unchanged")
+        expect(transport.writes == ["bfF0=00"], "deactivate writes only activation byte")
+    }
+
+    private static func testSafetyPermit() throws {
+        let identity = FirmwareLimitDeviceIdentity(
+            modelIdentifier: "MacBookPro18,1",
+            systemFirmware: "mBoot-20457.41.3",
+            macOSMajorVersion: 15,
+            architecture: "arm64"
+        )
+        let base = FirmwareLimitWriteContext(
+            isAdministrator: true, isOnACPower: true,
+            mauLeafRunning: false, battRunning: false, userConfirmed: true
+        )
+        _ = try FirmwareLimitWritePermit.authorize(identity: identity, context: base)
+        expectThrows({
+            _ = try FirmwareLimitWritePermit.authorize(
+                identity: identity,
+                context: FirmwareLimitWriteContext(
+                    isAdministrator: true, isOnACPower: false,
+                    mauLeafRunning: false, battRunning: false, userConfirmed: true
+                )
+            )
+        }, "no AC power blocks write authorization")
+        expectThrows({
+            _ = try FirmwareLimitWritePermit.authorize(
+                identity: identity,
+                context: FirmwareLimitWriteContext(
+                    isAdministrator: true, isOnACPower: true,
+                    mauLeafRunning: true, battRunning: false, userConfirmed: true
+                )
+            )
+        }, "running MauLeaf blocks write authorization")
+        expectThrows({
+            _ = try FirmwareLimitWritePermit.authorize(
+                identity: identity,
+                context: FirmwareLimitWriteContext(
+                    isAdministrator: true, isOnACPower: true,
+                    mauLeafRunning: false, battRunning: true, userConfirmed: true
+                )
+            )
+        }, "running batt blocks write authorization")
+        expectThrows({
+            _ = try FirmwareLimitWritePermit.authorize(
+                identity: identity,
+                context: FirmwareLimitWriteContext(
+                    isAdministrator: false, isOnACPower: true,
+                    mauLeafRunning: false, battRunning: false, userConfirmed: true
+                )
+            )
+        }, "non-administrator blocks write authorization")
+        expectThrows({
+            _ = try FirmwareLimitWritePermit.authorize(
+                identity: identity,
+                context: FirmwareLimitWriteContext(
+                    isAdministrator: true, isOnACPower: true,
+                    mauLeafRunning: false, battRunning: false, userConfirmed: false
+                )
+            )
+        }, "missing typed confirmation blocks write authorization")
+        expectThrows({
+            _ = try FirmwareLimitWritePermit.authorize(
+                identity: FirmwareLimitDeviceIdentity(
+                    modelIdentifier: "MacBookAir10,1",
+                    systemFirmware: identity.systemFirmware,
+                    macOSMajorVersion: 15,
+                    architecture: "arm64"
+                ),
+                context: base
+            )
+        }, "unverified Mac model is rejected")
+        expectThrows({
+            _ = try FirmwareLimitWritePermit.authorize(
+                identity: FirmwareLimitDeviceIdentity(
+                    modelIdentifier: identity.modelIdentifier,
+                    systemFirmware: "mBoot-20457.1.29",
+                    macOSMajorVersion: 15,
+                    architecture: "arm64"
+                ),
+                context: base
+            )
+        }, "different firmware build is rejected")
+        expectThrows({
+            _ = try FirmwareLimitWritePermit.authorize(
+                identity: FirmwareLimitDeviceIdentity(
+                    modelIdentifier: identity.modelIdentifier,
+                    systemFirmware: identity.systemFirmware,
+                    macOSMajorVersion: 27,
+                    architecture: "arm64"
+                ),
+                context: base
+            )
+        }, "unverified macOS major version is rejected")
+    }
+
+    private static func testInvalidStateRefusesWrites() throws {
+        let transport = FakeFirmwareLimitTransport()
+        transport.activation = 0x01
+        expectThrows({ _ = try controller(transport).readState() }, "unknown activation byte is rejected")
+        expect(transport.writes.isEmpty, "invalid activation state causes no writes")
+
+        let invalidBand = FakeFirmwareLimitTransport()
+        invalidBand.lower = 80
+        expectThrows({ _ = try controller(invalidBand).readState() }, "invalid stored lower/upper band is rejected")
+        expect(invalidBand.writes.isEmpty, "invalid stored band causes no writes")
+    }
+
+    private static func testUnexpectedMetadataRefusesWrites() throws {
+        let transport = FakeFirmwareLimitTransport()
+        transport.metadataValues[.upper] = FirmwareLimitKeyMetadata(size: 8, type: "ui64")
+        expectThrows({ _ = try controller(transport).configure(
+            FirmwareLimitRequest(upper: 85, lower: 83),
+            permit: permit()
+        ) }, "unexpected key metadata prevents configuration")
+        expect(transport.writes.isEmpty, "unexpected key metadata causes no writes")
+    }
+
+    private static func testRollbackRestoresPreviousState() throws {
+        let transport = FakeFirmwareLimitTransport()
+        transport.activation = 0x02
+        transport.failuresRemainingByKey[.lower] = 3
+        expectThrows({ _ = try controller(transport).configure(
+            FirmwareLimitRequest(upper: 85, lower: 83),
+            permit: permit()
+        ) }, "injected write failure is surfaced")
+        expect(transport.activation == 0x02 && transport.upper == 80 && transport.lower == 78,
+               "failed transaction restores and verifies previous active state")
+    }
+
+    private static func testRollbackFallsBackToInactive() throws {
+        let transport = FakeFirmwareLimitTransport()
+        transport.activation = 0x02
+        transport.mismatchedReadKey = .upper
+        expectThrows({ _ = try controller(transport).configure(
+            FirmwareLimitRequest(upper: 85, lower: 83),
+            permit: permit()
+        ) }, "readback mismatch is surfaced")
+        expect(transport.activation == 0x00, "failed rollback falls back to verified inactive state")
+    }
+}

@@ -31,7 +31,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p dist
-          swiftc -O \
+          swiftc -O -parse-as-library \
             -target arm64-apple-macos15.0 \
             -framework IOKit \
             -framework CoreFoundation \

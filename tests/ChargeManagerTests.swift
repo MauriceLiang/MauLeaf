@@ -71,10 +71,11 @@ private enum ChargeManagerTests {
 
         try await testAutomaticQuitRestore()
         try await testQuitDuringOneTimeFullCharge()
-        try await testUnpluggedManualDisableQueuesRestore()
-        try await testUnpluggedQuitQueuesRestore()
-        try await testUnpluggedLegacyQuitQueuesDeactivation()
-        try await testUnpluggedOneTimeQuitCancelsAndQueuesRestore()
+        try await testUnpluggedManualDisableRestoresImmediately()
+        try await testUnpluggedQuitRestoresImmediately()
+        try await testUnpluggedLowBatteryQuitBlocked()
+        try await testUnpluggedLegacyQuitRequiresExplicitOverride()
+        try await testUnpluggedOneTimeQuitRestoresImmediately()
         try await testRestoreFailureBlocksQuit()
         try await testFalseRestoreAcknowledgmentBlocksQuit()
         try await testLegacyPreview4RestoresActivationOnQuit()
@@ -82,7 +83,7 @@ private enum ChargeManagerTests {
         try await testUnknownFirmwareStateBlocksQuit()
 
         UserDefaults.standard.removeObject(forKey: "nativeFirmwareWriteConfirmed")
-        print("ChargeManagerTests: PASS (opt-in activation, automatic quit restore, AC guard, failure retry, one-time full and legacy migration)")
+        print("ChargeManagerTests: PASS (battery + AC exact restoration on normal quit, low-battery refusal, manual disable, one-time full, legacy migration)")
     }
 
     @MainActor
@@ -136,43 +137,62 @@ private enum ChargeManagerTests {
     }
 
     @MainActor
-    private static func testUnpluggedManualDisableQueuesRestore() async throws {
+    private static func testUnpluggedManualDisableRestoresImmediately() async throws {
         let backend = FixtureNativeFirmwareBackend()
         let manager = try await activatedManager(backend: backend)
         backend.acConnected = false
         manager.isAdapterConnected = false
         try check(manager.canDisableLimit,
-                  "the Disable charging limit button stays usable on battery")
+                  "Disable remains available on battery")
         manager.disableLimit()
         try await wait { backend.restoreCount == 1 && !manager.isBusy }
-        try check(manager.restorePending && !manager.isError,
-                  "manual disable on battery queues recovery without pretending firmware is already restored")
-        backend.acConnected = true
-        _ = try await backend.restoreOriginalState()
-        try check(!backend.state.active && !backend.state.hasOriginalStateSnapshot,
-                  "queued manual disable completes when AC power returns")
+        try check(!manager.restorePending && !manager.isError
+                  && !backend.state.active && !manager.hasOriginalStateSnapshot
+                  && backend.state.upper == 80 && backend.state.lower == 78,
+                  "manual disable on validated battery power restores all three original keys immediately")
     }
 
     @MainActor
-    private static func testUnpluggedQuitQueuesRestore() async throws {
+    private static func testUnpluggedQuitRestoresImmediately() async throws {
         let backend = FixtureNativeFirmwareBackend()
         let manager = try await activatedManager(backend: backend)
+        manager.requestLimit(90, immediate: true)
+        try await wait { backend.applyCount == 2 && !manager.isBusy }
         backend.acConnected = false
         manager.isAdapterConnected = false
         let allowed = await manager.prepareForTermination()
         try check(allowed && manager.isPreparingToQuit && !manager.isError,
-                  "unplugged normal quit is allowed after durable restoration is queued")
-        try check(backend.restoreCount == 1 && backend.state.active
-                  && backend.state.restorePending && manager.restorePending,
-                  "without AC, the helper retains the original snapshot and the recovery request")
-        backend.acConnected = true
-        _ = try await backend.restoreOriginalState()
-        try check(!backend.state.active && !backend.state.hasOriginalStateSnapshot,
-                  "reconnecting AC allows the queued original-state restore to complete")
+                  "normal quit on battery is allowed after verified restoration")
+        try check(backend.restoreCount == 1 && !backend.state.active
+                  && backend.state.upper == 80 && backend.state.lower == 78
+                  && !manager.hasOriginalStateSnapshot && !backend.pending
+                  && !manager.restorePending,
+                  "battery-only normal quit restores exact original three keys and clears durable snapshot")
     }
 
     @MainActor
-    private static func testUnpluggedLegacyQuitQueuesDeactivation() async throws {
+    private static func testUnpluggedLowBatteryQuitBlocked() async throws {
+        let backend = FixtureNativeFirmwareBackend()
+        let manager = try await activatedManager(backend: backend)
+        backend.acConnected = false
+        backend.offlineRestoreAllowed = false
+        manager.isAdapterConnected = false
+        let denied = await manager.prepareForTermination()
+        try check(!denied && !manager.isPreparingToQuit && manager.isError,
+                  "low battery or unverified power source cannot silently pass normal quit")
+        try check(backend.restoreCount == 1 && backend.state.active
+                  && manager.hasOriginalStateSnapshot && manager.restorePending,
+                  "failed offline restore preserves helper snapshot and durable recovery request")
+        backend.acConnected = true
+        manager.isAdapterConnected = true
+        let retried = await manager.prepareForTermination()
+        try check(retried && !backend.state.active && !manager.restorePending
+                  && !manager.hasOriginalStateSnapshot,
+                  "after AC reconnection user can retry and safely quit")
+    }
+
+    @MainActor
+    private static func testUnpluggedLegacyQuitRequiresExplicitOverride() async throws {
         let backend = FixtureNativeFirmwareBackend()
         backend.state = FirmwareLimitHelperStateResponse(
             state: FirmwareLimitState(activationByte: 0x02, upper: 85, lower: 83)
@@ -182,17 +202,18 @@ private enum ChargeManagerTests {
         try await wait { manager.isLegacyActive }
         backend.acConnected = false
         manager.isAdapterConnected = false
-        let allowed = await manager.prepareForTermination()
-        try check(allowed && backend.pendingLegacyRestore && manager.restorePending,
-                  "unplugged Preview 4 legacy limit may exit while a deactivation request is retained")
+        let denied = await manager.prepareForTermination()
+        try check(!denied && backend.pendingLegacyRestore && manager.restorePending,
+                  "without original snapshot unplugged legacy quit must warn rather than silently claim restoration")
         backend.acConnected = true
-        _ = try await backend.restoreOriginalState()
-        try check(!backend.state.active && backend.state.upper == 85 && backend.state.lower == 83,
-                  "legacy restoration only clears activation and preserves unknown historical thresholds")
+        let retried = await manager.prepareForTermination()
+        try check(retried && !backend.state.active && backend.state.upper == 85
+                  && backend.state.lower == 83,
+                  "legacy AC restoration deactivates bfF0 while preserving unknown historical thresholds")
     }
 
     @MainActor
-    private static func testUnpluggedOneTimeQuitCancelsAndQueuesRestore() async throws {
+    private static func testUnpluggedOneTimeQuitRestoresImmediately() async throws {
         let backend = FixtureNativeFirmwareBackend()
         let manager = try await activatedManager(backend: backend)
         manager.beginOneTimeFullCharge()
@@ -200,12 +221,11 @@ private enum ChargeManagerTests {
         backend.acConnected = false
         manager.isAdapterConnected = false
         let allowed = await manager.prepareForTermination()
-        try check(allowed && !backend.pending && backend.state.restorePending,
-                  "unplugged quit cancels the one-time task and schedules original-state restore")
-        backend.acConnected = true
-        _ = try await backend.restoreOriginalState()
-        try check(!backend.state.active && !backend.state.hasOriginalStateSnapshot,
-                  "the original state, not the one-time charging limit, is restored after AC returns")
+        try check(allowed && !backend.pending && !backend.state.restorePending,
+                  "unplugged normal quit stops one-time charge and finishes immediate restoration")
+        try check(!backend.state.active && backend.state.upper == 80
+                  && backend.state.lower == 78 && !manager.hasOriginalStateSnapshot,
+                  "one-time charge quit restores the original values, not the temporary limited state")
     }
 
     @MainActor

@@ -10,7 +10,7 @@ It runs as root through the LaunchDaemon `com.local.chargecap.firmware-helper`. 
 
 ## Installation
 
-On first app launch, MauLeaf checks the native helper connection. If the service is missing or an older read-only helper is installed, the app runs the bundled installer with one administrator authorization prompt. The old “install control component” panel is not part of the UI.
+On first app launch, MauLeaf checks the native helper connection and protocol version. If the service is missing or an older helper is installed, the app runs the bundled installer with administrator authorization, then verifies the updated helper version before enabling controls. This also upgrades an installed helper when a new app version fixes firmware identity detection. The old “install control component” panel is not part of the UI.
 
 The installer validates the helper's code-signing identifier and existing LaunchDaemon metadata. It upgrades only an existing helper whose label, path, and signing identifier all match MauLeaf; unrelated same-name services are not overwritten.
 

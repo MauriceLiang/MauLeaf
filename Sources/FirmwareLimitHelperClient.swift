@@ -76,8 +76,8 @@ final class FirmwareLimitHelperClient: NativeFirmwareBackend {
                 connectionBox.connection.invalidate()
             }
 
-            let proxyObject = connection.remoteObjectProxyWithErrorHandler { error in
-                delivery.deliver(.failure(error))
+            let proxyObject = connection.remoteObjectProxyWithErrorHandler { _ in
+                delivery.deliver(.failure(FirmwareLimitHelperClientError.serviceUnavailable))
                 connection.invalidate()
             }
             guard let proxy = proxyObject as? FirmwareLimitHelperProtocol else {

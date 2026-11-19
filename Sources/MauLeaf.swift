@@ -1294,7 +1294,10 @@ final class ChargeManager: ObservableObject {
         let deadline = Date().addingTimeInterval(30)
         while isBusy {
             guard Date() < deadline else {
-                return cancelTermination("当前原生固件操作尚未结束，已取消退出；请重试。")
+                isPreparingToQuit = false
+                statusMessage = "当前原生固件操作尚未结束，已取消退出；请重试。"
+                isError = true
+                return false
             }
             try? await Task.sleep(nanoseconds: 50_000_000)
         }
@@ -1319,7 +1322,7 @@ final class ChargeManager: ObservableObject {
             if needsRestore {
                 guard state.restoreSupported else {
                     return cancelTermination(
-                        "当前设备不支持安全恢复：\\(state.restoreBlockReason ?? "硬件身份校验失败")。已取消退出，请勿直接删除 MauLeaf。"
+                        "当前设备不支持安全恢复：\(state.restoreBlockReason ?? "硬件身份校验失败")。已取消退出，请勿直接删除 MauLeaf."
                     )
                 }
                 guard isAdapterConnected else {
@@ -1362,7 +1365,7 @@ final class ChargeManager: ObservableObject {
             refreshTimer = nil
             return true
         } catch {
-            return cancelTermination("退出前恢复固件失败：\\(AppText(error: error))；已取消退出，请保持接电并重试。")
+            return cancelTermination("退出前恢复固件失败：\(AppText(error: error))；已取消退出，请保持接电并重试。")
         }
     }
 

@@ -303,6 +303,34 @@ final class FirmwareLimitHelperService: NSObject, FirmwareLimitHelperProtocol {
         }
     }
 
+    /// Read-only verification for the root-owned finalizer, which may run
+    /// after the main app bundle has already been deleted.
+    func verifyReadyForDeferredRemoval() throws {
+        guard isAdministrator() else { throw FirmwareLimitCoreError.administratorRequired }
+        stateLock.lock()
+        let hasSnapshot = originalStateSnapshot != nil
+        let hasLegacy = legacyRestoreRequest != nil
+        let hasJob = pendingJob != nil
+        stateLock.unlock()
+        guard originalSnapshotLoadError == nil,
+              legacyRestoreLoadError == nil,
+              !hasSnapshot, !hasLegacy, !hasJob,
+              !FileManager.default.fileExists(atPath: originalStateURL.path),
+              !FileManager.default.fileExists(atPath: legacyRestoreURL.path),
+              !FileManager.default.fileExists(atPath: restoreRequestURL.path),
+              !FileManager.default.fileExists(atPath: jobURL.path) else {
+            throw FirmwareLimitCoreError.transportFailure(
+                "Pending or unverified firmware recovery data still exists."
+            )
+        }
+        let firmware = try withHardwareWatchdog { try controller.readState() }
+        guard !firmware.isActive else {
+            throw FirmwareLimitCoreError.transportFailure(
+                "The firmware limit is still active; do not remove its recovery helper."
+            )
+        }
+    }
+
     func oneTimeChargeStatus(withReply reply: @escaping (NSData?, NSString?) -> Void) {
         stateLock.lock()
         let job = pendingJob

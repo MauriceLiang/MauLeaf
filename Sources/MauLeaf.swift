@@ -827,6 +827,11 @@ final class ChargeManager: ObservableObject {
         !isBusy && !isPreparingToQuit && (!backendReady || lastAction != nil)
     }
 
+    var canStartFullCharge: Bool {
+        backendReady && currentState?.active == true && isAdapterConnected
+            && !isBusy && !isPreparingToQuit && !fullOncePending
+    }
+
     func start() {
         guard !started else { return }
         started = true
@@ -868,8 +873,14 @@ final class ChargeManager: ObservableObject {
             currentState = state
             fullOncePending = oneTime.pending
             fullOnceCancelRequested = oneTime.cancelRequested
-            backendReady = true
+            backendReady = state.writeSupported
             if (50...95).contains(state.upper) { limit = state.upper }
+            if !state.writeSupported {
+                modeText = "当前设备不支持原生固件控制"
+                statusMessage = AppText(verbatim: state.writeBlockReason ?? "当前硬件配置未通过原生写入验证。")
+                isError = true
+                return
+            }
             if oneTime.pending && oneTime.cancelRequested {
                 modeText = "等待接电后恢复原生充电上限"
             } else if oneTime.pending {
@@ -893,8 +904,15 @@ final class ChargeManager: ObservableObject {
                     currentState = state
                     fullOncePending = oneTime.pending
                     fullOnceCancelRequested = oneTime.cancelRequested
-                    backendReady = true
+                    backendReady = state.writeSupported
                     if (50...95).contains(state.upper) { limit = state.upper }
+                    guard state.writeSupported else {
+                        modeText = "当前设备不支持原生固件控制"
+                        statusMessage = AppText(verbatim: state.writeBlockReason ?? "当前硬件配置未通过原生写入验证。")
+                        isError = true
+                        isBusy = false
+                        return
+                    }
                     modeText = oneTime.pending && oneTime.cancelRequested
                         ? "等待接电后恢复原生充电上限"
                         : (oneTime.pending
@@ -983,8 +1001,7 @@ final class ChargeManager: ObservableObject {
     }
 
     func beginOneTimeFullCharge() {
-        guard backendReady, isAdapterConnected, !isBusy, !isPreparingToQuit,
-              (batteryPercent ?? 0) < 100 else { return }
+        guard canStartFullCharge, (batteryPercent ?? 0) < 100 else { return }
         if !UserDefaults.standard.bool(forKey: "nativeFirmwareWriteConfirmed") {
             pendingAction = .full
             showNativeWriteConfirmation = true

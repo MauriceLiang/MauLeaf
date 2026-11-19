@@ -64,6 +64,8 @@ private enum UnpluggedRestorePolicyTests {
             root: Bool = true,
             external: Bool? = false,
             pmsetBattery: Bool = true,
+            batteryPercent: Int? = 80,
+            batteryIsCharging: Bool = false,
             conflict: String? = nil,
             confirmed: Bool = true
         ) -> UnpluggedRestoreConditions {
@@ -74,6 +76,8 @@ private enum UnpluggedRestorePolicyTests {
                 isAdministrator: root,
                 externalConnected: external,
                 pmsetReportsBatteryPower: pmsetBattery,
+                batteryPercent: batteryPercent,
+                batteryIsCharging: batteryIsCharging,
                 conflictingProcess: conflict,
                 explicitlyConfirmed: confirmed
             )
@@ -100,6 +104,15 @@ private enum UnpluggedRestorePolicyTests {
         }
         mustReject("pmset disagrees") {
             try UnpluggedRestorePolicy.authorize(context(pmsetBattery: false))
+        }
+        mustReject("low battery") {
+            try UnpluggedRestorePolicy.authorize(context(batteryPercent: 20))
+        }
+        mustReject("battery reading missing") {
+            try UnpluggedRestorePolicy.authorize(context(batteryPercent: nil))
+        }
+        mustReject("contradictory charging telemetry") {
+            try UnpluggedRestorePolicy.authorize(context(batteryIsCharging: true))
         }
         mustReject("not root") {
             try UnpluggedRestorePolicy.authorize(context(root: false))

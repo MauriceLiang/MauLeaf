@@ -94,7 +94,8 @@ fi
 [[ "$(grep -c 'arch: arm64' "$ROOT/.github/workflows/build-release.yml")" -eq 1 ]]
 grep -Fq -- '--restore-original-state' "$ROOT/Sources/FirmwareLimitHelperMain.swift"
 grep -Fq 'original-firmware-state.json' "$ROOT/Sources/FirmwareLimitHelperService.swift"
-grep -Fq 'restore-original-state.pending' "$ROOT/Support/com.local.chargecap.firmware-helper.plist"
+grep -Fq 'background-recovery.pending' "$ROOT/Support/com.local.chargecap.firmware-helper.plist"
+grep -Fq 'restore-original-state.pending' "$ROOT/Sources/FirmwareLimitHelperService.swift"
 grep -Fq '启用限制充电' "$ROOT/Sources/MauLeaf.swift"
 grep -Fq '关闭限制充电' "$ROOT/Sources/MauLeaf.swift"
 grep -Fq '@Published private(set) var menuBarLeafStyle: MenuBarLeafStyle = .green' "$ROOT/Sources/MauLeaf.swift"

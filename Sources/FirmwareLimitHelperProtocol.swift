@@ -1,7 +1,7 @@
 import Foundation
 
 /// Narrow XPC surface for the native firmware controller. All SMC writes are
-/// performed by the root helper after target, AC-power, and consent checks.
+/// performed by the root helper after target, power-source, and consent checks.
 @objc protocol FirmwareLimitHelperProtocol {
     func readState(withReply reply: @escaping (NSData?, NSString?) -> Void)
     func makePlan(upper: Int, lower: Int, withReply reply: @escaping (NSData?, NSString?) -> Void)
@@ -13,7 +13,7 @@ import Foundation
 }
 
 enum FirmwareLimitHelperProtocolVersion {
-    static let current = 4
+    static let current = 5
 }
 
 struct FirmwareLimitHelperStateResponse: Codable, Equatable {

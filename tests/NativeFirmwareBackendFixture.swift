@@ -25,6 +25,8 @@ final class FixtureNativeFirmwareBackend: NativeFirmwareBackend {
     var failNextRestore = false
     var failNextRead = false
     var falselyReportRestoreSuccess = false
+    var acConnected = true
+    var pendingLegacyRestore = false
 
     func readState() async throws -> FirmwareLimitHelperStateResponse {
         if failNextRead {
@@ -103,6 +105,32 @@ final class FixtureNativeFirmwareBackend: NativeFirmwareBackend {
             failNextRestore = false
             throw FixtureBackendError.injected
         }
+        if !acConnected {
+            if var snapshot = originalSnapshot {
+                snapshot.restoreRequested = true
+                originalSnapshot = snapshot
+                state = FirmwareLimitHelperStateResponse(
+                    state: FirmwareLimitState(
+                        activationByte: state.activationByte,
+                        upper: state.upper,
+                        lower: state.lower
+                    ),
+                    identity: identity, snapshot: snapshot
+                )
+            } else if state.active {
+                pendingLegacyRestore = true
+                state = FirmwareLimitHelperStateResponse(
+                    state: FirmwareLimitState(
+                        activationByte: state.activationByte,
+                        upper: state.upper,
+                        lower: state.lower
+                    ),
+                    identity: identity, legacyRestorePending: true
+                )
+            }
+            pending = false
+            throw FixtureBackendError.injected
+        }
         if falselyReportRestoreSuccess {
             falselyReportRestoreSuccess = false
             let fabricated = FirmwareLimitHelperStateResponse(
@@ -121,6 +149,7 @@ final class FixtureNativeFirmwareBackend: NativeFirmwareBackend {
                 identity: identity
             )
             self.originalSnapshot = nil
+            pendingLegacyRestore = false
         } else if state.active {
             state = FirmwareLimitHelperStateResponse(
                 state: FirmwareLimitState(activationByte: 0x00, upper: state.upper, lower: state.lower),
@@ -128,6 +157,13 @@ final class FixtureNativeFirmwareBackend: NativeFirmwareBackend {
             )
         }
         pending = false
+        pendingLegacyRestore = false
+        state = FirmwareLimitHelperStateResponse(
+            state: FirmwareLimitState(
+                activationByte: state.activationByte, upper: state.upper, lower: state.lower
+            ),
+            identity: identity
+        )
         return FirmwareLimitHelperOperationResponse(
             state: state,
             oneTimePending: false,

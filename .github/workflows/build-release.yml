@@ -34,6 +34,29 @@ jobs:
       - name: Run tests
         run: bash tests/run.sh
 
+
+  # Exercise the exact Apple Silicon packaging path before merging.
+  # This produces a local smoke-test DMG but does not upload or publish it.
+  package-smoke:
+    if: github.event_name == 'pull_request'
+    needs: test
+    runs-on: macos-15
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build and verify arm64 DMG
+        env:
+          TARGET_ARCH: arm64
+          BUILD_NUMBER: '8000'
+        shell: bash
+        run: |
+          set -euo pipefail
+          RELEASE_VERSION="$(tr -d '[:space:]' < VERSION)"
+          export RELEASE_VERSION
+          export RELEASE_LABEL="${RELEASE_VERSION}-preview.0"
+          bash Scripts/ci/package-macos.sh
+          test -s "dist/MauLeaf-${RELEASE_LABEL}-macos-arm64.dmg"
+
   prepare:
     if: >-
       (github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')))

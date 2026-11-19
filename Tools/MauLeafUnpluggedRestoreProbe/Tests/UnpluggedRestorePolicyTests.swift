@@ -7,6 +7,7 @@ private final class OfflineFakeSMC: FirmwareLimitTransport {
     var writes: [(String, [UInt8])] = []
     var failWrites = 0
     var ignoreWrites = 0
+    var allowFullRestore = false
 
     func metadata(for key: FirmwareLimitKey) throws -> FirmwareLimitKeyMetadata {
         FirmwareLimitKeyMetadata(
@@ -35,10 +36,19 @@ private final class OfflineFakeSMC: FirmwareLimitTransport {
             ignoreWrites -= 1
             return
         }
-        guard key == .activation && bytes == [0x00] else {
-            fatalError("Safety violation: offline probe attempted a non-deactivation write")
+        if key == .activation && bytes == [0x00] {
+            activation = 0x00
+            return
         }
-        activation = 0x00
+        guard allowFullRestore, activation == 0,
+              let value = FirmwareLimitPolicy.decodeUInt32LittleEndian(bytes) else {
+            fatalError("Safety violation: offline probe attempted a write outside inactive original-state restoration")
+        }
+        switch key {
+        case .upper: upper = value
+        case .lower: lower = value
+        case .activation: fatalError("Safety violation: offline probe reactivated bfF0")
+        }
     }
 }
 
@@ -233,6 +243,71 @@ private enum UnpluggedRestorePolicyTests {
         precondition(failures.writes.count == 3
                      && failures.writes.allSatisfy({ $0.0 == "bfF0" && $0.1 == [0x00] }),
                      "bounded retries never re-enable the limit or touch thresholds")
+
+        // Full original restore, lower-first: 85/83 -> 85/78 -> 80/78.
+        let full = OfflineFakeSMC()
+        full.upper = 85
+        full.lower = 83
+        full.allowFullRestore = true
+        var preflights: [FirmwareLimitState] = []
+        let exact = try UnpluggedRestorePolicy.restoreOriginal(
+            transport: full,
+            before: active,
+            original: original.state,
+            preflight: { expected in
+                preflights.append(expected)
+                let live = FirmwareLimitState(
+                    activationByte: full.activation,
+                    upper: full.upper, lower: full.lower
+                )
+                precondition(live == expected, "preflight saw unexpected firmware state")
+            },
+            pause: { _ in }
+        )
+        precondition(exact == original.state)
+        precondition(full.writes.map({ $0.0 }) == ["bfF0", "bfE0", "bfD0"])
+        precondition(preflights.count == 3 && preflights[1].activationByte == 0,
+                     "offline power + snapshot gates must be checked before each write")
+
+        // Opposite ordering: current 75/73 -> target 80/78. Upper first.
+        let upperFirst = OfflineFakeSMC()
+        upperFirst.upper = 75
+        upperFirst.lower = 73
+        upperFirst.allowFullRestore = true
+        let beforeUpperFirst = FirmwareLimitState(activationByte: 2, upper: 75, lower: 73)
+        let upperFirstResult = try UnpluggedRestorePolicy.restoreOriginal(
+            transport: upperFirst,
+            before: beforeUpperFirst,
+            original: original.state,
+            preflight: { _ in }, pause: { _ in }
+        )
+        precondition(upperFirstResult == original.state)
+        precondition(upperFirst.writes.map({ $0.0 }) == ["bfF0", "bfD0", "bfE0"])
+
+        // Fail closed midway through exact restore: bfF0 stays OFF, snapshot
+        // is external to this policy, no attempt ever writes bfF0=0x02.
+        let midFailure = OfflineFakeSMC()
+        midFailure.upper = 85
+        midFailure.lower = 83
+        midFailure.allowFullRestore = true
+        var preflightCalls = 0
+        mustReject("full restoration preflight failed after deactivation") {
+            _ = try UnpluggedRestorePolicy.restoreOriginal(
+                transport: midFailure,
+                before: active,
+                original: original.state,
+                preflight: { _ in
+                    preflightCalls += 1
+                    if preflightCalls == 2 {
+                        throw UnpluggedRestoreProbeError.requiresUnpluggedMac
+                    }
+                },
+                pause: { _ in }
+            )
+        }
+        precondition(midFailure.activation == 0 && midFailure.writes.count == 1
+                     && midFailure.writes[0].0 == "bfF0",
+                     "failure after deactivation must not re-enable or write thresholds")
 
         let inactive = OfflineFakeSMC()
         inactive.activation = 0

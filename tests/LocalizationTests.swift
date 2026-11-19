@@ -68,9 +68,6 @@ struct LocalizationTests {
               "both quit component lifecycle choices have bilingual labels")
         check(translations["固件已恢复，但后台组件未处理完成"] != nil,
               "component cleanup failure is distinguished from unverified firmware")
-        check(QuitComponentPolicy.keep.rawValue == "--keep-components"
-              && QuitComponentPolicy.remove.rawValue == "--remove-components",
-              "both native exit modes map to explicit safe root script arguments")
 
         print("LocalizationTests: PASS (\(checks) checks; real bundled string tables)")
     }

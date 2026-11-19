@@ -82,21 +82,31 @@ Only Apple Silicon arm64 packages are built and published. Intel builds are disc
 - **Change the limit:** Once enabled, the slider and presets apply immediately without overwriting the original snapshot.
 - **Disable charging limit:** Click “Disable charging limit” to restore the three original register values.
 - **One-time full charge:** Available only while a MauLeaf limit is enabled. When the one-time task finishes, the current MauLeaf limit is restored. You can then disable the limit to restore the original snapshot.
-- **Quit normally:** Restore the original registers immediately on AC or on the validated battery-only profile under its additional safeguards. If battery-only recovery is unavailable, preserve a durable pending recovery request and helper. A **Quit anyway** option may remain available for failures, but it is not a completed safe uninstall. Forced deletion and crashes cannot guarantee firmware restoration.
+- **Quit normally:** Choose **Keep components and quit**, **Remove components and quit**, or **Cancel**. Both exit paths restore and verify the original firmware immediately (AC or approved battery-only restore), then stop or remove the privileged helper according to your choice. Failed recovery/cleanup cancels normal quit.
 
-## Complete uninstall — AC and battery power
+## Normal quit: keep or remove native control components
 
-First launch the latest preview once to ensure the installed privileged Helper has been upgraded. Then quit MauLeaf **normally** from its menu bar. Run this single command from Terminal:
+On **Quit** from the menu bar, MauLeaf asks what to do with its native components. All successful normal quits restore and verify the exact pre-MauLeaf `bfF0 / bfD0 / bfE0` values first, whether AC is connected or the validated M1 Pro battery-only safety requirements are met.
+
+| Choice | Firmware | Running helper | System-level scripts and helper | Application |
+| --- | --- | --- | --- | --- |
+| **Keep components and quit** | Restore and verify | Stop | Retain for next launch | Retain |
+| **Remove components and quit** | Restore and verify | Stop | Remove helper, LaunchDaemon, root scripts, markers and log | Retain until moved to Trash in Finder |
+| **Cancel** | No quit transaction | Unchanged | Unchanged | Retain |
+
+If restoration, privileged authorization, service shutdown, or cleanup fails, normal quit is cancelled and the recovery files are retained. An explicit **Quit anyway** emergency override is not confirmation that cleanup succeeded.
+
+**Keep** stops the installed helper service but keeps its files for next use. On the next launch, macOS may require authorization to bootstrap it again. **Remove** stops and removes the privileged components, then exits; move `/Applications/MauLeaf.app` to Trash to remove the application and its bundled scripts. Moving the application to Trash without executing the normal quit does not run firmware restoration or root-component cleanup.
+
+## Alternate command-line complete uninstall
+
+If the application is already closed but you previously kept the native components, this command can safely restore any remaining original snapshot and remove both the app and system-level components:
 
 ```bash
 sudo "/Applications/MauLeaf.app/Contents/Resources/MauLeafNativeControl/uninstall-native-firmware-helper.sh"
 ```
 
-The command restores the **exact original firmware state**, independently verifies bfF0 is inactive and no unfinished job remains, then removes `/Applications/MauLeaf.app`, the root-owned privileged Helper, LaunchDaemon, saved recovery state, and **every installed MauLeaf install/uninstall/finalizer script**. There is no need to manually drag the app to the Trash after success.
-
-AC power is not required on the exact verified M1 Pro/macOS 15 firmware profile when both power-source sensors agree, the battery is >=30%, it is not charging, and the original snapshot was inactive and matches the current machine. If restoration or verification fails, the script exits with an error **without deleting the app or recovery components**. Connect AC or diagnose the underlying issue and retry. There is no force-delete-without-restore option.
-
-Preview 4 and earlier did not capture the historical thresholds; unknown original values cannot be reconstructed. Directly deleting the app or privileged service in Finder does not invoke the restore transaction and cannot be guaranteed safe.
+No option skips original-state verification. Legacy pre-snapshot firmware thresholds cannot be reconstructed.
 
 ## Development and tests
 

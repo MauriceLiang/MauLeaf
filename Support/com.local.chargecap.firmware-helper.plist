@@ -17,8 +17,11 @@
         <key>com.local.chargecap.firmware-helper</key>
         <true/>
     </dict>
+    <!-- Keep a registered MachService on demand, but do not launch a
+         background process merely because macOS booted. Pending recovery
+         remains launchd KeepAlive-protected via PathState below. -->
     <key>RunAtLoad</key>
-    <true/>
+    <false/>
     <key>KeepAlive</key>
     <dict>
         <key>PathState</key>

@@ -644,7 +644,7 @@ struct ContentView: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .disabled(manager.isPreparingToQuit)
-                .help(manager.text("退出 MauLeaf 不会取消已写入固件的充电上限；本次充满由原生后台服务负责恢复。"))
+                .help(manager.text("正常退出会先关闭限制充电并验证恢复。若无法安全恢复，将取消退出。"))
         }
     }
 }
@@ -1282,25 +1282,96 @@ final class ChargeManager: ObservableObject {
         }
     }
 
+    /// A normal application quit is a firmware recovery transaction, not
+    /// merely a UI shutdown. A failed or unverifiable restore cancels quitting.
+    /// The privileged helper retains the original snapshot for retry.
     func prepareForTermination() async -> Bool {
-        if isPreparingToQuit { return false }
+        guard !isPreparingToQuit else { return false }
         isPreparingToQuit = true
         limitDebounce?.cancel()
-        refreshTimer?.invalidate()
-        refreshTimer = nil
+        limitDebounce = nil
+
         let deadline = Date().addingTimeInterval(30)
         while isBusy {
             guard Date() < deadline else {
-                isPreparingToQuit = false
-                statusMessage = "当前原生固件操作尚未结束，已取消退出。"
-                isError = true
-                return false
+                return cancelTermination("当前原生固件操作尚未结束，已取消退出；请重试。")
             }
             try? await Task.sleep(nanoseconds: 50_000_000)
         }
-        // The firmware keeps the configured limit after the UI exits. The
-        // privileged helper independently owns one-time restoration.
-        return true
+
+        isBusy = true
+        isError = false
+        statusMessage = "退出前正在核对并恢复固件充电状态…"
+
+        do {
+            // Always re-read the root helper: a prior UI refresh may be stale.
+            // A Preview 4 helper must be upgraded before its legacy activation
+            // flag can be safely cleared by the Preview 5 restore operation.
+            let initial = try await backend.readState()
+            let state = try await ensureCurrentNativeHelper(initial, allowInstall: true)
+            let oneTime = try await backend.oneTimeChargeStatus()
+
+            let needsRestore = state.active
+                || state.hasOriginalStateSnapshot
+                || state.restorePending
+                || oneTime.pending
+
+            if needsRestore {
+                guard state.restoreSupported else {
+                    return cancelTermination(
+                        "当前设备不支持安全恢复：\\(state.restoreBlockReason ?? "硬件身份校验失败")。已取消退出，请勿直接删除 MauLeaf。"
+                    )
+                }
+                guard isAdapterConnected else {
+                    return cancelTermination("请先连接电源，再退出 MauLeaf；当前限充尚未恢复。")
+                }
+
+                // This also cancels a pending one-time full-charge task.
+                // A legacy Preview 4 state has no snapshot, so the helper
+                // clears only bfF0 and does not invent historical thresholds.
+                let result = try await backend.restoreOriginalState()
+                guard !result.state.active,
+                      !result.state.hasOriginalStateSnapshot,
+                      !result.state.restorePending,
+                      !result.oneTimePending else {
+                    return cancelTermination("原始固件恢复未完成，已取消退出；请接电后重试。")
+                }
+            }
+
+            // A successful XPC response is insufficient: confirm the helper
+            // independently reads back an inactive, task-free state.
+            let verified = try await backend.readState()
+            let verifiedOneTime = try await backend.oneTimeChargeStatus()
+            guard !verified.active,
+                  !verified.hasOriginalStateSnapshot,
+                  !verified.restorePending,
+                  !verifiedOneTime.pending else {
+                return cancelTermination("固件状态复查未通过，已取消退出；恢复数据已保留。")
+            }
+
+            currentState = verified
+            fullOncePending = false
+            fullOnceCancelRequested = false
+            backendReady = verified.writeSupported
+            restoreReady = verified.restoreSupported
+            modeText = "限制充电未启用"
+            statusMessage = "退出前已确认限制充电关闭。"
+            isError = false
+            isBusy = false
+            refreshTimer?.invalidate()
+            refreshTimer = nil
+            return true
+        } catch {
+            return cancelTermination("退出前恢复固件失败：\\(AppText(error: error))；已取消退出，请保持接电并重试。")
+        }
+    }
+
+    private func cancelTermination(_ message: AppText) -> Bool {
+        isBusy = false
+        isPreparingToQuit = false
+        isError = true
+        statusMessage = message
+        return false
     }
 
     private func readSystemBattery() {

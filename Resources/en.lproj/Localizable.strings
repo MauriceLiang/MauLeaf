@@ -183,3 +183,5 @@
 "安装控制组件" = "Install control component";
 
 "原生固件限充至 %@%%" = "Native firmware limit: %@%%";
+
+"原生控制失败：%@" = "Native control failed: %@";

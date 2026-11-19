@@ -17,7 +17,7 @@ struct FeedbackLayoutTests {
         DischargeAgent.monitor = DischargeMonitor(directory: directory)
         UserDefaults.standard.set(80, forKey: "chargeLimit")
         UserDefaults.standard.set("limited", forKey: "chargeModeV5")
-        UserDefaults.standard.set("adapter", forKey: "highChargePolicy")
+        UserDefaults.standard.set("discharge", forKey: "highChargePolicy")
         UserDefaults.standard.set(false, forKey: "chargeControlReleasedOnQuit")
         guard let leafURL = Bundle.main.url(forResource: "MenuBarLeafTemplate", withExtension: "png"),
               let leaf = NSImage(contentsOf: leafURL), leaf.isValid else {

@@ -8,11 +8,12 @@ import Foundation
     func applyLimit(upper: Int, lower: Int, confirmed: Bool, withReply reply: @escaping (NSData?, NSString?) -> Void)
     func beginOneTimeCharge(upper: Int, lower: Int, confirmed: Bool, withReply reply: @escaping (NSData?, NSString?) -> Void)
     func cancelOneTimeCharge(withReply reply: @escaping (NSData?, NSString?) -> Void)
+    func restoreOriginalState(withReply reply: @escaping (NSData?, NSString?) -> Void)
     func oneTimeChargeStatus(withReply reply: @escaping (NSData?, NSString?) -> Void)
 }
 
 enum FirmwareLimitHelperProtocolVersion {
-    static let current = 2
+    static let current = 3
 }
 
 struct FirmwareLimitHelperStateResponse: Codable, Equatable {
@@ -23,24 +24,51 @@ struct FirmwareLimitHelperStateResponse: Codable, Equatable {
     let lower: Int
     let writeSupported: Bool
     let writeBlockReason: String?
+    let hasOriginalStateSnapshot: Bool
+    let restorePending: Bool
+    let restoreSupported: Bool
+    let restoreBlockReason: String?
 
-    init(state: FirmwareLimitState, identity: FirmwareLimitDeviceIdentity? = nil) {
+    init(
+        state: FirmwareLimitState,
+        identity: FirmwareLimitDeviceIdentity? = nil,
+        snapshot: FirmwareLimitOriginalStateSnapshot? = nil
+    ) {
         helperVersion = FirmwareLimitHelperProtocolVersion.current
         activationByte = state.activationByte
         active = state.isActive
         upper = state.upper
         lower = state.lower
+        hasOriginalStateSnapshot = snapshot != nil
+        restorePending = snapshot?.restoreRequested ?? false
         if let identity {
             writeBlockReason = FirmwareLimitWritePermit.targetBlockReason(identity: identity)
             writeSupported = writeBlockReason == nil
+            if let snapshot {
+                restoreBlockReason = FirmwareLimitWritePermit.restoreBlockReason(
+                    identity: identity,
+                    snapshotIdentity: snapshot.deviceIdentity
+                )
+            } else {
+                // Without a snapshot, this capability is limited to clearing
+                // a legacy activation flag on the exact validated hardware.
+                restoreBlockReason = FirmwareLimitWritePermit.restoreBlockReason(
+                    identity: identity,
+                    snapshotIdentity: identity
+                )
+            }
+            restoreSupported = restoreBlockReason == nil
         } else {
             writeSupported = true
             writeBlockReason = nil
+            restoreSupported = true
+            restoreBlockReason = nil
         }
     }
 
     private enum CodingKeys: String, CodingKey {
         case helperVersion, activationByte, active, upper, lower, writeSupported, writeBlockReason
+        case hasOriginalStateSnapshot, restorePending, restoreSupported, restoreBlockReason
     }
 
     init(from decoder: Decoder) throws {
@@ -55,6 +83,10 @@ struct FirmwareLimitHelperStateResponse: Codable, Equatable {
         // them as legacy so the subsequent XPC version probe can trigger upgrade.
         writeSupported = try container.decodeIfPresent(Bool.self, forKey: .writeSupported) ?? true
         writeBlockReason = try container.decodeIfPresent(String.self, forKey: .writeBlockReason)
+        hasOriginalStateSnapshot = try container.decodeIfPresent(Bool.self, forKey: .hasOriginalStateSnapshot) ?? false
+        restorePending = try container.decodeIfPresent(Bool.self, forKey: .restorePending) ?? false
+        restoreSupported = try container.decodeIfPresent(Bool.self, forKey: .restoreSupported) ?? writeSupported
+        restoreBlockReason = try container.decodeIfPresent(String.self, forKey: .restoreBlockReason)
     }
 }
 

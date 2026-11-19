@@ -65,13 +65,20 @@ private enum FirmwareLimitHelperServiceTests {
             macOSMajorVersion: 15,
             architecture: "arm64"
         )
+        let jobURL = directory.appendingPathComponent("one-time-charge.json")
+        let originalStateURL = directory.appendingPathComponent("original-firmware-state.json")
+        let restoreRequestURL = directory.appendingPathComponent("restore-original-state.pending")
+        let backgroundRecoveryURL = directory.appendingPathComponent("background-recovery.pending")
         let service = FirmwareLimitHelperService(
             transport: transport,
             identityProvider: { identity },
             isOnACPower: { onAC },
             isAdministrator: { true },
             batteryObservation: { observation },
-            jobURL: directory.appendingPathComponent("one-time-charge.json"),
+            jobURL: jobURL,
+            originalStateURL: originalStateURL,
+            restoreRequestURL: restoreRequestURL,
+            backgroundRecoveryURL: backgroundRecoveryURL,
             monitorEnabled: false
         )
 
@@ -114,6 +121,15 @@ private enum FirmwareLimitHelperServiceTests {
         precondition(transport.writes == [
             "bfF0=00", "bfD0=55000000", "bfE0=53000000", "bfF0=02"
         ], "native helper applies the guarded firmware transaction")
+        let savedSnapshot = try JSONDecoder().decode(
+            FirmwareLimitOriginalStateSnapshot.self,
+            from: Data(contentsOf: originalStateURL)
+        )
+        precondition(savedSnapshot.state == FirmwareLimitState(activationByte: 0, upper: 80, lower: 78),
+                     "the helper persists the exact original activation flag and thresholds before writing")
+        let snapshotPermissions = try FileManager.default.attributesOfItem(atPath: originalStateURL.path)[.posixPermissions] as? NSNumber
+        precondition(snapshotPermissions?.intValue == 0o600,
+                     "the original-state snapshot is owner-only")
 
         var unconfirmedData: NSData?
         var unconfirmedError: NSString?
@@ -133,6 +149,8 @@ private enum FirmwareLimitHelperServiceTests {
         precondition(begun.oneTimePending && !begun.state.active,
                      "one-time full charge deactivates the firmware limit and persists a job")
         precondition(service.hasPendingOneTimeCharge, "helper retains the one-time task after the XPC request")
+        precondition(FileManager.default.fileExists(atPath: backgroundRecoveryURL.path),
+                     "the unified launchd marker keeps any background recovery job alive")
 
         onAC = false
         var cancelData: NSData?
@@ -145,6 +163,8 @@ private enum FirmwareLimitHelperServiceTests {
         onAC = true
         service.runOneTimeMonitorTickForTesting()
         precondition(!service.hasPendingOneTimeCharge, "pending cancellation restores once AC returns")
+        precondition(!FileManager.default.fileExists(atPath: backgroundRecoveryURL.path),
+                     "the unified launchd marker is removed when no recovery task remains")
         precondition(transport.activation == 2 && transport.upper == 85 && transport.lower == 83,
                      "cancellation restores and verifies the original native limit")
 
@@ -157,6 +177,86 @@ private enum FirmwareLimitHelperServiceTests {
         precondition(transport.activation == 2 && transport.upper == 85 && transport.lower == 83,
                      "automatic completion restores the exact saved thresholds")
 
-        print("FirmwareLimitHelperServiceTests: PASS (native helper, guarded writes, persistent one-time restore)")
+        var restoreData: NSData?
+        var restoreError: NSString?
+        service.restoreOriginalState { data, error in restoreData = data; restoreError = error }
+        precondition(restoreError == nil, "disabling MauLeaf restores the saved original state")
+        let restored = try JSONDecoder().decode(FirmwareLimitHelperOperationResponse.self, from: restoreData! as Data)
+        precondition(!restored.state.active && restored.state.upper == 80 && restored.state.lower == 78,
+                     "disable restores the original activation byte and both thresholds")
+        precondition(!FileManager.default.fileExists(atPath: originalStateURL.path)
+                     && !FileManager.default.fileExists(atPath: restoreRequestURL.path),
+                     "the snapshot is removed only after successful read-back verification")
+
+        var secondApplyError: NSString?
+        service.applyLimit(upper: 85, lower: 83, confirmed: true) { _, error in secondApplyError = error }
+        precondition(secondApplyError == nil, "a new managed limit can be enabled after restoring the original state")
+        onAC = false
+        var queuedRestoreError: NSString?
+        service.restoreOriginalState { _, error in queuedRestoreError = error }
+        precondition(queuedRestoreError != nil, "restoration refuses to write without AC power")
+        let queuedSnapshot = try JSONDecoder().decode(
+            FirmwareLimitOriginalStateSnapshot.self,
+            from: Data(contentsOf: originalStateURL)
+        )
+        precondition(queuedSnapshot.restoreRequested
+                     && FileManager.default.fileExists(atPath: restoreRequestURL.path)
+                     && FileManager.default.fileExists(atPath: backgroundRecoveryURL.path),
+                     "a failed unplugged restore keeps the snapshot and unified durable retry marker")
+        onAC = true
+        service.runOneTimeMonitorTickForTesting()
+        precondition(!FileManager.default.fileExists(atPath: originalStateURL.path)
+                     && !FileManager.default.fileExists(atPath: backgroundRecoveryURL.path)
+                     && transport.activation == 0 && transport.upper == 80 && transport.lower == 78,
+                     "the helper retries and completes the original-state restore after AC returns")
+
+        let upgradedIdentity = FirmwareLimitDeviceIdentity(
+            modelIdentifier: identity.modelIdentifier,
+            systemFirmware: identity.systemFirmware,
+            macOSMajorVersion: 27,
+            architecture: identity.architecture
+        )
+        precondition(FirmwareLimitWritePermit.targetBlockReason(identity: upgradedIdentity) != nil,
+                     "new firmware writes remain blocked on an unvalidated macOS release")
+        precondition(FirmwareLimitWritePermit.restoreBlockReason(
+            identity: upgradedIdentity,
+            snapshotIdentity: identity
+        ) == nil, "exact snapshot restoration remains available after an OS upgrade")
+
+        let legacyTransport = HelperFakeTransport()
+        legacyTransport.activation = 0x02
+        legacyTransport.upper = 85
+        legacyTransport.lower = 83
+        let legacyService = FirmwareLimitHelperService(
+            transport: legacyTransport,
+            identityProvider: { upgradedIdentity },
+            isOnACPower: { true },
+            isAdministrator: { true },
+            batteryObservation: { observation },
+            jobURL: directory.appendingPathComponent("legacy-one-time-charge.json"),
+            originalStateURL: directory.appendingPathComponent("legacy-original-state.json"),
+            restoreRequestURL: directory.appendingPathComponent("legacy-restore.pending"),
+            backgroundRecoveryURL: directory.appendingPathComponent("legacy-background-recovery.pending"),
+            monitorEnabled: false
+        )
+        var legacyStateData: NSData?
+        var legacyStateError: NSString?
+        legacyService.readState { data, error in legacyStateData = data; legacyStateError = error }
+        precondition(legacyStateError == nil, "legacy state remains readable after an OS upgrade")
+        let upgradedLegacyState = try JSONDecoder().decode(FirmwareLimitHelperStateResponse.self, from: legacyStateData! as Data)
+        precondition(!upgradedLegacyState.writeSupported && upgradedLegacyState.restoreSupported,
+                     "new writes stay blocked on the upgraded OS while activation-only legacy cleanup remains available")
+
+        var legacyData: NSData?
+        var legacyError: NSString?
+        legacyService.restoreOriginalState { data, error in legacyData = data; legacyError = error }
+        precondition(legacyError == nil, "legacy Preview 4 limits can be safely deactivated")
+        let legacyRestoreResponse = try JSONDecoder().decode(FirmwareLimitHelperOperationResponse.self, from: legacyData! as Data)
+        precondition(!legacyRestoreResponse.state.active && legacyTransport.upper == 85 && legacyTransport.lower == 83,
+                     "legacy migration only clears the activation flag and never invents original thresholds")
+        precondition(legacyRestoreResponse.message.contains("cannot be reconstructed"),
+                     "legacy migration explicitly reports that historical thresholds are unavailable")
+
+        print("FirmwareLimitHelperServiceTests: PASS (snapshot, exact restore, deferred restore, legacy migration)")
     }
 }

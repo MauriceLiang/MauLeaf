@@ -354,14 +354,14 @@ struct ContentView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             batteryCard
-            #if MAULEAF_INTEL_EXPERIMENTAL
-            intelPreviewSection
-            #else
             limitSection
                 .disabled(manager.isPreparingToQuit)
-            oneTimeChargeSection
+            limitControlSection
                 .disabled(manager.isPreparingToQuit)
-            #endif
+            if manager.hasOriginalStateSnapshot || manager.fullOncePending {
+                oneTimeChargeSection
+                    .disabled(manager.isPreparingToQuit)
+            }
             Divider()
             footer
         }
@@ -437,7 +437,7 @@ struct ContentView: View {
                 in: 50...95,
                 step: 5
             )
-            .disabled(!manager.backendReady || !manager.isAdapterConnected || manager.isBusy || manager.fullOncePending)
+            .disabled(manager.isBusy || manager.isPreparingToQuit || manager.fullOncePending || manager.isLegacyActive)
 
             HStack(spacing: 5) {
                 ForEach(presets, id: \.self) { preset in
@@ -452,13 +452,126 @@ struct ContentView: View {
                             .clipShape(RoundedRectangle(cornerRadius: 6))
                     }
                     .buttonStyle(.plain)
-                    .disabled(!manager.backendReady || !manager.isAdapterConnected || manager.isBusy || manager.fullOncePending)
+                    .disabled(manager.isBusy || manager.isPreparingToQuit || manager.fullOncePending || manager.isLegacyActive)
                 }
             }
-            Text(manager.text("连接电源后自动写入原生固件；本次充满期间暂不可修改上限。"))
+            Text(manager.text("未启用时仅保存上限设置；启用后修改会立即应用。"))
                 .font(.caption2)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private var limitControlSection: some View {
+        VStack(alignment: .leading, spacing: 9) {
+            if manager.isLegacyActive {
+                Label(manager.text("检测到旧版或未托管的固件限充"), systemImage: "exclamationmark.triangle.fill")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.orange)
+                Text(manager.text("没有找到首次启用前的原始固件快照。停用旧版限制只能关闭激活标志，不能恢复未保存的阈值。"))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                Button {
+                    manager.requestLegacyDisableConfirmation()
+                } label: {
+                    Label(manager.text("停用旧版限制"), systemImage: "power")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.bordered)
+                .disabled(!manager.canDisableLegacyLimit)
+            } else if manager.restorePending {
+                Label(manager.text("正在等待恢复原始固件配置"), systemImage: "arrow.triangle.2.circlepath")
+                    .font(.subheadline.weight(.semibold))
+                Text(manager.text("原始配置快照已保留。接入电源后，后台服务会继续恢复；也可以手动重试。"))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                Button {
+                    manager.disableLimit()
+                } label: {
+                    Label(manager.text("重试恢复原始配置"), systemImage: "arrow.clockwise")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.bordered)
+                .disabled(!manager.canRetryOriginalRestore)
+            } else if manager.fullOncePending {
+                Label(manager.text("本次充满进行中 · 限制暂时关闭"), systemImage: "bolt.fill")
+                    .font(.subheadline.weight(.semibold))
+                Text(manager.text("本次充满结束后会恢复当前 MauLeaf 上限；也可以现在关闭 MauLeaf 限制并恢复最初的固件配置。"))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                Button {
+                    manager.disableLimit()
+                } label: {
+                    Label(manager.text("关闭限制充电"), systemImage: "power")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.bordered)
+                .disabled(!manager.canDisableLimit)
+            } else if manager.hasOriginalStateSnapshot && manager.currentState?.active == true {
+                HStack {
+                    Label(manager.text("限制充电已启用"), systemImage: "checkmark.circle.fill")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.green)
+                    Spacer()
+                    Text(manager.text("上限") + " \(manager.limit)%")
+                        .font(.subheadline.monospacedDigit().weight(.semibold))
+                }
+                Text(manager.text("MauLeaf 已保存启用前的固件配置。关闭时会逐项恢复并验证原始值。"))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                Button {
+                    manager.disableLimit()
+                } label: {
+                    Label(manager.text("关闭限制充电"), systemImage: "power")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.bordered)
+                .disabled(!manager.canDisableLimit)
+            } else if manager.hasOriginalStateSnapshot {
+                Label(manager.text("原始快照仍保留，但当前限充未启用"), systemImage: "exclamationmark.triangle")
+                    .font(.subheadline.weight(.semibold))
+                Text(manager.text("当前固件状态与 MauLeaf 保存的限充状态不一致。建议恢复原始配置，避免遗留快照。"))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                Button {
+                    manager.disableLimit()
+                } label: {
+                    Label(manager.text("恢复原始配置"), systemImage: "arrow.uturn.backward")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.bordered)
+                .disabled(!manager.canDisableLimit)
+            } else {
+                Label(manager.text("限制充电尚未启用"), systemImage: "leaf")
+                    .font(.subheadline.weight(.semibold))
+                Text(manager.text("当前不会向固件写入充电上限。启用时会先保存原始配置，之后可随时关闭并恢复。"))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                Button {
+                    manager.enableLimit()
+                } label: {
+                    Label(manager.text("启用限制充电"), systemImage: "leaf.fill")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(!manager.canEnableLimit)
+            }
+        }
+        .padding(12)
+        .background(Color.primary.opacity(0.035), in: RoundedRectangle(cornerRadius: 11))
+        .alert(manager.text("检测到旧版充电限制"), isPresented: $manager.showLegacyDisableConfirmation) {
+            Button(manager.text("停用旧版限制"), role: .destructive) {
+                manager.confirmDisableLegacyLimit()
+            }
+            Button(manager.text("取消"), role: .cancel) {}
+        } message: {
+            Text(manager.text("当前固件限充没有 MauLeaf 原始快照。无法确认这些值是否由 Preview 4 或其他工具设置。继续操作只会清除 bfF0 激活标志，并保留 bfD0、bfE0 当前值；无法恢复历史阈值。"))
         }
     }
 
@@ -512,24 +625,6 @@ struct ContentView: View {
         .padding(12)
         .background(Color.primary.opacity(0.035), in: RoundedRectangle(cornerRadius: 11))
     }
-
-    #if MAULEAF_INTEL_EXPERIMENTAL
-    private var intelPreviewSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text(manager.language == .english ? "Intel experimental preview" : "Intel 实验预览版")
-                .font(.subheadline.weight(.semibold))
-            Text(manager.language == .english
-                 ? "Unverified Intel preview: the developer has no Intel Mac and has not tested launching or running this build on Intel hardware. Actual operation, accuracy and stability are unknown. Battery information only; native charging controls are unavailable. Provided AS IS, at your own risk."
-                 : "未经实机测试的 Intel 实验预览版：开发者没有 Intel Mac，未在 Intel 设备上安装、启动或运行本版本。实际运行情况、数据准确性与稳定性均未知。仅展示电池信息，不提供原生充电控制；软件按现状提供，风险由使用者自行评估。")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-        }
-        .padding(11)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.orange.opacity(0.075), in: RoundedRectangle(cornerRadius: 10))
-    }
-    #endif
 
     private var footer: some View {
         HStack(spacing: 12) {
@@ -651,10 +746,12 @@ final class ChargeManager: ObservableObject {
     @Published var statusMessage: AppText = "正在连接 MauLeaf 原生固件服务…"
     @Published var autoApplyFeedback: AppText = "调整后自动应用"
     @Published var backendReady = false
+    @Published private(set) var restoreReady = false
     @Published var isBusy = false
     @Published private(set) var isPreparingToQuit = false
     @Published var isError = false
     @Published var showNativeWriteConfirmation = false
+    @Published var showLegacyDisableConfirmation = false
 
     private let backend: NativeFirmwareBackend
     private let autoInstallNativeHelper: Bool
@@ -662,11 +759,12 @@ final class ChargeManager: ObservableObject {
     private var started = false
     private var refreshTimer: Timer?
     private var limitDebounce: Task<Void, Never>?
-    private var currentState: FirmwareLimitHelperStateResponse?
+    @Published private(set) var currentState: FirmwareLimitHelperStateResponse?
     private var pendingAction: PendingAction?
     private var lastAction: PendingAction?
 
     private enum PendingAction {
+        case enable
         case limit(Int)
         case full
     }
@@ -676,11 +774,7 @@ final class ChargeManager: ObservableObject {
         autoInstallNativeHelper: Bool = true
     ) {
         self.backend = backend
-        #if MAULEAF_INTEL_EXPERIMENTAL
-        self.autoInstallNativeHelper = false
-        #else
         self.autoInstallNativeHelper = autoInstallNativeHelper
-        #endif
         let saved = UserDefaults.standard.integer(forKey: "chargeLimit")
         limit = (50...95).contains(saved) ? saved : 80
     }
@@ -728,9 +822,42 @@ final class ChargeManager: ObservableObject {
         !isBusy && !isPreparingToQuit && (!backendReady || lastAction != nil)
     }
 
-    var canStartFullCharge: Bool {
-        backendReady && currentState?.active == true && isAdapterConnected
+    var hasOriginalStateSnapshot: Bool {
+        currentState?.hasOriginalStateSnapshot == true
+    }
+
+    var restorePending: Bool {
+        currentState?.restorePending == true
+    }
+
+    var isLegacyActive: Bool {
+        currentState?.active == true && !hasOriginalStateSnapshot
+    }
+
+    var canEnableLimit: Bool {
+        backendReady && currentState != nil && currentState?.active == false
+            && !hasOriginalStateSnapshot && !restorePending && isAdapterConnected
             && !isBusy && !isPreparingToQuit && !fullOncePending
+    }
+
+    var canDisableLimit: Bool {
+        restoreReady && hasOriginalStateSnapshot && isAdapterConnected
+            && !isBusy && !isPreparingToQuit
+    }
+
+    var canRetryOriginalRestore: Bool {
+        restoreReady && restorePending && isAdapterConnected
+            && !isBusy && !isPreparingToQuit
+    }
+
+    var canDisableLegacyLimit: Bool {
+        restoreReady && isLegacyActive && isAdapterConnected
+            && !isBusy && !isPreparingToQuit
+    }
+
+    var canStartFullCharge: Bool {
+        backendReady && hasOriginalStateSnapshot && currentState?.active == true
+            && isAdapterConnected && !isBusy && !isPreparingToQuit && !fullOncePending
     }
 
     func start() {
@@ -760,39 +887,11 @@ final class ChargeManager: ObservableObject {
 
     private func refreshNativeState(allowInstall: Bool) async {
         guard !isPreparingToQuit, !isBusy else { return }
-        #if MAULEAF_INTEL_EXPERIMENTAL
-        backendReady = false
-        modeText = "Intel 实验预览"
-        statusMessage = "Intel 版本不包含原生固件控制服务。"
-        isError = false
-        return
-        #endif
         do {
             let initialState = try await backend.readState()
             let state = try await ensureCurrentNativeHelper(initialState, allowInstall: allowInstall)
             let oneTime = try await backend.oneTimeChargeStatus()
-            currentState = state
-            fullOncePending = oneTime.pending
-            fullOnceCancelRequested = oneTime.cancelRequested
-            backendReady = state.writeSupported
-            if (50...95).contains(state.upper) { limit = state.upper }
-            if !state.writeSupported {
-                modeText = "当前设备不支持原生固件控制"
-                statusMessage = AppText(verbatim: state.writeBlockReason ?? "当前硬件配置未通过原生写入验证。")
-                isError = true
-                return
-            }
-            if oneTime.pending && oneTime.cancelRequested {
-                modeText = "等待接电后恢复原生充电上限"
-            } else if oneTime.pending {
-                modeText = "本次充满进行中 · 原上限 \(oneTime.restoreUpper ?? limit)%"
-            } else if state.active {
-                modeText = "原生固件限充至 \(state.upper)%"
-            } else {
-                modeText = "原生固件限充未启用"
-            }
-            statusMessage = "已读取原生固件状态；寄存器读回成功仍需进一步验证实际充电行为。"
-            isError = false
+            updateFromNativeState(state, oneTime: oneTime, status: "已读取原生固件状态。")
         } catch {
             if allowInstall, autoInstallNativeHelper, !helperInstallAttempted, isHelperUnavailable(error) {
                 helperInstallAttempted = true
@@ -802,30 +901,14 @@ final class ChargeManager: ObservableObject {
                     try await installNativeHelper()
                     let state = try await backend.readState()
                     let oneTime = try await backend.oneTimeChargeStatus()
-                    currentState = state
-                    fullOncePending = oneTime.pending
-                    fullOnceCancelRequested = oneTime.cancelRequested
-                    backendReady = state.writeSupported
-                    if (50...95).contains(state.upper) { limit = state.upper }
-                    guard state.writeSupported else {
-                        modeText = "当前设备不支持原生固件控制"
-                        statusMessage = AppText(verbatim: state.writeBlockReason ?? "当前硬件配置未通过原生写入验证。")
-                        isError = true
-                        isBusy = false
-                        return
-                    }
-                    modeText = oneTime.pending && oneTime.cancelRequested
-                        ? "等待接电后恢复原生充电上限"
-                        : (oneTime.pending
-                            ? "本次充满进行中 · 原上限 \(oneTime.restoreUpper ?? limit)%"
-                            : (state.active ? "原生固件限充至 \(state.upper)%" : "原生固件限充未启用"))
-                    statusMessage = "MauLeaf 原生固件服务已启用。"
-                    isError = false
+                    updateFromNativeState(state, oneTime: oneTime, status: "MauLeaf 原生固件服务已启用。")
                     isBusy = false
                     return
                 } catch {
                     isBusy = false
                     backendReady = false
+                    restoreReady = false
+                    currentState = nil
                     modeText = "原生固件服务未启用"
                     statusMessage = "无法启用原生固件服务：\(AppText(error: error))"
                     isError = true
@@ -833,10 +916,71 @@ final class ChargeManager: ObservableObject {
                 }
             }
             backendReady = false
+            restoreReady = false
             currentState = nil
             modeText = "原生固件控制不可用"
             statusMessage = AppText(error: error)
             isError = true
+        }
+    }
+
+    private func updateFromNativeState(
+        _ state: FirmwareLimitHelperStateResponse,
+        oneTime: FirmwareLimitHelperOneTimeStatusResponse,
+        status: AppText
+    ) {
+        currentState = state
+        fullOncePending = oneTime.pending
+        fullOnceCancelRequested = oneTime.cancelRequested
+        backendReady = state.writeSupported
+        restoreReady = state.restoreSupported
+
+        if oneTime.pending, let restoreUpper = oneTime.restoreUpper {
+            limit = restoreUpper
+        } else if state.active, (50...95).contains(state.upper) {
+            limit = state.upper
+        }
+
+        if state.restorePending {
+            modeText = "等待恢复原始固件配置"
+            statusMessage = "原始配置快照已保留；接入电源后后台服务会继续恢复。"
+            isError = false
+        } else if oneTime.pending && oneTime.cancelRequested {
+            modeText = "等待接电后恢复原生充电上限"
+            statusMessage = AppText(verbatim: oneTime.cancelRequested
+                ? "已请求取消本次充满；接入电源后会恢复当前限充设置。"
+                : status.localized(in: language))
+            isError = false
+        } else if oneTime.pending {
+            modeText = "本次充满进行中 · 原上限 \(oneTime.restoreUpper ?? limit)%"
+            statusMessage = status
+            isError = false
+        } else if state.active && state.hasOriginalStateSnapshot {
+            modeText = "限制充电已启用 · 上限 \(state.upper)%"
+            statusMessage = status
+            isError = false
+        } else if state.active {
+            modeText = "检测到旧版或未托管的固件限充"
+            statusMessage = "没有找到启用前的原始快照；停用时只能关闭激活标志，无法恢复历史阈值。"
+            isError = false
+        } else {
+            modeText = "限制充电未启用"
+            statusMessage = status
+            isError = false
+        }
+
+        if !state.writeSupported && !state.restoreSupported {
+            statusMessage = AppText(verbatim: state.writeBlockReason ?? "当前硬件配置未通过原生写入验证。")
+            isError = true
+        } else if !state.writeSupported && state.restoreSupported {
+            if state.hasOriginalStateSnapshot {
+                statusMessage = "当前系统不允许启用新的限充配置，但可以使用已保存快照恢复原始状态。"
+            } else if state.active {
+                statusMessage = "当前系统不允许启用新的限充配置，但可以停用旧版限充；历史阈值无法恢复。"
+            } else {
+                statusMessage = "当前系统不支持新的充电限制写入；限制充电保持关闭。"
+            }
+            isError = false
         }
     }
 
@@ -903,9 +1047,20 @@ final class ChargeManager: ObservableObject {
         guard !isPreparingToQuit, (50...95).contains(value) else { return }
         limit = value
         limitDebounce?.cancel()
-        autoApplyFeedback = "等待自动应用 \(value)%…"
+
+        guard currentState?.active == true, hasOriginalStateSnapshot else {
+            autoApplyFeedback = "已保存设置；启用限制充电后生效"
+            statusMessage = "当前限制充电未启用，此次调整仅保存在 MauLeaf 中。"
+            isError = false
+            return
+        }
+        guard !fullOncePending else {
+            statusMessage = "本次充满进行中，暂不可修改充电上限。"
+            isError = true
+            return
+        }
         guard backendReady else {
-            statusMessage = "原生固件控制尚未就绪。"
+            statusMessage = "当前系统或硬件配置不允许写入新的充电上限。"
             isError = true
             return
         }
@@ -914,6 +1069,7 @@ final class ChargeManager: ObservableObject {
             isError = true
             return
         }
+        autoApplyFeedback = "等待自动应用 \(value)%…"
         if !UserDefaults.standard.bool(forKey: "nativeFirmwareWriteConfirmed") {
             pendingAction = .limit(value)
             showNativeWriteConfirmation = true
@@ -924,6 +1080,66 @@ final class ChargeManager: ObservableObject {
             if !immediate { try? await Task.sleep(nanoseconds: 450_000_000) }
             guard !Task.isCancelled else { return }
             await self?.applyLimit(value)
+        }
+    }
+
+    func enableLimit() {
+        guard canEnableLimit else {
+            statusMessage = isAdapterConnected
+                ? "当前设备暂时不能启用限制充电。"
+                : "请先连接电源，再启用限制充电。"
+            isError = true
+            return
+        }
+        if !UserDefaults.standard.bool(forKey: "nativeFirmwareWriteConfirmed") {
+            pendingAction = .enable
+            showNativeWriteConfirmation = true
+            return
+        }
+        lastAction = .enable
+        Task { await applyLimit(limit) }
+    }
+
+    func disableLimit() {
+        guard (canDisableLimit || canRetryOriginalRestore) else { return }
+        lastAction = nil
+        Task { await restoreOriginalFirmwareState() }
+    }
+
+    func requestLegacyDisableConfirmation() {
+        guard canDisableLegacyLimit else { return }
+        showLegacyDisableConfirmation = true
+    }
+
+    func confirmDisableLegacyLimit() {
+        showLegacyDisableConfirmation = false
+        guard canDisableLegacyLimit else { return }
+        Task { await restoreOriginalFirmwareState() }
+    }
+
+    private func restoreOriginalFirmwareState() async {
+        guard !isBusy, !isPreparingToQuit else { return }
+        isBusy = true
+        isError = false
+        statusMessage = "正在恢复启用前的原始固件配置…"
+        defer { isBusy = false }
+        do {
+            let response = try await backend.restoreOriginalState()
+            currentState = response.state
+            fullOncePending = false
+            fullOnceCancelRequested = false
+            backendReady = response.state.writeSupported
+            restoreReady = response.state.restoreSupported
+            modeText = response.state.active
+                ? "检测到未托管的固件限充"
+                : "限制充电未启用"
+            statusMessage = AppText(verbatim: response.message)
+            isError = false
+        } catch {
+            isBusy = false
+            statusMessage = "恢复原始固件配置失败：\(AppText(error: error))"
+            isError = true
+            await refreshNativeState(allowInstall: false)
         }
     }
 
@@ -944,6 +1160,9 @@ final class ChargeManager: ObservableObject {
         guard let action = pendingAction else { return }
         pendingAction = nil
         switch action {
+        case .enable:
+            lastAction = .enable
+            Task { await applyLimit(limit) }
         case .limit(let value):
             lastAction = .limit(value)
             Task { await applyLimit(value) }
@@ -955,8 +1174,12 @@ final class ChargeManager: ObservableObject {
 
     func cancelNativeWrite() {
         showNativeWriteConfirmation = false
+        let action = pendingAction
         pendingAction = nil
-        if let currentState, (50...95).contains(currentState.upper) { limit = currentState.upper }
+        if let action, case .limit = action, currentState?.active == true,
+           let currentState, (50...95).contains(currentState.upper) {
+            limit = currentState.upper
+        }
     }
 
     func cancelFullOnce() {
@@ -970,6 +1193,8 @@ final class ChargeManager: ObservableObject {
             do {
                 let response = try await backend.cancelOneTimeCharge()
                 currentState = response.state
+                backendReady = response.state.writeSupported
+                restoreReady = response.state.restoreSupported
                 fullOncePending = response.oneTimePending
                 fullOnceCancelRequested = response.oneTimePending
                 modeText = response.oneTimePending
@@ -998,9 +1223,11 @@ final class ChargeManager: ObservableObject {
                 confirmed: true
             )
             currentState = response.state
+            backendReady = response.state.writeSupported
+            restoreReady = response.state.restoreSupported
             fullOncePending = response.oneTimePending
             fullOnceCancelRequested = false
-            modeText = "原生固件限充寄存器：\(value)%"
+            modeText = "限制充电已启用 · 上限 \(value)%"
             autoApplyFeedback = "已写入并读回 \(value)%"
             statusMessage = AppText(verbatim: response.message)
             isError = false
@@ -1025,6 +1252,8 @@ final class ChargeManager: ObservableObject {
                 confirmed: true
             )
             currentState = response.state
+            backendReady = response.state.writeSupported
+            restoreReady = response.state.restoreSupported
             fullOncePending = response.oneTimePending
             fullOnceCancelRequested = false
             modeText = "本次充满进行中 · 原上限 \(limit)%"
@@ -1044,6 +1273,7 @@ final class ChargeManager: ObservableObject {
             return
         }
         switch lastAction {
+        case .enable: Task { await applyLimit(limit) }
         case .limit(let value): Task { await applyLimit(value) }
         case .full:
             if fullOncePending { cancelFullOnce() }

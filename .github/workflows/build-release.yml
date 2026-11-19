@@ -21,7 +21,7 @@ permissions:
 
 concurrency:
   group: mauleaf-${{ github.ref }}
-  cancel-in-progress: false
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   test:
@@ -33,6 +33,29 @@ jobs:
           ref: ${{ inputs.release_tag || github.ref }}
       - name: Run tests
         run: bash tests/run.sh
+
+
+  # Exercise the exact Apple Silicon packaging path before merging.
+  # This produces a local smoke-test DMG but does not upload or publish it.
+  package-smoke:
+    if: github.event_name == 'pull_request'
+    needs: test
+    runs-on: macos-15
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build and verify arm64 DMG
+        env:
+          TARGET_ARCH: arm64
+          BUILD_NUMBER: '8000'
+        shell: bash
+        run: |
+          set -euo pipefail
+          RELEASE_VERSION="$(tr -d '[:space:]' < VERSION)"
+          export RELEASE_VERSION
+          export RELEASE_LABEL="${RELEASE_VERSION}-preview.0"
+          bash Scripts/ci/package-macos.sh
+          test -s "dist/MauLeaf-${RELEASE_LABEL}-macos-arm64.dmg"
 
   prepare:
     if: >-
@@ -134,7 +157,6 @@ jobs:
       matrix:
         include:
           - {arch: arm64, runner: macos-15}
-          - {arch: x86_64, runner: macos-15-intel}
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 35
     steps:
@@ -186,10 +208,12 @@ jobs:
           fi
           grep -q '## 简体中文' artifacts/RELEASE_NOTES.md
           grep -q '## English' artifacts/RELEASE_NOTES.md
-          grep -qi Intel artifacts/RELEASE_NOTES.md
-          grep -q '实验' artifacts/RELEASE_NOTES.md
+          grep -qi 'Apple Silicon' artifacts/RELEASE_NOTES.md
           test -s "artifacts/MauLeaf-${RELEASE_LABEL}-macos-arm64.dmg"
-          test -s "artifacts/MauLeaf-${RELEASE_LABEL}-macos-x86_64-EXPERIMENTAL.dmg"
+          if find artifacts -maxdepth 1 -type f | grep -Eq 'x86_64|INTEL'; then
+            echo "Intel artifacts are not part of Preview 5." >&2
+            exit 1
+          fi
       - name: Publish GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}

@@ -11,6 +11,9 @@ final class FirmwareLimitHelperService: NSObject, FirmwareLimitHelperProtocol {
     private let isAdministrator: () -> Bool
     private let batteryObservation: () -> FirmwareLimitBatteryObservation
     private let jobURL: URL
+    private let originalStateURL: URL
+    private let restoreRequestURL: URL
+    private let backgroundRecoveryURL: URL
     private let now: () -> Date
     private let monitorEnabled: Bool
     private let hardwareLock = NSLock()
@@ -19,6 +22,8 @@ final class FirmwareLimitHelperService: NSObject, FirmwareLimitHelperProtocol {
     private var operationSequence = 0
     private var activeOperation: Int?
     private var pendingJob: FirmwareLimitOnceJob?
+    private var originalStateSnapshot: FirmwareLimitOriginalStateSnapshot?
+    private var originalSnapshotLoadError: String?
     private var monitorTimer: DispatchSourceTimer?
     private let watchdogTimeout: TimeInterval = 15
 
@@ -29,6 +34,9 @@ final class FirmwareLimitHelperService: NSObject, FirmwareLimitHelperProtocol {
         isAdministrator: @escaping () -> Bool = { FirmwareLimitRuntime.isAdministrator },
         batteryObservation: @escaping () -> FirmwareLimitBatteryObservation = FirmwareLimitRuntime.batteryObservation,
         jobURL: URL = URL(fileURLWithPath: "/Library/Application Support/MauLeaf/one-time-charge.json"),
+        originalStateURL: URL = URL(fileURLWithPath: "/Library/Application Support/MauLeaf/original-firmware-state.json"),
+        restoreRequestURL: URL = URL(fileURLWithPath: "/Library/Application Support/MauLeaf/restore-original-state.pending"),
+        backgroundRecoveryURL: URL = URL(fileURLWithPath: "/Library/Application Support/MauLeaf/background-recovery.pending"),
         now: @escaping () -> Date = Date.init,
         monitorEnabled: Bool = true
     ) {
@@ -38,11 +46,41 @@ final class FirmwareLimitHelperService: NSObject, FirmwareLimitHelperProtocol {
         self.isAdministrator = isAdministrator
         self.batteryObservation = batteryObservation
         self.jobURL = jobURL
+        self.originalStateURL = originalStateURL
+        self.restoreRequestURL = restoreRequestURL
+        self.backgroundRecoveryURL = backgroundRecoveryURL
         self.now = now
         self.monitorEnabled = monitorEnabled
         super.init()
         pendingJob = loadPendingJob()
-        if pendingJob != nil { startMonitoring() }
+        originalStateSnapshot = loadOriginalStateSnapshot()
+        if FileManager.default.fileExists(atPath: restoreRequestURL.path),
+           var snapshot = originalStateSnapshot {
+            snapshot.restoreRequested = true
+            originalStateSnapshot = snapshot
+        }
+        if let snapshot = originalStateSnapshot, snapshot.restoreRequested {
+            // Recreate missing markers so launchd can restart us after a crash.
+            try? persistOriginalStateSnapshot(snapshot)
+            try? persistBackgroundRecoveryMarker()
+        } else if originalSnapshotLoadError != nil {
+            // A corrupt snapshot cannot be retried automatically, but is kept
+            // intact for diagnostics and must still block uninstallation.
+            try? FileManager.default.removeItem(at: restoreRequestURL)
+            if pendingJob != nil {
+                try? persistBackgroundRecoveryMarker()
+            } else {
+                try? FileManager.default.removeItem(at: backgroundRecoveryURL)
+            }
+        } else if originalStateSnapshot == nil && pendingJob == nil {
+            try? FileManager.default.removeItem(at: restoreRequestURL)
+            try? FileManager.default.removeItem(at: backgroundRecoveryURL)
+        } else if pendingJob != nil {
+            try? persistBackgroundRecoveryMarker()
+        }
+        if pendingJob != nil || originalStateSnapshot?.restoreRequested == true {
+            startMonitoring()
+        }
     }
 
     var hasPendingOneTimeCharge: Bool {
@@ -51,13 +89,19 @@ final class FirmwareLimitHelperService: NSObject, FirmwareLimitHelperProtocol {
         return pendingJob != nil
     }
 
+    var hasPendingBackgroundRecovery: Bool {
+        stateLock.lock()
+        defer { stateLock.unlock() }
+        return pendingJob != nil || originalStateSnapshot?.restoreRequested == true
+    }
+
     func readState(withReply reply: @escaping (NSData?, NSString?) -> Void) {
         do {
-            let identity = identityProvider()
-            let response = FirmwareLimitHelperStateResponse(
-                state: try withHardwareWatchdog { try controller.readState() },
-                identity: identity
-            )
+            guard originalSnapshotLoadError == nil else {
+                throw FirmwareLimitCoreError.invalidOriginalSnapshot
+            }
+            let state = try withHardwareWatchdog { try controller.readState() }
+            let response = stateResponse(state)
             reply(try JSONEncoder().encode(response) as NSData, nil)
         } catch {
             reply(nil, error.localizedDescription as NSString)
@@ -78,6 +122,9 @@ final class FirmwareLimitHelperService: NSObject, FirmwareLimitHelperProtocol {
 
     func applyLimit(upper: Int, lower: Int, confirmed: Bool, withReply reply: @escaping (NSData?, NSString?) -> Void) {
         do {
+            guard originalSnapshotLoadError == nil else {
+                throw FirmwareLimitCoreError.invalidOriginalSnapshot
+            }
             let request = try FirmwareLimitRequest(upper: upper, lower: lower)
             let response = try withHardwareWatchdog {
                 guard !hasPendingOneTimeCharge else {
@@ -85,15 +132,25 @@ final class FirmwareLimitHelperService: NSObject, FirmwareLimitHelperProtocol {
                 }
                 let permit = try writePermit(confirmed: confirmed)
                 let previous = try controller.readState()
+                let snapshot = try ensureOriginalStateSnapshot(beforeEnablingFrom: previous)
                 do {
                     let state = try controller.configure(request, permit: permit)
                     return FirmwareLimitHelperOperationResponse(
-                        state: FirmwareLimitHelperStateResponse(state: state),
+                        state: stateResponse(state),
                         oneTimePending: false,
-                        message: "Firmware registers were written and read back successfully. Real charging enforcement still requires hardware observation."
+                        message: "The original firmware state was saved before enabling MauLeaf. The requested registers were written and read back; actual charging behavior still requires hardware verification."
                     )
                 } catch {
-                    persistRecoveryIfNeeded(previous: previous, error: error)
+                    do {
+                        let restorePermit = try writeRestorePermit(for: snapshot)
+                        _ = try controller.restore(snapshot.state, permit: restorePermit)
+                        try removePersistedOriginalStateSnapshot()
+                    } catch {
+                        var pending = snapshot
+                        pending.restoreRequested = true
+                        try? persistOriginalStateSnapshot(pending)
+                        startMonitoring()
+                    }
                     throw error
                 }
             }
@@ -109,6 +166,9 @@ final class FirmwareLimitHelperService: NSObject, FirmwareLimitHelperProtocol {
             let response = try withHardwareWatchdog {
                 guard !hasPendingOneTimeCharge else {
                     throw FirmwareLimitCoreError.transportFailure("A one-time full-charge task is already active.")
+                }
+                guard originalStateSnapshot != nil, originalStateSnapshot?.restoreRequested == false else {
+                    throw FirmwareLimitCoreError.legacyActiveStateWithoutSnapshot
                 }
                 let permit = try writePermit(confirmed: confirmed)
                 let previous = try controller.readState()
@@ -132,7 +192,7 @@ final class FirmwareLimitHelperService: NSObject, FirmwareLimitHelperProtocol {
                     setPendingJob(job)
                     startMonitoring()
                     return FirmwareLimitHelperOperationResponse(
-                        state: FirmwareLimitHelperStateResponse(state: state),
+                        state: stateResponse(state),
                         oneTimePending: true,
                         message: "The native limit is temporarily disabled. The helper will restore the saved limit at 100%, on cancellation, or after 10 hours."
                     )
@@ -175,7 +235,7 @@ final class FirmwareLimitHelperService: NSObject, FirmwareLimitHelperProtocol {
                     stateLock.unlock()
                     let state = try controller.readState()
                     return FirmwareLimitHelperOperationResponse(
-                        state: FirmwareLimitHelperStateResponse(state: state),
+                        state: stateResponse(state),
                         oneTimePending: false,
                         message: "No one-time full-charge task is active."
                     )
@@ -187,7 +247,7 @@ final class FirmwareLimitHelperService: NSObject, FirmwareLimitHelperProtocol {
                 monitorOneTimeChargeLocked()
                 let state = try controller.readState()
                 return FirmwareLimitHelperOperationResponse(
-                    state: FirmwareLimitHelperStateResponse(state: state),
+                    state: stateResponse(state),
                     oneTimePending: hasPendingOneTimeCharge,
                     message: hasPendingOneTimeCharge
                         ? "Cancellation is saved. The original limit will be restored when AC power is connected."
@@ -197,6 +257,25 @@ final class FirmwareLimitHelperService: NSObject, FirmwareLimitHelperProtocol {
             reply(try JSONEncoder().encode(response) as NSData, nil)
         } catch {
             reply(nil, error.localizedDescription as NSString)
+        }
+    }
+
+    func restoreOriginalState(withReply reply: @escaping (NSData?, NSString?) -> Void) {
+        do {
+            let response = try withHardwareWatchdog {
+                try restoreOriginalStateLocked()
+            }
+            reply(try JSONEncoder().encode(response) as NSData, nil)
+        } catch {
+            reply(nil, error.localizedDescription as NSString)
+        }
+    }
+
+    /// Used by the bundled uninstaller after the app has stopped. It performs
+    /// the same verified restore without depending on a running XPC client.
+    func restoreOriginalStateForUninstall() throws -> FirmwareLimitHelperOperationResponse {
+        try withHardwareWatchdog {
+            try restoreOriginalStateLocked()
         }
     }
 
@@ -230,25 +309,192 @@ final class FirmwareLimitHelperService: NSObject, FirmwareLimitHelperProtocol {
         )
     }
 
-    private func persistRecoveryIfNeeded(previous: FirmwareLimitState, error: Error) {
-        guard previous.isActive,
-              let coreError = error as? FirmwareLimitCoreError,
-              case .transactionFailed(_, let recovery) = coreError,
-              !recovery.contains("previous firmware state was restored and verified"),
-              let request = try? FirmwareLimitRequest(upper: previous.upper, lower: previous.lower) else { return }
-        do {
-            let job = try FirmwareLimitOnceJob(
-                jobID: UUID().uuidString,
-                restore: request,
-                deadline: now().addingTimeInterval(10 * 60 * 60),
-                cancelRequested: true
-            )
-            try persist(job)
-            setPendingJob(job)
-            startMonitoring()
-        } catch {
-            NSLog("MauLeaf could not persist the native recovery job: %@", error.localizedDescription)
+    private func stateResponse(_ state: FirmwareLimitState) -> FirmwareLimitHelperStateResponse {
+        stateLock.lock()
+        let snapshot = originalStateSnapshot
+        stateLock.unlock()
+        return FirmwareLimitHelperStateResponse(
+            state: state,
+            identity: identityProvider(),
+            snapshot: snapshot
+        )
+    }
+
+    private func ensureOriginalStateSnapshot(
+        beforeEnablingFrom previous: FirmwareLimitState
+    ) throws -> FirmwareLimitOriginalStateSnapshot {
+        stateLock.lock()
+        let existing = originalStateSnapshot
+        stateLock.unlock()
+
+        if let existing {
+            guard existing.isValid,
+                  FirmwareLimitWritePermit.restoreBlockReason(
+                    identity: identityProvider(),
+                    snapshotIdentity: existing.deviceIdentity
+                  ) == nil else {
+                throw FirmwareLimitCoreError.originalStateDeviceMismatch
+            }
+            guard !existing.restoreRequested else {
+                throw FirmwareLimitCoreError.transportFailure("Original firmware restoration is pending; wait for it to finish before enabling a new limit.")
+            }
+            return existing
         }
+
+        guard !previous.isActive else {
+            throw FirmwareLimitCoreError.legacyActiveStateWithoutSnapshot
+        }
+        let snapshot = try FirmwareLimitOriginalStateSnapshot(
+            deviceIdentity: identityProvider(),
+            state: previous
+        )
+        try persistOriginalStateSnapshot(snapshot)
+        return snapshot
+    }
+
+    private func restoreOriginalStateLocked() throws -> FirmwareLimitHelperOperationResponse {
+        guard originalSnapshotLoadError == nil else {
+            throw FirmwareLimitCoreError.invalidOriginalSnapshot
+        }
+
+        stateLock.lock()
+        let snapshot = originalStateSnapshot
+        stateLock.unlock()
+
+        if let snapshot {
+            guard snapshot.isValid,
+                  FirmwareLimitWritePermit.restoreBlockReason(
+                    identity: identityProvider(),
+                    snapshotIdentity: snapshot.deviceIdentity
+                  ) == nil else {
+                throw FirmwareLimitCoreError.originalStateDeviceMismatch
+            }
+
+            var requested = snapshot
+            requested.restoreRequested = true
+            try persistOriginalStateSnapshot(requested)
+            setPendingJob(nil)
+            removePersistedJob()
+            startMonitoring()
+
+            let permit = try writeRestorePermit(for: requested)
+            let restored = try controller.restore(requested.state, permit: permit)
+            try removePersistedOriginalStateSnapshot()
+            stopMonitoringIfIdle()
+            return FirmwareLimitHelperOperationResponse(
+                state: stateResponse(restored),
+                oneTimePending: false,
+                message: "The exact original firmware state was restored and verified. MauLeaf's saved snapshot was removed."
+            )
+        }
+
+        setPendingJob(nil)
+        removePersistedJob()
+        let current = try controller.readState()
+        if current.isActive {
+            let permit = try writeLegacyDisablePermit()
+            let inactive = try controller.deactivate(permit: permit)
+            return FirmwareLimitHelperOperationResponse(
+                state: stateResponse(inactive),
+                oneTimePending: false,
+                message: "Legacy limit disabled. Preview 4 did not save the pre-MauLeaf thresholds, so only the activation flag was cleared; the original threshold values cannot be reconstructed."
+            )
+        }
+        return FirmwareLimitHelperOperationResponse(
+            state: stateResponse(current),
+            oneTimePending: false,
+            message: "No MauLeaf original-state snapshot exists and the firmware limit is already inactive. No register values were changed."
+        )
+    }
+
+    /// Legacy Preview 4 state has no original threshold snapshot. This
+    /// permit can only clear bfF0 on the exact validated hardware identity;
+    /// it never writes or invents bfD0/bfE0 values.
+    private func writeLegacyDisablePermit() throws -> FirmwareLimitWritePermit {
+        let identity = identityProvider()
+        return try FirmwareLimitWritePermit.authorizeRestore(
+            identity: identity,
+            snapshotIdentity: identity,
+            context: FirmwareLimitWriteContext(
+                isAdministrator: isAdministrator(),
+                isOnACPower: isOnACPower(),
+                userConfirmed: true
+            )
+        )
+    }
+
+    private func writeRestorePermit(
+        for snapshot: FirmwareLimitOriginalStateSnapshot
+    ) throws -> FirmwareLimitWritePermit {
+        try FirmwareLimitWritePermit.authorizeRestore(
+            identity: identityProvider(),
+            snapshotIdentity: snapshot.deviceIdentity,
+            context: FirmwareLimitWriteContext(
+                isAdministrator: isAdministrator(),
+                isOnACPower: isOnACPower(),
+                userConfirmed: true
+            )
+        )
+    }
+
+    private func persistOriginalStateSnapshot(
+        _ snapshot: FirmwareLimitOriginalStateSnapshot
+    ) throws {
+        let directory = originalStateURL.deletingLastPathComponent()
+        try FileManager.default.createDirectory(
+            at: directory,
+            withIntermediateDirectories: true,
+            attributes: [.posixPermissions: 0o755]
+        )
+        let data = try JSONEncoder().encode(snapshot)
+        try data.write(to: originalStateURL, options: .atomic)
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o600],
+            ofItemAtPath: originalStateURL.path
+        )
+        stateLock.lock()
+        originalStateSnapshot = snapshot
+        stateLock.unlock()
+        if snapshot.restoreRequested {
+            try Data("restore".utf8).write(to: restoreRequestURL, options: .atomic)
+            try FileManager.default.setAttributes(
+                [.posixPermissions: 0o600],
+                ofItemAtPath: restoreRequestURL.path
+            )
+            try persistBackgroundRecoveryMarker()
+        } else {
+            if FileManager.default.fileExists(atPath: restoreRequestURL.path) {
+                try FileManager.default.removeItem(at: restoreRequestURL)
+            }
+            removeBackgroundRecoveryMarkerIfIdle()
+        }
+    }
+
+    private func loadOriginalStateSnapshot() -> FirmwareLimitOriginalStateSnapshot? {
+        guard FileManager.default.fileExists(atPath: originalStateURL.path) else { return nil }
+        do {
+            let data = try Data(contentsOf: originalStateURL)
+            let snapshot = try JSONDecoder().decode(FirmwareLimitOriginalStateSnapshot.self, from: data)
+            guard snapshot.isValid else { throw FirmwareLimitCoreError.invalidOriginalSnapshot }
+            return snapshot
+        } catch {
+            originalSnapshotLoadError = error.localizedDescription
+            NSLog("MauLeaf original firmware snapshot could not be read: %@", error.localizedDescription)
+            return nil
+        }
+    }
+
+    private func removePersistedOriginalStateSnapshot() throws {
+        if FileManager.default.fileExists(atPath: restoreRequestURL.path) {
+            try FileManager.default.removeItem(at: restoreRequestURL)
+        }
+        if FileManager.default.fileExists(atPath: originalStateURL.path) {
+            try FileManager.default.removeItem(at: originalStateURL)
+        }
+        stateLock.lock()
+        originalStateSnapshot = nil
+        stateLock.unlock()
+        removeBackgroundRecoveryMarkerIfIdle()
     }
 
     private func monitorOneTimeCharge() {
@@ -261,8 +507,25 @@ final class FirmwareLimitHelperService: NSObject, FirmwareLimitHelperProtocol {
 
     private func monitorOneTimeChargeLocked() {
         stateLock.lock()
+        let snapshot = originalStateSnapshot
         let job = pendingJob
         stateLock.unlock()
+
+        if let snapshot, snapshot.restoreRequested {
+            guard isOnACPower() else { return }
+            do {
+                let permit = try writeRestorePermit(for: snapshot)
+                _ = try controller.restore(snapshot.state, permit: permit)
+                try removePersistedOriginalStateSnapshot()
+                setPendingJob(nil)
+                removePersistedJob()
+                stopMonitoringIfIdle()
+            } catch {
+                NSLog("MauLeaf original firmware restore will retry: %@", error.localizedDescription)
+            }
+            return
+        }
+
         guard let job else { stopMonitoringIfIdle(); return }
 
         let observation = batteryObservation()
@@ -279,8 +542,8 @@ final class FirmwareLimitHelperService: NSObject, FirmwareLimitHelperProtocol {
             do {
                 let permit = try writePermit(confirmed: true)
                 _ = try controller.configure(request, permit: permit)
-                removePersistedJob()
                 setPendingJob(nil)
+                removePersistedJob()
                 stopMonitoringIfIdle()
             } catch {
                 NSLog("MauLeaf native one-time charge restore will retry: %@", error.localizedDescription)
@@ -304,6 +567,7 @@ final class FirmwareLimitHelperService: NSObject, FirmwareLimitHelperProtocol {
         let data = try JSONEncoder().encode(job)
         try data.write(to: jobURL, options: .atomic)
         try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: jobURL.path)
+        try persistBackgroundRecoveryMarker()
     }
 
     private func loadPendingJob() -> FirmwareLimitOnceJob? {
@@ -315,12 +579,36 @@ final class FirmwareLimitHelperService: NSObject, FirmwareLimitHelperProtocol {
 
     private func removePersistedJob() {
         try? FileManager.default.removeItem(at: jobURL)
+        removeBackgroundRecoveryMarkerIfIdle()
+    }
+
+    private func persistBackgroundRecoveryMarker() throws {
+        let directory = backgroundRecoveryURL.deletingLastPathComponent()
+        try FileManager.default.createDirectory(
+            at: directory,
+            withIntermediateDirectories: true,
+            attributes: [.posixPermissions: 0o755]
+        )
+        try Data("pending".utf8).write(to: backgroundRecoveryURL, options: .atomic)
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o600],
+            ofItemAtPath: backgroundRecoveryURL.path
+        )
+    }
+
+    private func removeBackgroundRecoveryMarkerIfIdle() {
+        stateLock.lock()
+        let idle = pendingJob == nil && originalStateSnapshot?.restoreRequested != true
+        stateLock.unlock()
+        guard idle, FileManager.default.fileExists(atPath: backgroundRecoveryURL.path) else { return }
+        try? FileManager.default.removeItem(at: backgroundRecoveryURL)
     }
 
     private func startMonitoring() {
         guard monitorEnabled else { return }
         stateLock.lock()
-        guard pendingJob != nil, monitorTimer == nil else {
+        guard (pendingJob != nil || originalStateSnapshot?.restoreRequested == true),
+              monitorTimer == nil else {
             stateLock.unlock()
             return
         }
@@ -334,7 +622,9 @@ final class FirmwareLimitHelperService: NSObject, FirmwareLimitHelperProtocol {
 
     private func stopMonitoringIfIdle() {
         stateLock.lock()
-        guard pendingJob == nil, let timer = monitorTimer else {
+        guard pendingJob == nil,
+              originalStateSnapshot?.restoreRequested != true,
+              let timer = monitorTimer else {
             stateLock.unlock()
             return
         }
@@ -447,7 +737,7 @@ final class FirmwareLimitHelperListener: NSObject, NSXPCListenerDelegate {
             let idle = self.activeConnections == 0 && self.idleGeneration == generation
             self.stateLock.unlock()
             if idle {
-                if self.service.hasPendingOneTimeCharge {
+                if self.service.hasPendingBackgroundRecovery {
                     self.scheduleIdleExit()
                 } else {
                     exit(0)

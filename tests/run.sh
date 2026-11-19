@@ -83,10 +83,30 @@ if grep -Eq 'componentSetupSection|installBackend|uninstallBackend' "$ROOT/Sourc
     echo "The legacy component installer UI must not return" >&2
     exit 1
 fi
+if grep -RniE 'MAULEAF_INTEL_EXPERIMENTAL|x86_64|macos-15-intel|EXPERIMENTAL.dmg|(^|[^[:alnum:]_])batt([^[:alnum:]_]|$)' \
+    "$ROOT/Sources" "$ROOT/Scripts/ci/package-macos.sh" "$ROOT/build.command"; then
+    echo "Intel build support must not ship in Preview 5." >&2
+    exit 1
+fi
+! grep -q 'macos-15-intel' "$ROOT/.github/workflows/build-release.yml"
+! grep -q 'arch: x86_64' "$ROOT/.github/workflows/build-release.yml"
+! grep -q 'EXPERIMENTAL.dmg' "$ROOT/.github/workflows/build-release.yml"
+[[ "$(grep -c 'arch: arm64' "$ROOT/.github/workflows/build-release.yml")" -eq 1 ]]
+grep -Fq -- '--restore-original-state' "$ROOT/Sources/FirmwareLimitHelperMain.swift"
+grep -Fq 'original-firmware-state.json' "$ROOT/Sources/FirmwareLimitHelperService.swift"
+grep -Fq 'background-recovery.pending' "$ROOT/Support/com.local.chargecap.firmware-helper.plist"
+grep -Fq 'restore-original-state.pending' "$ROOT/Sources/FirmwareLimitHelperService.swift"
+grep -Fq '启用限制充电' "$ROOT/Sources/MauLeaf.swift"
+grep -Fq '关闭限制充电' "$ROOT/Sources/MauLeaf.swift"
 grep -Fq '@Published private(set) var menuBarLeafStyle: MenuBarLeafStyle = .green' "$ROOT/Sources/MauLeaf.swift"
 bash -n "$ROOT/Scripts/ci/package-macos.sh"
+bash -n "$ROOT/build.command"
 bash -n "$ROOT/Scripts/install-native-firmware-helper.sh"
 bash -n "$ROOT/Scripts/uninstall-native-firmware-helper.sh"
+grep -Fq '/usr/bin/cmp -s "$TARGET" "$SOURCE_BINARY"' "$ROOT/Scripts/uninstall-native-firmware-helper.sh"
+bash -n "$ROOT/Scripts/uninstall-macos26-27.sh"
+grep -Fq 'original-firmware-state.json' "$ROOT/Scripts/uninstall-macos26-27.sh"
+grep -Fq 'Native MauLeaf firmware helper or recovery data is present.' "$ROOT/Scripts/uninstall-macos26-27.sh"
 if [[ "$(uname -s)" == Darwin ]]; then
     plutil -lint "$ROOT/Support/com.local.chargecap.firmware-helper.plist"
 fi

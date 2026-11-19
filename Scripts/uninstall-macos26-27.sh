@@ -16,6 +16,21 @@ if [ "$(/usr/bin/id -u)" -eq 0 ]; then
   exit 1
 fi
 
+# Never remove the native Preview 5 app or its recovery capability using the
+# legacy batt cleanup path. Restore the native helper first with its installer.
+NATIVE_LABEL="com.local.chargecap.firmware-helper"
+NATIVE_BINARY="/Library/PrivilegedHelperTools/$NATIVE_LABEL"
+NATIVE_PLIST="/Library/LaunchDaemons/$NATIVE_LABEL.plist"
+NATIVE_SUPPORT="/Library/Application Support/MauLeaf"
+if [[ -e "$NATIVE_BINARY" || -e "$NATIVE_PLIST" \
+    || -e "$NATIVE_SUPPORT/original-firmware-state.json" \
+    || -e "$NATIVE_SUPPORT/restore-original-state.pending" \
+    || -e "$NATIVE_SUPPORT/background-recovery.pending" ]]; then
+  echo "Native MauLeaf firmware helper or recovery data is present." >&2
+  echo "Refusing legacy cleanup: use the native uninstaller to restore firmware first." >&2
+  exit 12
+fi
+
 MAJOR="$(/usr/bin/sw_vers -productVersion | /usr/bin/cut -d. -f1)"
 if [ "$MAJOR" != "26" ] && [ "$MAJOR" != "27" ]; then
   echo "This emergency uninstaller is intended for macOS 26 and 27 only (detected: $MAJOR)." >&2

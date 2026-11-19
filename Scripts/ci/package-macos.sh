@@ -8,10 +8,16 @@ RELEASE_LABEL="${RELEASE_LABEL:-$RELEASE_VERSION}"
 RELEASE_LABEL="${RELEASE_LABEL#v}"
 [[ "$RELEASE_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || exit 2
 [[ "$RELEASE_LABEL" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-preview\.[0-9]+)?$ ]] || exit 2
-[[ "$TARGET_ARCH" == arm64 || "$TARGET_ARCH" == x86_64 ]] || exit 2
-[[ "$(uname -m)" == "$TARGET_ARCH" ]] || exit 2
+[[ "$TARGET_ARCH" == arm64 ]] || {
+  echo "MauLeaf Preview 5 supports Apple Silicon arm64 builds only." >&2
+  exit 2
+}
+[[ "$(uname -m)" == arm64 ]] || {
+  echo "The packaging runner must be Apple Silicon arm64." >&2
+  exit 2
+}
 
-STAGE="$RUNNER_TEMP/mauleaf-$TARGET_ARCH"
+STAGE="$RUNNER_TEMP/mauleaf-arm64"
 APP="$STAGE/MauLeaf.app"
 rm -rf "$STAGE"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources" dist
@@ -41,30 +47,27 @@ PLIST
 }
 write_plist
 
-FLAGS=(-parse-as-library -O -target "$TARGET_ARCH-apple-macos13.0")
-if [[ "$TARGET_ARCH" == x86_64 ]]; then FLAGS+=(-D MAULEAF_INTEL_EXPERIMENTAL); fi
+FLAGS=(-parse-as-library -O -target arm64-apple-macos13.0)
 xcrun swiftc "${FLAGS[@]}" -framework SwiftUI -framework AppKit -framework Combine -framework Foundation \
   Sources/MauLeaf.swift Sources/AppLocalization.swift Sources/BatteryStatusReader.swift Sources/FirmwareLimitCore.swift \
   Sources/FirmwareLimitHelperProtocol.swift Sources/FirmwareLimitHelperClient.swift \
   -o "$APP/Contents/MacOS/MauLeaf"
 
-if [[ "$TARGET_ARCH" == arm64 ]]; then
-  NATIVE="$APP/Contents/Resources/MauLeafNativeControl"
-  mkdir -p "$NATIVE"
-  xcrun swiftc -O -parse-as-library -target arm64-apple-macos13.0 \
-    -framework IOKit -framework Security \
-    Sources/FirmwareLimitCore.swift Sources/FirmwareLimitReconciliation.swift \
-    Sources/BatteryStatusReader.swift Sources/SystemFirmwareReader.swift Sources/FirmwareLimitRuntime.swift Sources/FirmwareLimitSMCTransport.swift \
-    Sources/FirmwareLimitHelperProtocol.swift Sources/FirmwareLimitHelperService.swift \
-    Sources/FirmwareLimitHelperMain.swift \
-    -o "$NATIVE/MauLeafFirmwareHelper"
-  chmod 755 "$NATIVE/MauLeafFirmwareHelper"
-  codesign --force --sign - --identifier com.local.chargecap.firmware-helper "$NATIVE/MauLeafFirmwareHelper"
-  codesign --verify --strict "$NATIVE/MauLeafFirmwareHelper"
-  cp Support/com.local.chargecap.firmware-helper.plist "$NATIVE/"
-  cp Scripts/install-native-firmware-helper.sh Scripts/uninstall-native-firmware-helper.sh "$NATIVE/"
-  chmod 755 "$NATIVE/"*.sh
-fi
+NATIVE="$APP/Contents/Resources/MauLeafNativeControl"
+mkdir -p "$NATIVE"
+xcrun swiftc -O -parse-as-library -target arm64-apple-macos13.0 \
+  -framework IOKit -framework Security \
+  Sources/FirmwareLimitCore.swift Sources/FirmwareLimitReconciliation.swift \
+  Sources/BatteryStatusReader.swift Sources/SystemFirmwareReader.swift Sources/FirmwareLimitRuntime.swift Sources/FirmwareLimitSMCTransport.swift \
+  Sources/FirmwareLimitHelperProtocol.swift Sources/FirmwareLimitHelperService.swift \
+  Sources/FirmwareLimitHelperMain.swift \
+  -o "$NATIVE/MauLeafFirmwareHelper"
+chmod 755 "$NATIVE/MauLeafFirmwareHelper"
+codesign --force --sign - --identifier com.local.chargecap.firmware-helper "$NATIVE/MauLeafFirmwareHelper"
+codesign --verify --strict "$NATIVE/MauLeafFirmwareHelper"
+cp Support/com.local.chargecap.firmware-helper.plist "$NATIVE/"
+cp Scripts/install-native-firmware-helper.sh Scripts/uninstall-native-firmware-helper.sh "$NATIVE/"
+chmod 755 "$NATIVE/"*.sh
 
 xcrun swift Scripts/GenerateAppIcon.swift Assets/MauLeafIcon-1024.png "$STAGE/MauLeaf.iconset"
 iconutil -c icns "$STAGE/MauLeaf.iconset" -o "$STAGE/MauLeaf.icns"
@@ -82,27 +85,28 @@ NOTICE
 
 codesign --force --sign - "$APP"
 codesign --verify --deep --strict "$APP"
-[[ " $(lipo -archs "$APP/Contents/MacOS/MauLeaf") " == *" $TARGET_ARCH "* ]] || exit 5
+[[ " $(lipo -archs "$APP/Contents/MacOS/MauLeaf") " == *" arm64 "* ]] || exit 5
 [[ "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$APP/Contents/Info.plist")" == "$RELEASE_VERSION" ]] || exit 5
 
 mkdir -p "$STAGE/dmg"
 ditto "$APP" "$STAGE/dmg/MauLeaf.app"
-if [[ "$TARGET_ARCH" == arm64 ]]; then
-  NAME="MauLeaf-$RELEASE_LABEL-macos-arm64.dmg"
-else
-  NAME="MauLeaf-$RELEASE_LABEL-macos-x86_64-EXPERIMENTAL.dmg"
-  cat > "$STAGE/dmg/INTEL-EXPERIMENTAL-READ-ME.txt" <<'NOTICE'
-Intel EXPERIMENTAL, UNTESTED, READ-ONLY preview / Intel 未测试只读实验版
-
-The developer does not have an Intel Mac. This build has NOT been
-installed, launched or tested on real Intel hardware. Actual operation,
-accuracy and stability are unknown. It contains no privileged native
-firmware helper and does not provide charging controls.
-
-开发者没有 Intel Mac 实机，未进行安装、启动或运行测试。此版本不包含
-原生固件服务，仅展示电池状态，不提供充电控制。
-NOTICE
-fi
+NAME="MauLeaf-$RELEASE_LABEL-macos-arm64.dmg"
 ln -s /Applications "$STAGE/dmg/Applications"
 hdiutil create -quiet -volname "MauLeaf $RELEASE_LABEL" -srcfolder "$STAGE/dmg" -format UDZO -ov "dist/$NAME"
-hdiutil verify "dist/$NAME"
+# DiskImages may briefly retain the newly created DMG on macOS runners.
+# Retry only the verification; never suppress a persistent verification failure.
+verified=false
+for attempt in 1 2 3 4 5; do
+  if hdiutil verify "dist/$NAME"; then
+    verified=true
+    break
+  fi
+  if [[ "$attempt" -lt 5 ]]; then
+    echo "DMG verification attempt $attempt failed; retrying after disk image service settles..." >&2
+    sleep $((attempt * 2))
+  fi
+done
+if [[ "$verified" != true ]]; then
+  echo "DMG verification failed after five attempts: dist/$NAME" >&2
+  exit 1
+fi

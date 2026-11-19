@@ -13,10 +13,8 @@ enum FirmwareLimitRuntime {
         let firmware = SystemFirmwareReader.read() ?? ""
         #if arch(arm64)
         let architecture = "arm64"
-        #elseif arch(x86_64)
-        let architecture = "x86_64"
         #else
-        let architecture = "unknown"
+        let architecture = "unsupported"
         #endif
 
         return FirmwareLimitDeviceIdentity(

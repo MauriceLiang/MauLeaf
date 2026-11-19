@@ -3,7 +3,7 @@
 [简体中文](#简体中文) | [English](#english)
 
 > [!IMPORTANT]
-> **本文件和配套脚本仅用于清理旧版 MauLeaf（0.7.x 及更早版本）安装的第三方控制服务。** 当前 0.8.0-preview.1 已改为 MauLeaf 自研 AppleSMC 控制，不包含、不调用旧版第三方控制程序。不要用本文件的旧版卸载脚本移除当前预览版的原生 helper；请使用 [原生服务卸载说明](NATIVE_FIRMWARE_HELPER.md)。
+> **本文件和配套脚本仅用于清理旧版 MauLeaf（0.7.x 及更早版本）安装的第三方控制服务。** 当前 Preview 5 采用 MauLeaf 自研 AppleSMC 控制，不包含、不调用旧版第三方控制程序。不要用本文件的旧版卸载脚本移除当前预览版的原生 helper；请使用 [原生服务卸载说明](NATIVE_FIRMWARE_HELPER.md)。
 
 ## 简体中文
 
@@ -31,7 +31,7 @@
 
 脚本先核验 `source=MauLeaf` 安装凭据及 `cc.chlc.batt` 服务是否确实指向 `/usr/local/bin/batt`，才操作系统控制组件。它首先尝试 `batt adapter enable` 恢复适配器供电；如果 `batt disable` **仅**返回已知的“不支持充电控制”错误，将继续尝试 `batt uninstall`。**只有官方卸载命令成功且服务已停止，才删除程序、服务配置和受管文件**。随后清理 MauLeaf/ChargeCap 用户任务、应用和偏好设置。
 
-**保护措施**：若检测到其他来源安装的 batt、不能确认归属、供电恢复失败、或 `batt uninstall` 失败，脚本会停止系统组件的删除。它不会关闭 SIP、删除 macOS 自带电池服务或清空无关软件的文件；不能保证清除所有用户自定义安装路径。请勿绕过检查强制删除正在运行的控制器。
+**保护措施**：如果检测到 Preview 5 原生服务、原始快照或后台恢复标记，脚本会直接停止，避免删除仍需恢复固件的应用。若检测到其他来源安装的 batt、不能确认归属、供电恢复失败、或 `batt uninstall` 失败，也会停止系统组件的删除。它不会关闭 SIP、删除 macOS 自带电池服务或清空无关软件的文件；不能保证清除所有用户自定义安装路径。请勿绕过检查强制删除正在运行的控制器。
 
 ### 完整卸载脚本（可直接复制）
 
@@ -41,6 +41,10 @@
 
 ~~~bash
 #!/bin/bash
+# LEGACY ONLY: cleanup for older MauLeaf releases (0.7.x and earlier).
+# This script is not part of the native-only 0.8.0 preview package.
+# Do not use it to remove the current MauLeaf AppleSMC helper.
+# MauLeaf native helper removal is documented in docs/NATIVE_FIRMWARE_HELPER.md.
 # MauLeaf emergency uninstaller for macOS 26 / 27.
 # Run as your normal macOS user: bash Scripts/uninstall-macos26-27.sh
 set -euo pipefail
@@ -52,6 +56,21 @@ fi
 if [ "$(/usr/bin/id -u)" -eq 0 ]; then
   echo "Run as your normal user, not with sudo. The script requests sudo when needed." >&2
   exit 1
+fi
+
+# Never remove the native Preview 5 app or its recovery capability using the
+# legacy batt cleanup path. Restore the native helper first with its installer.
+NATIVE_LABEL="com.local.chargecap.firmware-helper"
+NATIVE_BINARY="/Library/PrivilegedHelperTools/$NATIVE_LABEL"
+NATIVE_PLIST="/Library/LaunchDaemons/$NATIVE_LABEL.plist"
+NATIVE_SUPPORT="/Library/Application Support/MauLeaf"
+if [[ -e "$NATIVE_BINARY" || -e "$NATIVE_PLIST" \
+    || -e "$NATIVE_SUPPORT/original-firmware-state.json" \
+    || -e "$NATIVE_SUPPORT/restore-original-state.pending" \
+    || -e "$NATIVE_SUPPORT/background-recovery.pending" ]]; then
+  echo "Native MauLeaf firmware helper or recovery data is present." >&2
+  echo "Refusing legacy cleanup: use the native uninstaller to restore firmware first." >&2
+  exit 12
 fi
 
 MAJOR="$(/usr/bin/sw_vers -productVersion | /usr/bin/cut -d. -f1)"

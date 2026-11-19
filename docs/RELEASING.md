@@ -18,6 +18,6 @@
 
 1. GitHub → Actions → **Build & Release** → **Run workflow**。
 2. 选择 `main`，在 `release_tag` 输入已存在的标签（例如 `v0.7.5`）。
-3. 手动启动：使用最新工作流定义，从该标签检出源码进行测试、双架构打包和发布。
+3. 如需发布一个全新的预览版本，在 Actions → Build & Release → Run workflow 中填写 `preview_tag=v0.8.0-preview.1`，留空 `release_tag`。工作流会从当前 main 测试和双架构打包，随后自动创建该 tag 并发布 Pre-release。已有标签重发仍使用 `release_tag`。
 4. 发布前检查已有 Release；如果已经存在则拒绝覆盖。输入留空则只运行测试。手动发布 `-preview.N` 标签时工作流同样自动添加 Pre-release 标记。
 5. 原先 `tar -tzf ... | grep -q 'LICENSE$'` 在 `pipefail` 下可能因 `grep -q` 提前关闭管道导致 `tar: stdout: write error`；现先完整输出到临时文件再匹配。

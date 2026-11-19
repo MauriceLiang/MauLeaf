@@ -7,7 +7,11 @@ on:
   workflow_dispatch:
     inputs:
       release_tag:
-        description: 'Existing vX.Y.Z or vX.Y.Z-preview.N tag to publish (blank = tests only)'
+        description: 'Existing vX.Y.Z or vX.Y.Z-preview.N tag to republish'
+        required: false
+        type: string
+      preview_tag:
+        description: 'Create and publish a new vX.Y.Z-preview.N tag from main'
         required: false
         type: string
 permissions:
@@ -25,7 +29,7 @@ jobs:
           ref: ${{ inputs.release_tag || github.ref }}
       - run: bash tests/run.sh
   build:
-    if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.release_tag != '')
+    if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && (inputs.release_tag != '' || inputs.preview_tag != ''))
     needs: test
     strategy:
       fail-fast: false
@@ -41,12 +45,25 @@ jobs:
           ref: ${{ inputs.release_tag || github.ref }}
       - name: Validate tag
         env:
-          RELEASE_TAG: ${{ inputs.release_tag || github.ref_name }}
+          RELEASE_TAG: ${{ inputs.preview_tag || inputs.release_tag || github.ref_name }}
+          CREATE_PREVIEW_TAG: ${{ inputs.preview_tag != '' }}
+          EXISTING_RELEASE_TAG: ${{ inputs.release_tag }}
         shell: bash
         run: |
           set -euo pipefail
+          if [[ "$CREATE_PREVIEW_TAG" == "true" && -n "$EXISTING_RELEASE_TAG" ]]; then
+            echo "Choose either preview_tag or release_tag, not both." >&2
+            exit 1
+          fi
           [[ "$RELEASE_TAG" =~ ^v([0-9]+)\.([0-9]+)\.([0-9]+)(-preview\.([0-9]+))?$ ]] || exit 1
-          git ls-remote --exit-code --tags origin "refs/tags/$RELEASE_TAG" >/dev/null
+          if [[ "$CREATE_PREVIEW_TAG" == "true" ]]; then
+            if git ls-remote --exit-code --tags origin "refs/tags/$RELEASE_TAG" >/dev/null 2>&1; then
+              echo "Tag $RELEASE_TAG already exists; refusing to overwrite" >&2
+              exit 1
+            fi
+          else
+            git ls-remote --exit-code --tags origin "refs/tags/$RELEASE_TAG" >/dev/null
+          fi
           major="${BASH_REMATCH[1]}"; minor="${BASH_REMATCH[2]}"; patch="${BASH_REMATCH[3]}"
           ((minor < 1000 && patch < 1000)) || exit 1
           echo "RELEASE_VERSION=${major}.${minor}.${patch}" >> "$GITHUB_ENV"
@@ -55,7 +72,7 @@ jobs:
       - name: Package
         env:
           TARGET_ARCH: ${{ matrix.arch }}
-          RELEASE_LABEL: ${{ inputs.release_tag || github.ref_name }}
+          RELEASE_LABEL: ${{ inputs.preview_tag || inputs.release_tag || github.ref_name }}
         run: bash Scripts/ci/package-macos.sh
       - uses: actions/upload-artifact@v4
         with:
@@ -63,7 +80,7 @@ jobs:
           path: dist/*.dmg
           if-no-files-found: error
   release:
-    if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.release_tag != '')
+    if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && (inputs.release_tag != '' || inputs.preview_tag != ''))
     needs: build
     runs-on: ubuntu-latest
     permissions:
@@ -76,9 +93,27 @@ jobs:
         with:
           path: artifacts
           merge-multiple: true
+      - name: Create preview tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.preview_tag || inputs.release_tag || github.ref_name }}
+          CREATE_PREVIEW_TAG: ${{ inputs.preview_tag != '' }}
+        run: |
+          set -euo pipefail
+          if [[ "$CREATE_PREVIEW_TAG" == "true" ]]; then
+            [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+-preview\.[0-9]+$ ]] || exit 1
+            if git ls-remote --exit-code --tags origin "refs/tags/$RELEASE_TAG" >/dev/null 2>&1; then
+              echo "Tag $RELEASE_TAG already exists; refusing to overwrite" >&2
+              exit 1
+            fi
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git tag -a "$RELEASE_TAG" -m "MauLeaf $RELEASE_TAG"
+            git push origin "$RELEASE_TAG"
+          fi
       - name: Verify release notes and assets
         env:
-          RELEASE_TAG: ${{ inputs.release_tag || github.ref_name }}
+          RELEASE_TAG: ${{ inputs.preview_tag || inputs.release_tag || github.ref_name }}
         run: |
           set -euo pipefail
           [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-preview\.[0-9]+)?$ ]] || exit 1
@@ -96,14 +131,12 @@ jobs:
           set -euo pipefail
           [[ "$(tr -d '\r\n' < Vendor/batt-version)" == "v0.8.0" ]] || exit 1
           curl -fLsS --retry 3 "https://github.com/charlie0129/batt/archive/refs/tags/v0.8.0.tar.gz" -o artifacts/batt-v0.8.0-source.tar.gz
-          # Fully consume the archive listing first. grep -q in a pipe can
-          # cause tar: stdout: write error when pipefail is enabled.
           tar -tzf artifacts/batt-v0.8.0-source.tar.gz > "$RUNNER_TEMP/batt-source-contents.txt"
           grep -Eq '(^|/)LICENSE$' "$RUNNER_TEMP/batt-source-contents.txt"
       - name: Publish GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
-          RELEASE_TAG: ${{ inputs.release_tag || github.ref_name }}
+          RELEASE_TAG: ${{ inputs.preview_tag || inputs.release_tag || github.ref_name }}
         run: |
           set -euo pipefail
           V="${RELEASE_TAG#v}"

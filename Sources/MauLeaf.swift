@@ -1290,6 +1290,12 @@ final class ChargeManager: ObservableObject {
         isPreparingToQuit = true
         limitDebounce?.cancel()
         limitDebounce = nil
+        // Do not leave any pre-quit "Retry" action that could reapply a limit
+        // after restoration failed. The next explicit Quit retries recovery.
+        pendingAction = nil
+        lastAction = nil
+        showNativeWriteConfirmation = false
+        showLegacyDisableConfirmation = false
 
         let deadline = Date().addingTimeInterval(30)
         while isBusy {

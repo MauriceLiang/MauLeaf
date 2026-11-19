@@ -86,7 +86,7 @@ MauLeaf 只保留日常充电上限和「本次充满」两项功能。菜单栏
 
 ## 卸载原生服务
 
-连接电源并先退出 MauLeaf，然后执行：
+使用当前 Preview 5 安装包启动 MauLeaf，确保原生 helper 已自动升级到相同版本，再连接电源并退出 MauLeaf，然后执行：
 
     sudo "/Applications/MauLeaf.app/Contents/Resources/MauLeafNativeControl/uninstall-native-firmware-helper.sh"
 

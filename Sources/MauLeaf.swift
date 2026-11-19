@@ -384,7 +384,7 @@ struct ContentView: View {
             }
             Button(manager.text("取消"), role: .cancel) {}
         } message: {
-            Text(manager.text("Preview 4 没有保存首次启用前的固件阈值，因此无法恢复原始上限。继续操作只会关闭旧版限充激活标志，并保留当前阈值；这不等于恢复历史原状。"))
+            Text(manager.text("当前固件限充没有 MauLeaf 原始快照。无法确认这些值是否由 Preview 4 或其他工具设置。继续操作只会清除 bfF0 激活标志，并保留 bfD0、bfE0 当前值；无法恢复历史阈值。"))
         }
         .task { manager.start() }
     }
@@ -503,6 +503,21 @@ struct ContentView: View {
                 }
                 .buttonStyle(.bordered)
                 .disabled(!manager.canRetryOriginalRestore)
+            } else if manager.fullOncePending {
+                Label(manager.text("本次充满进行中 · 限制暂时关闭"), systemImage: "bolt.fill")
+                    .font(.subheadline.weight(.semibold))
+                Text(manager.text("本次充满结束后会恢复当前 MauLeaf 上限；也可以现在关闭 MauLeaf 限制并恢复最初的固件配置。"))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                Button {
+                    manager.disableLimit()
+                } label: {
+                    Label(manager.text("关闭限制充电"), systemImage: "power")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.bordered)
+                .disabled(!manager.canDisableLimit)
             } else if manager.hasOriginalStateSnapshot {
                 HStack {
                     Label(manager.text("限制充电已启用"), systemImage: "checkmark.circle.fill")

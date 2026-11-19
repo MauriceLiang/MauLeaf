@@ -217,6 +217,14 @@ private enum FirmwareLimitCoreTests {
         expect(transport.writes == [
             "bfF0=00", "bfD0=50000000", "bfE0=4E000000", "bfF0=00"
         ], "restore deactivates, restores thresholds, then restores the original activation byte")
+
+        let partiallyWritten = FakeFirmwareLimitTransport()
+        partiallyWritten.activation = 0x02
+        partiallyWritten.upper = 40
+        partiallyWritten.lower = 45
+        let recovered = try controller(partiallyWritten).restore(original, permit: permit())
+        expect(recovered == original,
+               "restore can recover from an invalid intermediate threshold pair after a partial write")
     }
 
     private static func testOriginalStateSnapshot() throws {

@@ -560,18 +560,22 @@ struct ContentView: View {
             }
 
             if manager.fullOncePending {
-                Text(manager.text("原生固件限充已临时关闭；达到 100% 或 10 小时期限后自动恢复原上限。断开电源时会等待重新接电再恢复。"))
+                Text(manager.text(manager.fullOnceCancelRequested
+                    ? "已请求恢复原上限；当前未连接电源，重新接电后会继续恢复。"
+                    : "原生固件限充已临时关闭；达到 100% 或 10 小时期限后自动恢复原上限。断开电源时会等待重新接电再恢复。"))
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
-                Button {
-                    manager.cancelFullOnce()
-                } label: {
-                    Label(manager.text("取消本次充满并恢复上限"), systemImage: "arrow.uturn.backward")
-                        .frame(maxWidth: .infinity)
+                if !manager.fullOnceCancelRequested {
+                    Button {
+                        manager.cancelFullOnce()
+                    } label: {
+                        Label(manager.text("取消本次充满并恢复上限"), systemImage: "arrow.uturn.backward")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(manager.isBusy)
                 }
-                .buttonStyle(.bordered)
-                .disabled(manager.isBusy)
             } else {
                 Text(manager.text("仅本次允许充至 100%；完成后由原生后台服务恢复当前充电上限。"))
                     .font(.caption)
@@ -727,6 +731,7 @@ final class ChargeManager: ObservableObject {
     }
     @Published private(set) var menuBarLeafStyle: MenuBarLeafStyle = .green
     @Published private(set) var fullOncePending = false
+    @Published private(set) var fullOnceCancelRequested = false
     @Published var modeText: AppText = "正在检查原生固件控制…"
     @Published var statusMessage: AppText = "正在连接 MauLeaf 原生固件服务…"
     @Published var autoApplyFeedback: AppText = "调整后自动应用"
@@ -862,9 +867,12 @@ final class ChargeManager: ObservableObject {
             let oneTime = try await backend.oneTimeChargeStatus()
             currentState = state
             fullOncePending = oneTime.pending
+            fullOnceCancelRequested = oneTime.cancelRequested
             backendReady = true
             if (50...95).contains(state.upper) { limit = state.upper }
-            if oneTime.pending {
+            if oneTime.pending && oneTime.cancelRequested {
+                modeText = "等待接电后恢复原生充电上限"
+            } else if oneTime.pending {
                 modeText = "本次充满进行中 · 原上限 \(oneTime.restoreUpper ?? limit)%"
             } else if state.active {
                 modeText = "原生固件限充至 \(state.upper)%"
@@ -884,11 +892,14 @@ final class ChargeManager: ObservableObject {
                     let oneTime = try await backend.oneTimeChargeStatus()
                     currentState = state
                     fullOncePending = oneTime.pending
+                    fullOnceCancelRequested = oneTime.cancelRequested
                     backendReady = true
                     if (50...95).contains(state.upper) { limit = state.upper }
-                    modeText = oneTime.pending
-                        ? "本次充满进行中 · 原上限 \(oneTime.restoreUpper ?? limit)%"
-                        : (state.active ? "原生固件限充至 \(state.upper)%" : "原生固件限充未启用")
+                    modeText = oneTime.pending && oneTime.cancelRequested
+                        ? "等待接电后恢复原生充电上限"
+                        : (oneTime.pending
+                            ? "本次充满进行中 · 原上限 \(oneTime.restoreUpper ?? limit)%"
+                            : (state.active ? "原生固件限充至 \(state.upper)%" : "原生固件限充未启用"))
                     statusMessage = "MauLeaf 原生固件服务已启用。"
                     isError = false
                     isBusy = false
@@ -1016,6 +1027,7 @@ final class ChargeManager: ObservableObject {
                 let response = try await backend.cancelOneTimeCharge()
                 currentState = response.state
                 fullOncePending = response.oneTimePending
+                fullOnceCancelRequested = response.oneTimePending
                 modeText = response.oneTimePending
                     ? "等待接电后恢复原生充电上限"
                     : "原生固件限充至 \(response.state.upper)%"
@@ -1043,6 +1055,7 @@ final class ChargeManager: ObservableObject {
             )
             currentState = response.state
             fullOncePending = response.oneTimePending
+            fullOnceCancelRequested = false
             modeText = "原生固件限充寄存器：\(value)%"
             autoApplyFeedback = "已写入并读回 \(value)%"
             statusMessage = AppText(verbatim: response.message)
@@ -1069,6 +1082,7 @@ final class ChargeManager: ObservableObject {
             )
             currentState = response.state
             fullOncePending = response.oneTimePending
+            fullOnceCancelRequested = false
             modeText = "本次充满进行中 · 原上限 \(limit)%"
             statusMessage = AppText(verbatim: response.message)
             isError = false

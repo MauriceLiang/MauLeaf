@@ -467,23 +467,35 @@ struct FirmwareLimitController {
             // First deactivate the limit. When reducing the upper bound
             // (85/83 -> 80/78), write the LOWER bound first.
             // Conversely (75/73 -> 80/78), write the UPPER bound first.
-            let previous = try readState()
-            if previous.isActive {
+            // An interrupted older Preview may have left an invalid
+            // intermediate pair. Read each register independently so it can
+            // still be restored, even when readState() rejects that pair.
+            let activation = try readRaw(.activation).first ?? 0xFF
+            guard activation == 0x00 || activation == 0x02 else {
+                throw FirmwareLimitCoreError.invalidActivation(activation)
+            }
+            guard let previousUpper = FirmwareLimitPolicy.decodeUInt32LittleEndian(try readRaw(.upper)),
+                  let previousLower = FirmwareLimitPolicy.decodeUInt32LittleEndian(try readRaw(.lower)),
+                  (5...100).contains(previousUpper),
+                  (5...100).contains(previousLower) else {
+                throw FirmwareLimitCoreError.invalidOriginalSnapshot
+            }
+            if activation == 0x02 {
                 try writeAndVerify(.activation, bytes: [0x00], preflight: preflight)
             }
-            let upperFirst = original.upper > previous.lower
+            let upperFirst = original.upper > previousLower
             if upperFirst {
-                if previous.upper != original.upper {
+                if previousUpper != original.upper {
                     try writeAndVerify(.upper, bytes: FirmwareLimitPolicy.encodeUInt32LittleEndian(original.upper), preflight: preflight)
                 }
-                if previous.lower != original.lower {
+                if previousLower != original.lower {
                     try writeAndVerify(.lower, bytes: FirmwareLimitPolicy.encodeUInt32LittleEndian(original.lower), preflight: preflight)
                 }
             } else {
-                if previous.lower != original.lower {
+                if previousLower != original.lower {
                     try writeAndVerify(.lower, bytes: FirmwareLimitPolicy.encodeUInt32LittleEndian(original.lower), preflight: preflight)
                 }
-                if previous.upper != original.upper {
+                if previousUpper != original.upper {
                     try writeAndVerify(.upper, bytes: FirmwareLimitPolicy.encodeUInt32LittleEndian(original.upper), preflight: preflight)
                 }
             }

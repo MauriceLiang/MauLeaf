@@ -8,6 +8,7 @@ final class FirmwareLimitHelperService: NSObject, FirmwareLimitHelperProtocol {
     private let controller: FirmwareLimitController
     private let identityProvider: () -> FirmwareLimitDeviceIdentity
     private let isOnACPower: () -> Bool
+    private let isAdministrator: () -> Bool
     private let batteryObservation: () -> FirmwareLimitBatteryObservation
     private let jobURL: URL
     private let now: () -> Date
@@ -25,6 +26,7 @@ final class FirmwareLimitHelperService: NSObject, FirmwareLimitHelperProtocol {
         transport: FirmwareLimitTransport,
         identityProvider: @escaping () -> FirmwareLimitDeviceIdentity = FirmwareLimitRuntime.identity,
         isOnACPower: @escaping () -> Bool = FirmwareLimitRuntime.isOnACPower,
+        isAdministrator: @escaping () -> Bool = { FirmwareLimitRuntime.isAdministrator },
         batteryObservation: @escaping () -> FirmwareLimitBatteryObservation = FirmwareLimitRuntime.batteryObservation,
         jobURL: URL = URL(fileURLWithPath: "/Library/Application Support/MauLeaf/one-time-charge.json"),
         now: @escaping () -> Date = Date.init,
@@ -33,6 +35,7 @@ final class FirmwareLimitHelperService: NSObject, FirmwareLimitHelperProtocol {
         controller = FirmwareLimitController(transport: transport)
         self.identityProvider = identityProvider
         self.isOnACPower = isOnACPower
+        self.isAdministrator = isAdministrator
         self.batteryObservation = batteryObservation
         self.jobURL = jobURL
         self.now = now
@@ -192,7 +195,7 @@ final class FirmwareLimitHelperService: NSObject, FirmwareLimitHelperProtocol {
         try FirmwareLimitWritePermit.authorize(
             identity: identityProvider(),
             context: FirmwareLimitWriteContext(
-                isAdministrator: FirmwareLimitRuntime.isAdministrator,
+                isAdministrator: isAdministrator(),
                 isOnACPower: isOnACPower(),
                 userConfirmed: confirmed
             )

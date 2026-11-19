@@ -44,7 +44,7 @@ write_plist
 FLAGS=(-parse-as-library -O -target "$TARGET_ARCH-apple-macos13.0")
 if [[ "$TARGET_ARCH" == x86_64 ]]; then FLAGS+=(-D MAULEAF_INTEL_EXPERIMENTAL); fi
 xcrun swiftc "${FLAGS[@]}" -framework SwiftUI -framework AppKit -framework Combine -framework Foundation \
-  Sources/MauLeaf.swift Sources/AppLocalization.swift Sources/FirmwareLimitCore.swift \
+  Sources/MauLeaf.swift Sources/AppLocalization.swift Sources/BatteryStatusReader.swift Sources/FirmwareLimitCore.swift \
   Sources/FirmwareLimitHelperProtocol.swift Sources/FirmwareLimitHelperClient.swift \
   -o "$APP/Contents/MacOS/MauLeaf"
 
@@ -54,7 +54,7 @@ if [[ "$TARGET_ARCH" == arm64 ]]; then
   xcrun swiftc -O -parse-as-library -target arm64-apple-macos13.0 \
     -framework IOKit -framework Security \
     Sources/FirmwareLimitCore.swift Sources/FirmwareLimitReconciliation.swift \
-    Sources/FirmwareLimitRuntime.swift Sources/FirmwareLimitSMCTransport.swift \
+    Sources/BatteryStatusReader.swift Sources/FirmwareLimitRuntime.swift Sources/FirmwareLimitSMCTransport.swift \
     Sources/FirmwareLimitHelperProtocol.swift Sources/FirmwareLimitHelperService.swift \
     Sources/FirmwareLimitHelperMain.swift \
     -o "$NATIVE/MauLeafFirmwareHelper"

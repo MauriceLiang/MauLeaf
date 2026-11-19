@@ -126,7 +126,8 @@ private enum FirmwareLimitCoreTests {
 
     private static func testRequestValidation() throws {
         let standard = try FirmwareLimitRequest.standard(upper: 80)
-        expect(standard == (try FirmwareLimitRequest(upper: 80, lower: 78)), "default resume threshold is two points below upper")
+        let expected = try FirmwareLimitRequest(upper: 80, lower: 78)
+        expect(standard == expected, "default resume threshold is two points below upper")
         expectThrows({ _ = try FirmwareLimitRequest(upper: 49, lower: 47) }, "upper below MauLeaf's 50% floor is rejected")
         expectThrows({ _ = try FirmwareLimitRequest(upper: 96, lower: 94) }, "upper above MauLeaf's 95% ceiling is rejected")
         expectThrows({ _ = try FirmwareLimitRequest(upper: 80, lower: 80) }, "lower must be below upper")

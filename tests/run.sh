@@ -8,6 +8,8 @@ export CLANG_MODULE_CACHE_PATH="${CLANG_MODULE_CACHE_PATH:-$TMP/ModuleCache}"
 export SWIFT_MODULECACHE_PATH="${SWIFT_MODULECACHE_PATH:-$TMP/ModuleCache}"
 swiftc "$ROOT/Sources/ChargeModeCore.swift" "$ROOT/Sources/AppLocalization.swift" "$ROOT/Sources/ChargeModeCoreTests.swift" -o "$TMP/coretests"
 "$TMP/coretests"
+swiftc "$ROOT/Sources/FirmwareLimitCore.swift" "$ROOT/tests/FirmwareLimitCoreTests.swift" -o "$TMP/firmwarelimitcoretests"
+"$TMP/firmwarelimitcoretests"
 swiftc -parse-as-library "$ROOT/Sources/ChargeModeCore.swift" "$ROOT/Sources/AppLocalization.swift" \
     "$ROOT/tests/LocalizationTests.swift" -o "$TMP/localizationtests"
 "$TMP/localizationtests"
@@ -15,6 +17,9 @@ swiftc "$ROOT/Sources/ChargeModeCore.swift" "$ROOT/Sources/AppLocalization.swift
     "$ROOT/tests/DischargeControlTests.swift" -o "$TMP/dischargetests"
 "$TMP/dischargetests"
 if [[ "$(uname -s)" == Darwin ]]; then
+    swiftc -parse-as-library -emit-module -emit-library -module-name MauLeafFirmwareLimit \
+        -framework IOKit "$ROOT/Sources/FirmwareLimitCore.swift" "$ROOT/Sources/FirmwareLimitSMCTransport.swift" \
+        -emit-module-path "$TMP/MauLeafFirmwareLimit.swiftmodule" -o "$TMP/libMauLeafFirmwareLimit.dylib"
     swift "$ROOT/Scripts/GenerateAppIcon.swift" "$ROOT/Assets/MauLeafIcon-1024.png" "$TMP/AppIcon.iconset"
     swiftc -parse-as-library "$ROOT/tests/AppIconTests.swift" -o "$TMP/appicontests"
     "$TMP/appicontests" "$TMP/AppIcon.iconset"

@@ -49,7 +49,7 @@ enum FirmwareSMCTransportError: Error, CustomStringConvertible {
     case openFailed(Int32)
     case accessDenied
     case keyMissing(String)
-    case callFailed(io_return_t, UInt8)
+    case callFailed(kern_return_t, UInt8)
     case invalidPayloadSize(Int)
 
     var description: String {

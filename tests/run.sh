@@ -83,6 +83,17 @@ if grep -Eq 'componentSetupSection|installBackend|uninstallBackend' "$ROOT/Sourc
     echo "The legacy component installer UI must not return" >&2
     exit 1
 fi
+if grep -RniE 'MAULEAF_INTEL_EXPERIMENTAL|x86_64|macos-15-intel|EXPERIMENTAL.dmg' \
+    "$ROOT/Sources" "$ROOT/Scripts/ci/package-macos.sh" "$ROOT/.github/workflows/build-release.yml"; then
+    echo "Intel build support must not ship in Preview 5." >&2
+    exit 1
+fi
+[[ "$(grep -c 'arch: arm64' "$ROOT/.github/workflows/build-release.yml")" -eq 1 ]]
+grep -Fq -- '--restore-original-state' "$ROOT/Sources/FirmwareLimitHelperMain.swift"
+grep -Fq 'original-firmware-state.json' "$ROOT/Sources/FirmwareLimitHelperService.swift"
+grep -Fq 'restore-original-state.pending' "$ROOT/Support/com.local.chargecap.firmware-helper.plist"
+grep -Fq '启用限制充电' "$ROOT/Sources/MauLeaf.swift"
+grep -Fq '关闭限制充电' "$ROOT/Sources/MauLeaf.swift"
 grep -Fq '@Published private(set) var menuBarLeafStyle: MenuBarLeafStyle = .green' "$ROOT/Sources/MauLeaf.swift"
 bash -n "$ROOT/Scripts/ci/package-macos.sh"
 bash -n "$ROOT/Scripts/install-native-firmware-helper.sh"

@@ -1362,7 +1362,7 @@ final class ChargeManager: ObservableObject {
                 let detail = queued
                     ? "固件尚未恢复：已保留后台恢复任务。请连接电源或改善电池状态后重试正常退出；若仍然退出，删除应用前请先确认恢复完成。"
                     : "无法确认三个固件寄存器已恢复，请勿删除 MauLeaf 或恢复服务。"
-                return cancelTermination(detail)
+                return cancelTermination(AppText(key: detail))
             }
 
             currentState = verified

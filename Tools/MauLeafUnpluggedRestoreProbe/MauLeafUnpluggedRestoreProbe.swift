@@ -21,6 +21,8 @@ private enum MauLeafUnpluggedRestoreProbe {
                 try showStatus()
             case "test-unplugged-deactivation":
                 try testUnpluggedDeactivation()
+            case "test-unplugged-full-restore":
+                try testUnpluggedFullRestore()
             case "help", "--help", "-h":
                 showHelp()
             default:
@@ -42,13 +44,18 @@ private enum MauLeafUnpluggedRestoreProbe {
           ./MauLeafUnpluggedRestoreProbe status
           sudo ./MauLeafUnpluggedRestoreProbe status
           sudo ./MauLeafUnpluggedRestoreProbe test-unplugged-deactivation
+          sudo ./MauLeafUnpluggedRestoreProbe test-unplugged-full-restore
 
         status                      READ ONLY; no administrator rights normally required
         test-unplugged-deactivation Requires a verified MauLeaf snapshot, active
                                     limit, physically disconnected AC power,
                                     strict device match and typed confirmation.
                                     Writes ONLY bfF0 = 0x00 (disables limit).
-        Never enables a limit or modifies bfD0/bfE0. No installation performed.
+        test-unplugged-full-restore
+                                    EXPERIMENTAL: deactivates bfF0 then restores
+                                    saved original bfD0/bfE0, with readback at
+                                    every step. Does not delete helper/snapshot.
+        Neither write mode ever enables a limit. No installation performed.
         """)
     }
 
@@ -145,6 +152,68 @@ private enum MauLeafUnpluggedRestoreProbe {
         print("DO NOT uninstall all components based on this test alone.")
     }
 
+    private static func testUnpluggedFullRestore() throws {
+        guard geteuid() == 0 else {
+            throw UnpluggedRestoreProbeError.administratorRequired
+        }
+        guard isatty(STDIN_FILENO) == 1 else {
+            throw UnpluggedRestoreProbeError.confirmationMissing
+        }
+
+        let transport = AppleSMCFirmwareLimitTransport()
+        let controller = FirmwareLimitController(transport: transport)
+        let initial = try controller.readState()
+        let snapshot = try readOriginalSnapshot()
+        try preflight(transport: transport, baseline: initial, confirmed: false,
+                      ignoreMissingConfirmation: true)
+        guard initial.upper != snapshot.state.upper,
+              initial.lower != snapshot.state.lower else {
+            throw UnpluggedRestoreProbeError.firmwareWriteNotVerified(
+                "A meaningful full-restore test requires BOTH current thresholds to differ from the saved original values."
+            )
+        }
+
+        printHeader()
+        print("TEST            : UNPLUGGED FULL ORIGINAL-STATE RESTORE")
+        print("Before          :")
+        printFirmware(initial)
+        print("Original        :")
+        printFirmware(snapshot.state)
+        print("")
+        print("EXPERIMENTAL HARDWARE WRITES WHILE UNPLUGGED:")
+        print("  1. Write bfF0 = 0x00 (deactivate firmware limit).")
+        print("  2. Restore EXACT original bfD0/bfE0 from root-owned snapshot.")
+        print("  3. Verify all three registers; never re-enable bfF0.")
+        print("  4. Preserve the snapshot and helper; do NOT uninstall yet.")
+        print("The threshold write order preserves a valid range at each step.")
+        print("The experiment is not risk-free and cannot prove future charging.")
+        print("")
+        let confirmation = "UNPLUGGED FULL RESTORE MacBookPro18,1"
+        print("Enter EXACTLY: \(confirmation)")
+        guard readLine(strippingNewline: true) == confirmation else {
+            throw UnpluggedRestoreProbeError.confirmationMissing
+        }
+        try preflight(transport: transport, baseline: initial, confirmed: true)
+
+        let final = try UnpluggedRestorePolicy.restoreOriginal(
+            transport: transport,
+            before: initial,
+            original: snapshot.state,
+            preflight: { expected in
+                try preflight(transport: transport, baseline: expected, confirmed: true)
+            }
+        )
+
+        print("")
+        print("OFFLINE FULL RESTORE TEST: PASS")
+        print("After           :")
+        printFirmware(final)
+        print("Snapshot        : preserved for the existing Helper to remove after reconnect.")
+        print("IMPORTANT       : Full register readback passed; this is not a complete uninstall.")
+        print("NEXT            : Reconnect AC, let Helper finish recovery, and confirm actual charging.")
+        print("DO NOT remove helper/snapshot just because this experiment passed.")
+    }
+
     private static func preflight(
         transport: FirmwareLimitTransport,
         baseline: FirmwareLimitState,
@@ -168,12 +237,11 @@ private enum MauLeafUnpluggedRestoreProbe {
             conflictingProcess: conflict,
             explicitlyConfirmed: confirmed || ignoreMissingConfirmation
         )
-        try UnpluggedRestorePolicy.authorize(context)
+        try UnpluggedRestorePolicy.authorize(context, requireActive: baseline.isActive)
         // Ensure no other actor has changed the thresholds since the first
         // successful read. No write is permitted if the baseline is stale.
         let latest = try FirmwareLimitController(transport: transport).readState()
-        guard latest.upper == baseline.upper,
-              latest.lower == baseline.lower else {
+        guard latest == baseline else {
             throw UnpluggedRestoreProbeError.firmwareStateChanged
         }
     }

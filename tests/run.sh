@@ -20,7 +20,7 @@ swiftc -parse-as-library "$ROOT/Sources/AppLocalization.swift" \
 
 if [[ "$(uname -s)" == Darwin ]]; then
     swiftc -parse-as-library -framework IOKit -framework Security \
-        "$ROOT/Sources/FirmwareLimitCore.swift" \
+        "$ROOT/Sources/BatteryStatusReader.swift" "$ROOT/Sources/FirmwareLimitCore.swift" \
         "$ROOT/Sources/FirmwareLimitReconciliation.swift" \
         "$ROOT/Sources/FirmwareLimitRuntime.swift" \
         "$ROOT/Sources/FirmwareLimitSMCTransport.swift" \
@@ -33,7 +33,7 @@ if [[ "$(uname -s)" == Darwin ]]; then
     swiftc -parse-as-library -D MAULEAF_TESTING \
         -framework SwiftUI -framework AppKit -framework Combine \
         "$ROOT/Sources/MauLeaf.swift" "$ROOT/Sources/AppLocalization.swift" \
-        "$ROOT/Sources/FirmwareLimitCore.swift" "$ROOT/Sources/FirmwareLimitHelperProtocol.swift" \
+        "$ROOT/Sources/BatteryStatusReader.swift" "$ROOT/Sources/FirmwareLimitCore.swift" "$ROOT/Sources/FirmwareLimitHelperProtocol.swift" \
         "$ROOT/Sources/FirmwareLimitHelperClient.swift" \
         "$ROOT/tests/NativeFirmwareBackendFixture.swift" "$ROOT/tests/ChargeManagerTests.swift" \
         -o "$TMP/managertests"
@@ -62,7 +62,7 @@ fi
 
 swiftc -frontend -parse \
     "$ROOT/Sources/MauLeaf.swift" "$ROOT/Sources/AppLocalization.swift" \
-    "$ROOT/Sources/FirmwareLimitCore.swift" "$ROOT/Sources/FirmwareLimitReconciliation.swift" \
+    "$ROOT/Sources/BatteryStatusReader.swift" "$ROOT/Sources/FirmwareLimitCore.swift" "$ROOT/Sources/FirmwareLimitReconciliation.swift" \
     "$ROOT/Sources/FirmwareLimitRuntime.swift" "$ROOT/Sources/FirmwareLimitSMCTransport.swift" \
     "$ROOT/Sources/FirmwareLimitHelperProtocol.swift" "$ROOT/Sources/FirmwareLimitHelperClient.swift" \
     "$ROOT/Sources/FirmwareLimitHelperService.swift" "$ROOT/Sources/FirmwareLimitHelperMain.swift"

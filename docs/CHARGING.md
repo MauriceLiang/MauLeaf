@@ -53,6 +53,12 @@ MauLeaf Preview 5 只通过自研 AppleSMC 固件控制器管理充电上限。�
 - 恢复成功：删除恢复文件、服务二进制和 LaunchDaemon。
 - 用户手动删除应用：系统快照和 LaunchDaemon 不在应用目录中，不会随 app bundle 一起丢失；但建议通过内置卸载脚本排队自动清理，单纯拖动应用到废纸篓不会登记自动删除服务。
 
+**用户控制权：** 标准离线卸载会暂时保留独立恢复服务并在确认恢复后自动删除。用户若明确拒绝任何后台残留，可以在退出后以两项显式风险确认参数强制删除所有系统组件：
+
+    sudo "/Applications/MauLeaf.app/Contents/Resources/MauLeafNativeControl/uninstall-native-firmware-helper.sh" --force-remove-without-restore --i-accept-persistent-charge-limit-risk
+
+强制模式会销毁原始快照，无法保证固件充电限制已解除；只有用户明确选择时才执行，不得默认为强制删除。
+
 ### Preview 4 及更早版本迁移
 
 旧版本没有保存首次启用前的寄存器值。若升级后发现固件限充处于启用状态但不存在原始快照，MauLeaf 会明确显示迁移警告。此时只能将 bfF0 写为 0x00 并保留 bfD0、bfE0 当前值；无法保证恢复未保存的历史阈值，也不会伪造原始值。若用户之后再次启用 Preview 5，保留下来的当前阈值会成为新的快照基线，但它不是 Preview 4 之前的真实原始值。

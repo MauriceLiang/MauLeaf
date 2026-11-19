@@ -49,21 +49,12 @@ enum FirmwareLimitRuntime {
     }
 
     static func batteryObservation() -> FirmwareLimitBatteryObservation {
-        let result = run("/usr/bin/pmset", ["-g", "batt"])
-        guard result.status == 0 else {
-            return FirmwareLimitBatteryObservation(percent: nil, fullyCharged: nil, externalConnected: nil)
-        }
-        let output = result.output
-        let external = output.localizedCaseInsensitiveContains("AC Power")
-        let percent: Int?
-        if let range = output.range(of: #"\b(\d{1,3})%"#, options: .regularExpression) {
-            let token = String(output[range]).filter(\.isNumber)
-            percent = Int(token).flatMap { (0...100).contains($0) ? $0 : nil }
-        } else {
-            percent = nil
-        }
-        let full = percent == 100 || output.localizedCaseInsensitiveContains("charged")
-        return FirmwareLimitBatteryObservation(percent: percent, fullyCharged: full, externalConnected: external)
+        let snapshot = MauLeafBatteryStatusReader.read()
+        return FirmwareLimitBatteryObservation(
+            percent: snapshot.percent,
+            fullyCharged: snapshot.isFullyCharged,
+            externalConnected: snapshot.isACConnected
+        )
     }
 
     static func isOnACPower() -> Bool {

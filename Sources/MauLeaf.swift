@@ -1053,7 +1053,7 @@ final class ChargeManager: ObservableObject {
         do {
             let response = try await backend.beginOneTimeCharge(
                 upper: limit,
-                lower: max(5, limit - 2),
+                lower: currentState?.lower ?? max(5, limit - 2),
                 confirmed: true
             )
             currentState = response.state
@@ -1120,7 +1120,7 @@ final class ChargeManager: ObservableObject {
             let output = String(data: data, encoding: .utf8) ?? ""
             isAdapterConnected = output.localizedCaseInsensitiveContains("AC Power")
             if let range = output.range(of: #"\b\d{1,3}%"#, options: .regularExpression) {
-                let value = Int(output[range].filter(\.isNumber))
+                let value = Int(String(output[range].filter(\.isNumber)))
                 batteryPercent = value.flatMap { (0...100).contains($0) ? $0 : nil }
             } else {
                 batteryPercent = nil

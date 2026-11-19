@@ -1146,42 +1146,22 @@ final class ChargeManager: ObservableObject {
     }
 
     private func readSystemBattery() {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/pmset")
-        process.arguments = ["-g", "batt"]
-        process.standardInput = FileHandle.nullDevice
-        let pipe = Pipe()
-        process.standardOutput = pipe
-        process.standardError = pipe
-        do {
-            try process.run()
-            let data = pipe.fileHandleForReading.readDataToEndOfFile()
-            process.waitUntilExit()
-            guard process.terminationStatus == 0 else { throw NativeControlError.batteryReadFailed }
-            let output = String(data: data, encoding: .utf8) ?? ""
-            isAdapterConnected = output.localizedCaseInsensitiveContains("AC Power")
-            if let range = output.range(of: #"\b\d{1,3}%"#, options: .regularExpression) {
-                let value = Int(String(output[range].filter(\.isNumber)))
-                batteryPercent = value.flatMap { (0...100).contains($0) ? $0 : nil }
+        let snapshot = MauLeafBatteryStatusReader.read()
+        batteryPercent = snapshot.percent
+        isAdapterConnected = snapshot.isACConnected == true
+
+        switch snapshot.isACConnected {
+        case true:
+            if snapshot.isFullyCharged || snapshot.percent == 100 {
+                batteryStateText = "已接电源，已充满"
+            } else if snapshot.isCharging {
+                batteryStateText = "正在充电"
             } else {
-                batteryPercent = nil
+                batteryStateText = "已接电源，未充电"
             }
-            if isAdapterConnected {
-                if batteryPercent == 100 || output.localizedCaseInsensitiveContains("charged") {
-                    batteryStateText = "已接电源，已充满"
-                } else if output.localizedCaseInsensitiveContains("not charging") {
-                    batteryStateText = "已接电源，未充电"
-                } else if output.localizedCaseInsensitiveContains("charging") {
-                    batteryStateText = "正在充电"
-                } else {
-                    batteryStateText = "已接电源，未充电"
-                }
-            } else {
-                batteryStateText = "电池供电"
-            }
-        } catch {
-            batteryPercent = nil
-            isAdapterConnected = false
+        case false:
+            batteryStateText = "电池供电"
+        case nil:
             batteryStateText = "电池状态不可用"
         }
     }

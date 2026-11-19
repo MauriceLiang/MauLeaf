@@ -55,7 +55,7 @@ jobs:
       - name: Package
         env:
           TARGET_ARCH: ${{ matrix.arch }}
-          RELEASE_LABEL: ${{ env.RELEASE_LABEL }}
+          RELEASE_LABEL: ${{ inputs.release_tag || github.ref_name }}
         run: bash Scripts/ci/package-macos.sh
       - uses: actions/upload-artifact@v4
         with:
@@ -112,6 +112,8 @@ jobs:
             exit 1
           fi
           (cd artifacts && sha256sum *.dmg batt-v0.8.0-source.tar.gz > SHA256SUMS.txt)
+          PRE_FLAG=()
+          if [[ "$RELEASE_TAG" == *-preview.* ]]; then PRE_FLAG+=(--prerelease); fi
           gh release create "$RELEASE_TAG" artifacts/*.dmg artifacts/SHA256SUMS.txt \
             artifacts/batt-v0.8.0-source.tar.gz --verify-tag \
-            --title "MauLeaf $RELEASE_TAG" --notes-file "docs/releases/v$V.md"
+            --title "MauLeaf $RELEASE_TAG" --notes-file "docs/releases/v$V.md" "${PRE_FLAG[@]}"

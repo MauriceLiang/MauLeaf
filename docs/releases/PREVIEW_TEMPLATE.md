@@ -5,7 +5,7 @@
 本版本由 main 分支合并后自动构建，仅提供 Apple Silicon arm64 安装包，不再构建或发布 Intel 版本。
 
 - 首次启动默认不启用充电限制；用户点击「启用限制充电」后才写入原生固件。
-- 正常退出 MauLeaf：插电立即恢复；在经过真机验证的 M1 Pro/macOS 15/固件配置上，不插电也能恢复全部原始寄存器。若离线恢复条件不满足，保留持久恢复请求和 Helper 并允许退出，但不声称已安全卸载。
+- 正常退出 MauLeaf：插电立即恢复；在经过真机验证的 M1 Pro/macOS 15/固件配置上，不插电也能恢复全部原始寄存器。若离线恢复条件不满足，保留持久恢复请求和 Helper 并允许退出，但不声称已安全卸载；极端异常时用户也可选择「仍然退出」，而不能把此操作当作卸载。
 - 未启用时，调整滑杆或预设只保存本地设置，不会写入 AppleSMC。
 - 首次启用前，helper 保存 bfF0、bfD0、bfE0 原始值及硬件身份到 root-owned 快照；后续修改上限不会覆盖原始快照。
 - 「关闭限制充电」会恢复原始激活字节、上限和恢复阈值，逐项读回验证后才删除快照。
@@ -31,7 +31,8 @@ This release is built automatically after changes are merged into main. It ships
 - Before the first activation, the helper saves the original bfF0, bfD0, and bfE0 values plus hardware identity in a root-owned snapshot. Later limit changes never overwrite it.
 - “Disable charging limit” restores the original activation byte, upper threshold, and resume threshold, and deletes the snapshot only after read-back verification.
 - Complete uninstall is a single fail-closed transaction: restore all original firmware registers, independently verify normal SMC state, then remove the application, Helper, LaunchDaemon, snapshots, and installed scripts. A failed restore retains the app and recovery components.
-- The dangerous force-remove-without-restore option is removed. Unplugged complete restore is restricted to exact verified M1 Pro hardware, macOS 15 and matching firmware, with dual battery-source checks, >=30% charge and an inactive original snapshot.\n- “One-time full charge” still temporarily disables the current MauLeaf limit and restores that limit afterward. Disabling MauLeaf restores the original pre-activation firmware state.
+- The dangerous force-remove-without-restore option is removed. Unplugged complete restore is restricted to exact verified M1 Pro hardware, macOS 15 and matching firmware, with dual battery-source checks, >=30% charge and an inactive original snapshot.
+- “One-time full charge” still temporarily disables the current MauLeaf limit and restores that limit afterward. Disabling MauLeaf restores the original pre-activation firmware state.
 - The menu bar always displays the green leaf.
 - Remove the Intel build matrix, Intel experimental package, and related release steps.
 - Preview 4 and earlier releases have no original-state snapshot. Legacy migration can only deactivate the activation flag; historical thresholds cannot be reconstructed, and the app and uninstaller report this explicitly.

@@ -36,6 +36,32 @@ if /usr/bin/pgrep -x MauLeaf >/dev/null 2>&1; then
   exit 4
 fi
 
+# The normal (default) mode permits unplugged removal and preserves the
+# recovery helper until safe restoration succeeds. A user who explicitly
+# rejects any retained background component can choose unconditional removal.
+# This discards the restore snapshot and may leave the firmware charge-limited.
+if [[ "$#" -gt 0 ]]; then
+  if [[ "$#" -ne 2 || "$1" != "--force-remove-without-restore" \
+        || "$2" != "--i-accept-persistent-charge-limit-risk" ]]; then
+    echo "未知参数。正常卸载不需要参数；强制彻底删除需同时传入两项明确的风险确认参数。" >&2
+    exit 10
+  fi
+  echo "严重警告：正在按用户明确指令丢弃所有恢复记录并移除 MauLeaf 后台服务。"
+  echo "如果固件限充仍激活，删除服务后可能无法自动恢复正常充电；必须自行承担重新安装并手动恢复的风险。"
+
+  /bin/launchctl bootout "system/$LABEL" >/dev/null 2>&1 || true
+  if /bin/launchctl print "system/$LABEL" >/dev/null 2>&1; then
+    echo "LaunchDaemon 仍在运行，为防止留下不可控后台进程，本次未执行清理。" >&2
+    exit 11
+  fi
+  /bin/rm -f "$JOB" "$SNAPSHOT" "$RESTORE_REQUEST" "$BACKGROUND_RECOVERY" \
+    "$LEGACY_RESTORE" "$DEFERRED_UNINSTALL" "$DEFERRED_SCRIPT" \
+    "$PLIST_TARGET" "$TARGET"
+  /bin/rmdir "$SUPPORT_DIR" >/dev/null 2>&1 || true
+  echo "已按用户指令彻底移除 MauLeaf 的原生后台组件；不保证固件限充已恢复。"
+  exit 0
+fi
+
 # A Preview 4 helper does not implement the standalone restore command.
 # Refuse before bootout if the installed helper does not match this app's
 # bundled helper, rather than running an older daemon indefinitely.

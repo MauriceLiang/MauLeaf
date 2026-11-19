@@ -163,6 +163,8 @@ private enum MauLeafUnpluggedRestoreProbe {
             isAdministrator: geteuid() == 0,
             externalConnected: battery.isACConnected,
             pmsetReportsBatteryPower: pmset == true,
+            batteryPercent: battery.percent,
+            batteryIsCharging: battery.isCharging,
             conflictingProcess: conflict,
             explicitlyConfirmed: confirmed || ignoreMissingConfirmation
         )

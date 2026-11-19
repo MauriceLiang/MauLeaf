@@ -33,6 +33,19 @@ if /usr/bin/pgrep -x MauLeaf >/dev/null 2>&1; then
   exit 4
 fi
 
+# A Preview 4 helper does not implement the standalone restore command.
+# Refuse before bootout if the installed helper does not match this app's
+# bundled helper, rather than running an older daemon indefinitely.
+SOURCE_BINARY="$(cd "$(dirname "$0")" && pwd)/MauLeafFirmwareHelper"
+if [[ ! -x "$SOURCE_BINARY" ]] || ! /usr/bin/codesign --verify --strict "$SOURCE_BINARY" >/dev/null 2>&1; then
+  echo "未找到可验证的 Preview 5 原生 helper，保留已安装服务和固件配置。" >&2
+  exit 8
+fi
+if ! /usr/bin/cmp -s "$TARGET" "$SOURCE_BINARY"; then
+  echo "已安装的 helper 与当前 MauLeaf 不一致；请先启动当前版本并完成 helper 升级，退出应用后再卸载。" >&2
+  exit 9
+fi
+
 echo "正在恢复 MauLeaf 启用前的原始固件配置……"
 echo "仅当三个寄存器逐项读回验证成功后，才会删除原生服务和恢复快照。"
 

@@ -237,6 +237,9 @@ private enum FirmwareLimitHelperServiceTests {
             originalStateURL: directory.appendingPathComponent("legacy-original-state.json"),
             restoreRequestURL: directory.appendingPathComponent("legacy-restore.pending"),
             backgroundRecoveryURL: directory.appendingPathComponent("legacy-background-recovery.pending"),
+            legacyRestoreURL: directory.appendingPathComponent("legacy-restore.json"),
+            deferredUninstallURL: directory.appendingPathComponent("legacy-deferred-uninstall.pending"),
+            deferredUninstallScriptURL: directory.appendingPathComponent("legacy-finalizer.sh"),
             monitorEnabled: false
         )
         var legacyStateData: NSData?

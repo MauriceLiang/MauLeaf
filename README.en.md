@@ -82,7 +82,7 @@ Only Apple Silicon arm64 packages are built and published. Intel builds are disc
 - **Change the limit:** Once enabled, the slider and presets apply immediately without overwriting the original snapshot.
 - **Disable charging limit:** Click “Disable charging limit” to restore the three original register values.
 - **One-time full charge:** Available only while a MauLeaf limit is enabled. When the one-time task finishes, the current MauLeaf limit is restored. You can then disable the limit to restore the original snapshot.
-- **Quit the app:** Quitting does not disable the limit. Firmware keeps the current state, and the original snapshot remains in the system support directory.
+- **Quit normally:** Using Quit, Cmd+Q, or a normal macOS termination request automatically restores the original pre-activation firmware state, clears any one-time full-charge task, and independently reads back the inactive state before the app exits. You do **not** have to click Disable first. If AC power is missing, the helper is unavailable, or verification fails, normal quitting is cancelled, recovery data is retained, and a visible error is shown. Force Quit, process crashes, and sudden power loss cannot guarantee immediate restoration.
 
 ## Uninstall the native service
 

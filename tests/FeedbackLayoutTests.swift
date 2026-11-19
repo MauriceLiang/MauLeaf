@@ -31,6 +31,12 @@ struct FeedbackLayoutTests {
         let renderOutput = URL(fileURLWithPath: CommandLine.arguments[1], isDirectory: true)
         try verifyBatteryRingRendering(outputDirectory: renderOutput)
         let manager = ChargeManager(battPath: binary.path)
+        guard manager.menuBarLeafStyle == .green else {
+            fatalError("The menu-bar leaf must default to green without a style preference.")
+        }
+        guard manager.highChargePolicy == .adapter else {
+            fatalError("Legacy active-discharge preferences must migrate to adapter power.")
+        }
         manager.start()
         manager.requestLimit(80, immediate: true)
         let deadline = Date().addingTimeInterval(3)

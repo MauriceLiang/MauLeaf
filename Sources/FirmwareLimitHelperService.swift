@@ -481,27 +481,6 @@ final class FirmwareLimitHelperService: NSObject, FirmwareLimitHelperProtocol {
         removeBackgroundRecoveryMarkerIfIdle()
     }
 
-    private func persistRecoveryIfNeeded(previous: FirmwareLimitState, error: Error) {
-        guard previous.isActive,
-              let coreError = error as? FirmwareLimitCoreError,
-              case .transactionFailed(_, let recovery) = coreError,
-              !recovery.contains("previous firmware state was restored and verified"),
-              let request = try? FirmwareLimitRequest(upper: previous.upper, lower: previous.lower) else { return }
-        do {
-            let job = try FirmwareLimitOnceJob(
-                jobID: UUID().uuidString,
-                restore: request,
-                deadline: now().addingTimeInterval(10 * 60 * 60),
-                cancelRequested: true
-            )
-            try persist(job)
-            setPendingJob(job)
-            startMonitoring()
-        } catch {
-            NSLog("MauLeaf could not persist the native recovery job: %@", error.localizedDescription)
-        }
-    }
-
     private func monitorOneTimeCharge() {
         do {
             try withHardwareWatchdog { monitorOneTimeChargeLocked() }

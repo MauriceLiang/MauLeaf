@@ -157,6 +157,8 @@ private enum UnpluggedRestorePolicyTests {
         }
 
         let fake = OfflineFakeSMC()
+        fake.upper = 85
+        fake.lower = 83
         let result = try UnpluggedRestorePolicy.deactivate(
             transport: fake,
             baseline: active,
@@ -164,13 +166,15 @@ private enum UnpluggedRestorePolicyTests {
             pause: { _ in }
         )
         precondition(result.activationByte == 0 && fake.activation == 0
-                     && fake.upper == 80 && fake.lower == 78,
+                     && fake.upper == 85 && fake.lower == 83,
                      "the sole mutation disables the charging limit")
         precondition(fake.writes.count == 1
                      && fake.writes.allSatisfy({ $0.0 == "bfF0" && $0.1 == [0x00] }),
                      "only bfF0=0x00 was written")
 
         let retry = OfflineFakeSMC()
+        retry.upper = 85
+        retry.lower = 83
         retry.ignoreWrites = 1
         let recovered = try UnpluggedRestorePolicy.deactivate(
             transport: retry,
@@ -182,12 +186,14 @@ private enum UnpluggedRestorePolicyTests {
                      "transient no-effect SMC write is retried at most three times")
 
         let blocked = OfflineFakeSMC()
+        blocked.upper = 85
+        blocked.lower = 83
         mustReject("preflight power race") {
             try UnpluggedRestorePolicy.deactivate(
                 transport: blocked, baseline: active,
                 preflight: { throw UnpluggedRestoreProbeError.requiresUnpluggedMac },
                 pause: { _ in }
-            ).assertInactive()
+            )
         }
         precondition(blocked.writes.isEmpty, "failed preflight never mutates SMC")
 
@@ -202,6 +208,8 @@ private enum UnpluggedRestorePolicyTests {
         precondition(changed.writes.isEmpty, "unexpected firmware changes block all writes")
 
         let failures = OfflineFakeSMC()
+        failures.upper = 85
+        failures.lower = 83
         failures.failWrites = 10
         mustReject("repeated write failure") {
             _ = try UnpluggedRestorePolicy.deactivate(
@@ -227,6 +235,3 @@ private enum UnpluggedRestorePolicyTests {
     }
 }
 
-private extension FirmwareLimitState {
-    func assertInactive() {}
-}

@@ -55,8 +55,15 @@ final class FirmwareLimitHelperService: NSObject, FirmwareLimitHelperProtocol {
            var snapshot = originalStateSnapshot {
             snapshot.restoreRequested = true
             originalStateSnapshot = snapshot
+        }
+        if let snapshot = originalStateSnapshot, snapshot.restoreRequested {
+            // Recreate a missing marker so launchd can restart us after a crash.
             try? persistOriginalStateSnapshot(snapshot)
-        } else if originalStateSnapshot == nil, originalSnapshotLoadError == nil {
+        } else if originalSnapshotLoadError != nil {
+            // A corrupt snapshot cannot be retried automatically, but is kept
+            // intact for diagnostics and must still block uninstallation.
+            try? FileManager.default.removeItem(at: restoreRequestURL)
+        } else if originalStateSnapshot == nil {
             try? FileManager.default.removeItem(at: restoreRequestURL)
         }
         if pendingJob != nil || originalStateSnapshot?.restoreRequested == true {

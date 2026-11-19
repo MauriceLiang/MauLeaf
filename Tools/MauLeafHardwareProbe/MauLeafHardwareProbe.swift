@@ -154,7 +154,7 @@ private func run() {
     print("===================================")
     print("Model       : \(sysctl("hw.model") ?? "Unknown")")
     print("Chip        : \(sysctl("machdep.cpu.brand_string") ?? "Not reported")")
-    print("Firmware    : \\(SystemFirmwareReader.read() ?? "Not reported")")
+    print("Firmware    : \(SystemFirmwareReader.read() ?? "Not reported")")
     #if arch(arm64)
     print("Architecture: arm64")
     #elseif arch(x86_64)

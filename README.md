@@ -92,6 +92,12 @@ MauLeaf 只保留日常充电上限和「本次充满」两项功能。菜单栏
 
 有电源且恢复成功时，会立即删除 Helper 和数据；无电源时会排队恢复、保留最小后台服务，并允许用户立即删除 MauLeaf.app。后台服务重新接电后会恢复固件、读回验证，然后执行独立于应用包的自动清理脚本。如果身份校验失败或系统无法完成恢复，辅助服务及数据可能仍需手动处理；不要直接删除未恢复的固件快照。
 
+**完全不保留后台组件（高风险可选）**：如果你不愿保留任何延期恢复服务，即使还没接电，也可以在应用退出后运行以下命令强制删除。此模式会丢弃原始快照，**固件限充可能继续生效，无法保证充电恢复**。请仅在完全理解风险时使用：
+
+    sudo "/Applications/MauLeaf.app/Contents/Resources/MauLeafNativeControl/uninstall-native-firmware-helper.sh" --force-remove-without-restore --i-accept-persistent-charge-limit-risk
+
+常规卸载无需这两个参数，推荐优先使用安全延期恢复模式。
+
 Preview 4 及更早版本没有原始快照。卸载这类旧状态时，脚本只能停用旧限充激活标志，并会明确报告无法恢复历史阈值。
 
 ## 本地开发与测试

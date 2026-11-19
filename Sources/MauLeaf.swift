@@ -851,7 +851,7 @@ final class ChargeManager: ObservableObject {
     }
 
     var canDisableLegacyLimit: Bool {
-        backendReady && isLegacyActive && isAdapterConnected
+        restoreReady && isLegacyActive && isAdapterConnected
             && !isBusy && !isPreparingToQuit
     }
 

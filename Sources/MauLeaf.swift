@@ -378,14 +378,6 @@ struct ContentView: View {
         } message: {
             Text(manager.text("此操作会直接修改本机 AppleSMC 固件充电寄存器。仅支持已限定的 MacBookPro18,1、指定固件和 macOS 15，并且必须连接电源。程序会逐项读回校验并在失败时尝试恢复；寄存器写入成功仍不代表实际充电停止点已经验证。"))
         }
-        .alert(manager.text("检测到旧版充电限制"), isPresented: $manager.showLegacyDisableConfirmation) {
-            Button(manager.text("停用旧版限制"), role: .destructive) {
-                manager.confirmDisableLegacyLimit()
-            }
-            Button(manager.text("取消"), role: .cancel) {}
-        } message: {
-            Text(manager.text("当前固件限充没有 MauLeaf 原始快照。无法确认这些值是否由 Preview 4 或其他工具设置。继续操作只会清除 bfF0 激活标志，并保留 bfD0、bfE0 当前值；无法恢复历史阈值。"))
-        }
         .task { manager.start() }
     }
 
@@ -558,6 +550,14 @@ struct ContentView: View {
         }
         .padding(12)
         .background(Color.primary.opacity(0.035), in: RoundedRectangle(cornerRadius: 11))
+        .alert(manager.text("检测到旧版充电限制"), isPresented: $manager.showLegacyDisableConfirmation) {
+            Button(manager.text("停用旧版限制"), role: .destructive) {
+                manager.confirmDisableLegacyLimit()
+            }
+            Button(manager.text("取消"), role: .cancel) {}
+        } message: {
+            Text(manager.text("当前固件限充没有 MauLeaf 原始快照。无法确认这些值是否由 Preview 4 或其他工具设置。继续操作只会清除 bfF0 激活标志，并保留 bfD0、bfE0 当前值；无法恢复历史阈值。"))
+        }
     }
 
     private var oneTimeChargeSection: some View {

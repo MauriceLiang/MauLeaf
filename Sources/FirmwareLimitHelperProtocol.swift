@@ -32,6 +32,22 @@ struct FirmwareLimitHelperStateResponse: Codable, Equatable {
             writeBlockReason = nil
         }
     }
+
+    private enum CodingKeys: String, CodingKey {
+        case activationByte, active, upper, lower, writeSupported, writeBlockReason
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        activationByte = try container.decode(UInt8.self, forKey: .activationByte)
+        active = try container.decode(Bool.self, forKey: .active)
+        upper = try container.decode(Int.self, forKey: .upper)
+        lower = try container.decode(Int.self, forKey: .lower)
+        // Older read-only helpers returned only the four state fields. Treat
+        // them as legacy so the subsequent XPC version probe can trigger upgrade.
+        writeSupported = try container.decodeIfPresent(Bool.self, forKey: .writeSupported) ?? true
+        writeBlockReason = try container.decodeIfPresent(String.self, forKey: .writeBlockReason)
+    }
 }
 
 struct FirmwareLimitHelperPlanResponse: Codable, Equatable {

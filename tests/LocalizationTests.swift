@@ -54,8 +54,8 @@ struct LocalizationTests {
         let nested: AppText = "原生控制失败：\(failure)"
         check(nested.localized(in: .english) == "Native control failed: fixture native write failure",
               "native helper errors remain visible in English")
-        check(AppText(key: "启用原生固件控制？").localized(in: .english) == "Enable native firmware control?",
-              "hardware write consent is translated")
+        check(translations["启用原生固件控制？"] == "Enable native firmware control?",
+              "hardware write consent has an English string-table entry")
         let level: AppText = "电量 \(75)%"
         let tooltip: AppText = "\(level)，正在充电"
         check(tooltip.localized(in: .english) == "Battery 75%, charging", "nested menu bar tooltip")

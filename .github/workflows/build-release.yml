@@ -51,11 +51,11 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          [[ -z "$CREATE_PREVIEW_TAG" || "$CREATE_PREVIEW_TAG" == "false" || -z "$EXISTING_RELEASE_TAG" ]] || {
+          if [[ "$CREATE_PREVIEW_TAG" == "true" && -n "$EXISTING_RELEASE_TAG" ]]; then
             echo "Choose either preview_tag or release_tag, not both." >&2
             exit 1
-          }
-          [[ "$RELEASE_TAG" =~ ^v([0-9]+)\\.([0-9]+)\\.([0-9]+)(-preview\\.([0-9]+))?$ ]] || exit 1
+          fi
+          [[ "$RELEASE_TAG" =~ ^v([0-9]+)\.([0-9]+)\.([0-9]+)(-preview\.([0-9]+))?$ ]] || exit 1
           if [[ "$CREATE_PREVIEW_TAG" == "true" ]]; then
             if git ls-remote --exit-code --tags origin "refs/tags/$RELEASE_TAG" >/dev/null 2>&1; then
               echo "Tag $RELEASE_TAG already exists; refusing to overwrite" >&2
@@ -101,7 +101,7 @@ jobs:
         run: |
           set -euo pipefail
           if [[ "$CREATE_PREVIEW_TAG" == "true" ]]; then
-            [[ "$RELEASE_TAG" =~ ^v[0-9]+\\.[0-9]+\\.[0-9]+-preview\\.[0-9]+$ ]] || exit 1
+            [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+-preview\.[0-9]+$ ]] || exit 1
             if git ls-remote --exit-code --tags origin "refs/tags/$RELEASE_TAG" >/dev/null 2>&1; then
               echo "Tag $RELEASE_TAG already exists; refusing to overwrite" >&2
               exit 1
@@ -116,7 +116,7 @@ jobs:
           RELEASE_TAG: ${{ inputs.preview_tag || inputs.release_tag || github.ref_name }}
         run: |
           set -euo pipefail
-          [[ "$RELEASE_TAG" =~ ^v[0-9]+\\.[0-9]+\\.[0-9]+(-preview\\.[0-9]+)?$ ]] || exit 1
+          [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-preview\.[0-9]+)?$ ]] || exit 1
           git ls-remote --exit-code --tags origin "refs/tags/$RELEASE_TAG" >/dev/null
           V="${RELEASE_TAG#v}"; F="docs/releases/v$V.md"
           test -s "$F"
@@ -129,7 +129,7 @@ jobs:
       - name: Fetch GPL corresponding source
         run: |
           set -euo pipefail
-          [[ "$(tr -d '\\r\\n' < Vendor/batt-version)" == "v0.8.0" ]] || exit 1
+          [[ "$(tr -d '\r\n' < Vendor/batt-version)" == "v0.8.0" ]] || exit 1
           curl -fLsS --retry 3 "https://github.com/charlie0129/batt/archive/refs/tags/v0.8.0.tar.gz" -o artifacts/batt-v0.8.0-source.tar.gz
           tar -tzf artifacts/batt-v0.8.0-source.tar.gz > "$RUNNER_TEMP/batt-source-contents.txt"
           grep -Eq '(^|/)LICENSE$' "$RUNNER_TEMP/batt-source-contents.txt"
@@ -147,6 +147,6 @@ jobs:
           (cd artifacts && sha256sum *.dmg batt-v0.8.0-source.tar.gz > SHA256SUMS.txt)
           PRE_FLAG=()
           if [[ "$RELEASE_TAG" == *-preview.* ]]; then PRE_FLAG+=(--prerelease); fi
-          gh release create "$RELEASE_TAG" artifacts/*.dmg artifacts/SHA256SUMS.txt \\
-            artifacts/batt-v0.8.0-source.tar.gz --verify-tag \\
+          gh release create "$RELEASE_TAG" artifacts/*.dmg artifacts/SHA256SUMS.txt \
+            artifacts/batt-v0.8.0-source.tar.gz --verify-tag \
             --title "MauLeaf $RELEASE_TAG" --notes-file "docs/releases/v$V.md" "${PRE_FLAG[@]}"

@@ -547,8 +547,8 @@ final class FirmwareLimitHelperService: NSObject, FirmwareLimitHelperProtocol {
             do {
                 let permit = try writePermit(confirmed: true)
                 _ = try controller.configure(request, permit: permit)
-                removePersistedJob()
                 setPendingJob(nil)
+                removePersistedJob()
                 stopMonitoringIfIdle()
             } catch {
                 NSLog("MauLeaf native one-time charge restore will retry: %@", error.localizedDescription)

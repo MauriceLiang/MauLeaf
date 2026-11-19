@@ -82,6 +82,14 @@ if ! RESTORE_OUTPUT=$("$TARGET" --restore-original-state 2>&1); then
 fi
 printf '%s\n' "$RESTORE_OUTPUT"
 
+# An old Preview 4 installation without an original snapshot can only turn
+# off bfF0. We must not claim to restore unknown threshold registers.
+if [[ "$RESTORE_OUTPUT" == *"Legacy limit disabled."* ]]; then
+  echo "旧版限充没有原始快照，无法确认 bfD0/bfE0 的历史值；保留应用及服务供进一步恢复。" >&2
+  /bin/launchctl bootstrap system "$PLIST_TARGET" >/dev/null 2>&1 || true
+  exit 6
+fi
+
 # Never accept only the helper's success exit code: independently reopen
 # AppleSMC, verify bfF0 is inactive and all durable restore tasks are gone.
 if ! "$TARGET" --verify-clean-and-inactive; then
@@ -119,4 +127,8 @@ if [[ -e "$APP" || -e "$TARGET" || -e "$PLIST_TARGET" \
   echo "恢复已成功，但部分文件未能移除。请检查权限及残留路径。" >&2
   exit 8
 fi
-echo "MauLeaf 已完全卸载：原始固件配置恢复验证成功，应用、Helper、LaunchDaemon 与所有附带脚本均已删除。"
+if [[ "$RESTORE_OUTPUT" == *"No MauLeaf original-state snapshot exists"* ]]; then
+  echo "MauLeaf 已完全卸载：当前固件限充已关闭；由于没有原始快照，无法独立确认历史阈值。应用、Helper、LaunchDaemon 与脚本均已删除。"
+else
+  echo "MauLeaf 已完全卸载：原始固件配置恢复验证成功，应用、Helper、LaunchDaemon 与所有附带脚本均已删除。"
+fi

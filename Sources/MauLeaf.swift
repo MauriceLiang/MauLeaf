@@ -726,59 +726,41 @@ final class ChargeManager: ObservableObject {
         didSet { UserDefaults.standard.set(language.rawValue, forKey: AppLanguage.preferenceKey) }
     }
     @Published private(set) var menuBarLeafStyle: MenuBarLeafStyle = .green
-    @Published private(set) var chargeMode: ChargeMode = .limited
-    @Published private(set) var fullBehavior: FullBehavior = .once
     @Published private(set) var fullOncePending = false
-    @Published private(set) var highChargePolicy: HighChargePolicy = .adapter
-    @Published private(set) var supportsAdapterControl: Bool?
-    @Published private(set) var dischargePaused = false
-    @Published private(set) var dischargeMessage: AppText = "高于上限时停止充电，保持适配器供电。"
+    @Published var modeText: AppText = "正在检查原生固件控制…"
+    @Published var statusMessage: AppText = "正在连接 MauLeaf 原生固件服务…"
     @Published var autoApplyFeedback: AppText = "调整后自动应用"
-    private var limitDebounce: Task<Void, Never>?
-    private var lastVerifiedLimit: Int?
-    private var queuedLimit: Int?
-    private var operationToken: UUID?
-    private enum ChargeRequest {
-        case limit(HighChargePolicy?)
-        case full(FullBehavior)
-    }
-    private var lastChargeRequest: ChargeRequest?
-    @Published var modeText: AppText = "正在读取状态…"
-    @Published var statusMessage: AppText = "正在检查充电控制组件…"
     @Published var backendReady = false
-    @Published var componentPresent = false
-    @Published var detectedBattPath: String?
     @Published var isBusy = false
     @Published private(set) var isPreparingToQuit = false
     @Published var isError = false
-    @Published var chargePowerWatts: Double?
-    @Published var dischargePowerWatts: Double?
     @Published var lowPowerMode: Bool?
-    @Published var isManagedInstall = false
+    @Published var showNativeWriteConfirmation = false
 
-    private var timer: Timer?
-    private lazy var powerRefresh = PowerRefreshController(
-        onUpdate: { [weak self] sample in self?.applyPowerSample(sample) },
-        onSystemChange: { [weak self] in self?.refresh() })
+    private let backend: NativeFirmwareBackend
+    private let autoInstallNativeHelper: Bool
+    private var helperInstallAttempted = false
     private var started = false
     private var panelVisible = false
-    private var terminationReady = false
-    private var battPath: String?
+    private var refreshTimer: Timer?
+    private var limitDebounce: Task<Void, Never>?
+    private var currentState: FirmwareLimitHelperStateResponse?
+    private var pendingAction: PendingAction?
+    private var lastAction: PendingAction?
 
-    private let managedBinaryPath = "/usr/local/bin/batt"
-    // Keep the legacy identity/path so ChargeCap settings and tasks remain compatible.
-    private let managedReceiptPath = "/Library/Application Support/ChargeCap/managed-install"
-    private let managedDaemonPlistPath = "/Library/LaunchDaemons/cc.chlc.batt.plist"
+    private enum PendingAction {
+        case limit(Int)
+        case full
+    }
 
-    init(battPath: String? = nil) {
-        self.battPath = battPath
+    init(
+        backend: NativeFirmwareBackend = FirmwareLimitHelperClient(),
+        autoInstallNativeHelper: Bool = true
+    ) {
+        self.backend = backend
+        self.autoInstallNativeHelper = autoInstallNativeHelper
         let saved = UserDefaults.standard.integer(forKey: "chargeLimit")
-        self.limit = (50...95).contains(saved) ? saved : 80
-        self.chargeMode = ChargeMode(rawValue: UserDefaults.standard.string(forKey: "chargeModeV5") ?? "limited") ?? .limited
-        self.fullBehavior = FullBehavior(rawValue: UserDefaults.standard.string(forKey: "fullBehaviorV5") ?? "once") ?? .once
-        self.fullOncePending = OnceChargeAgent.hasPendingJob
-        self.highChargePolicy = .adapter
-        UserDefaults.standard.set(HighChargePolicy.adapter.rawValue, forKey: "highChargePolicy")
+        limit = (50...95).contains(saved) ? saved : 80
     }
 
     func text(_ message: AppText) -> String { message.localized(in: language) }
@@ -790,7 +772,6 @@ final class ChargeManager: ObservableObject {
         return .primary
     }
 
-    /// The center describes the power source; ring color describes battery state.
     var batteryRingIcon: BatteryRingIcon? {
         switch batteryStateText {
         case "正在充电": return .charging
@@ -806,33 +787,13 @@ final class ChargeManager: ObservableObject {
         return state
     }
 
-    var batteryCardSymbol: String {
-        if let batteryPercent, batteryPercent < 20 { return "battery.25percent" }
-        if batteryStateText == "正在充电" { return "battery.100percent.bolt" }
-        if lowPowerMode == true { return "battery.100percent" }
-        return menuBarSymbol
-    }
-
-    var menuBarAccessibilityText: AppText {
-        let level: AppText = batteryPercent.map { value -> AppText in "电量 \(value)%" } ?? "电量未知"
-        if let batteryPercent, batteryPercent < 20 { return "\(level)，电量低" }
-        if batteryStateText == "正在充电" { return "\(level)，正在充电" }
-        if isAdapterConnected { return "\(level)，已接入电源但未充电" }
-        if lowPowerMode == true { return "\(level)，低电量模式" }
-        return level
-    }
-
-    var chargePowerSubtitle: String {
-        if batteryStateText != "正在充电" { return "当前未充电" }
-        return chargePowerWatts == nil ? "电池电流数据不可用" : "功率流入电池"
-    }
-
-    var dischargePowerSubtitle: String {
-        if batteryStateText == "正在充电" { return "当前未放电" }
-        if batteryStateText == "电池供电" {
-            return dischargePowerWatts == nil ? "电池电流数据不可用" : "电池正在供电"
+    var batteryStateSymbol: String {
+        switch batteryStateText {
+        case "正在充电": return "bolt.fill"
+        case "已充满", "已接电源，已充满": return "battery.100percent"
+        case "电池供电": return "battery.75percent"
+        default: return "powerplug"
         }
-        return "当前未放电"
     }
 
     var menuBarSymbol: String {
@@ -845,895 +806,381 @@ final class ChargeManager: ObservableObject {
         }
     }
 
-    var batteryStateSymbol: String {
-        switch batteryStateText {
-        case "正在充电": return "bolt.fill"
-        case "已充满": return "battery.100percent"
-        case "电池供电": return "battery.75percent"
-        case "已接电源，未充电", "已接电源，已充满": return "powerplug"
-        default: return "powerplug"
-        }
+    var menuBarAccessibilityText: AppText {
+        let level: AppText = batteryPercent.map { value -> AppText in "电量 \(value)%" } ?? "电量未知"
+        if let batteryPercent, batteryPercent < 20 { return "\(level)，电量低" }
+        if batteryStateText == "正在充电" { return "\(level)，正在充电" }
+        if isAdapterConnected { return "\(level)，已接入电源" }
+        return "\(level)，电池供电"
     }
 
-    /// Detects the exact batt launch daemon regardless of whether an older
-    /// build created MauLeaf's receipt or UserDefaults marker.
-    private var hasManagedLaunchDaemon: Bool {
-        let url = URL(fileURLWithPath: managedDaemonPlistPath)
-        guard let data = try? Data(contentsOf: url),
-              let object = try? PropertyListSerialization.propertyList(from: data, options: [], format: nil),
-              let plist = object as? [String: Any],
-              let label = plist["Label"] as? String,
-              label == "cc.chlc.batt",
-              let arguments = plist["ProgramArguments"] as? [String] else {
-            return false
-        }
-        return arguments.contains(managedBinaryPath)
+    var canRetryChargeRequest: Bool {
+        !isBusy && !isPreparingToQuit && (!backendReady || lastAction != nil)
     }
 
     func start() {
         guard !started else { return }
         started = true
-        refresh()
-        powerRefresh.startObservingSystemEvents()
-        if backendReady, UserDefaults.standard.bool(forKey: "chargeControlReleasedOnQuit") {
-            Task { await applyDesiredLimit() }
-        }
-        if DischargeAgent.hasPendingJob {
-            Task {
-                do {
-                    try await DischargeAgent.stop()
-                    if isAdapterConnected { try await ensureAdapterPower() }
-                    refresh()
-                } catch {
-                    statusMessage = "旧版主动放电任务未能安全停止：\(AppText(error: error))"
-                    isError = true
-                }
+        readSystemBattery()
+        Task { await refreshNativeState(allowInstall: true) }
+        refreshTimer = Timer.scheduledTimer(withTimeInterval: 20, repeats: true) { [weak self] _ in
+            Task { @MainActor in
+                guard let self, !self.isBusy else { return }
+                self.readSystemBattery()
+                await self.refreshNativeState(allowInstall: false)
             }
-        }
-        timer = Timer.scheduledTimer(withTimeInterval: 20, repeats: true) { [weak self] _ in
-            Task { @MainActor in self?.refresh() }
         }
     }
 
     func setPanelVisible(_ visible: Bool) {
         panelVisible = visible
-        powerRefresh.setVisible(visible && !isPreparingToQuit)
+        if visible { refresh() }
     }
 
     func refresh() {
         guard !isPreparingToQuit else { return }
-        #if MAULEAF_INTEL_EXPERIMENTAL
         readSystemBattery()
-        backendReady = false
-        componentPresent = false
-        isManagedInstall = false
-        detectedBattPath = nil
-        supportsAdapterControl = false
-        modeText = "Intel 实验预览"
-        statusMessage = "Intel 充电控制未经验证，已禁用所有充电控制操作。"
-        isError = false
-        return
-        #endif
-        if isBusy {
-            readSystemBattery()
-            return
-        }
-        readSystemBattery()
-        detectedBattPath = locateBatt()
-        componentPresent = detectedBattPath != nil
-        let hasReceipt = FileManager.default.fileExists(atPath: managedReceiptPath)
-        let legacyDaemonInstall = hasManagedLaunchDaemon
-            && FileManager.default.isExecutableFile(atPath: managedBinaryPath)
-        // Older builds and manual `batt install` commands may not have created
-        // MauLeaf's receipt/UserDefaults flag. The exact launchd label plus
-        // ProgramArguments path is a stronger, backward-compatible signal.
-        isManagedInstall = detectedBattPath == managedBinaryPath
-            && FileManager.default.isExecutableFile(atPath: managedBinaryPath)
-            && (hasReceipt || legacyDaemonInstall)
+        guard started, !isBusy else { return }
+        Task { await refreshNativeState(allowInstall: false) }
+    }
 
-        guard let path = detectedBattPath else {
-            backendReady = false
-            modeText = "控制组件未安装"
-            statusMessage = "电池状态可读取，但限充控制尚未安装。"
-            isError = false
-            return
-        }
-
-        let result = run(path: path, arguments: ["status"])
-        guard result.status == 0 else {
-            backendReady = false
-            modeText = "控制组件不可用"
-            statusMessage = "已找到 batt，但无法连接控制服务。请检查服务是否正常运行。"
-            isError = true
-            return
-        }
-
-        backendReady = true
-        let status = BattStatus.parse(result.output)
-        updateDischargeState(status)
-        if lastVerifiedLimit == nil && !UserDefaults.standard.bool(forKey: "chargeCapV5LimitInitialized") {
-            if let remote = status.upperLimit, (50...95).contains(remote) {
-                limit = remote
-                UserDefaults.standard.set(true, forKey: "chargeCapV5LimitInitialized")
-            }
-        }
-        lastVerifiedLimit = status.upperLimit
-        let hasPendingJob = OnceChargeAgent.hasPendingJob
-        let onceCompleted = !hasPendingJob && (fullOncePending
-            || (DischargeAgent.result?.completedFullCharge == true && status.upperLimit == limit))
-        fullOncePending = hasPendingJob
-        // On first migration from 0.4.x, reflect an existing permanent
-        // batt-disable state instead of pretending the control mode is active.
-        if UserDefaults.standard.object(forKey: "chargeModeV5") == nil,
-           !fullOncePending, status.upperLimit == 100,
-           status.scheduledRestoreLimit == nil {
-            chargeMode = .full
-            fullBehavior = .always
-            UserDefaults.standard.set(chargeMode.rawValue, forKey: "chargeModeV5")
-            UserDefaults.standard.set(fullBehavior.rawValue, forKey: "fullBehaviorV5")
-        }
-        if fullOncePending {
-            chargeMode = .full
-            fullBehavior = .once
-            modeText = "本次充满进行中 · 目标 100%"
-        } else if chargeMode == .full && fullBehavior == .once && onceCompleted {
-            // The helper cleared its job only after successful restoration.
-            chargeMode = .limited
-            UserDefaults.standard.set(chargeMode.rawValue, forKey: "chargeModeV5")
-            modeText = "限充至 \(status.upperLimit ?? limit)%"
-        } else if chargeMode == .full && fullBehavior == .once {
-            modeText = "仅充满一次未运行 · 限充至 \(status.upperLimit ?? limit)%"
-        } else if let current = status.upperLimit {
-            if chargeMode == .full && fullBehavior == .always {
-                modeText = current >= 100 ? "持续允许充满" : "设备设定与充满模式不一致"
+    private func refreshNativeState(allowInstall: Bool) async {
+        guard !isPreparingToQuit, !isBusy else { return }
+        do {
+            let state = try await backend.readState()
+            let oneTime = try await backend.oneTimeChargeStatus()
+            currentState = state
+            fullOncePending = oneTime.pending
+            backendReady = true
+            if (50...95).contains(state.upper) { limit = state.upper }
+            if oneTime.pending {
+                modeText = "本次充满进行中 · 原上限 \(oneTime.restoreUpper ?? limit)%"
+            } else if state.active {
+                modeText = "原生固件限充至 \(state.upper)%"
             } else {
-                modeText = current == limit ? "限充至 \(current)%" : "设备报告上限 \(current)% · 设定 \(limit)%"
+                modeText = "原生固件限充未启用"
             }
-        } else {
-            modeText = "控制组件已连接"
+            statusMessage = "已读取原生固件状态；寄存器读回成功仍需进一步验证实际充电行为。"
+            isError = false
+        } catch {
+            if allowInstall, autoInstallNativeHelper, !helperInstallAttempted, isHelperUnavailable(error) {
+                helperInstallAttempted = true
+                isBusy = true
+                statusMessage = "正在启用 MauLeaf 原生固件服务，需要一次管理员授权…"
+                do {
+                    try await installNativeHelper()
+                    let state = try await backend.readState()
+                    let oneTime = try await backend.oneTimeChargeStatus()
+                    currentState = state
+                    fullOncePending = oneTime.pending
+                    backendReady = true
+                    if (50...95).contains(state.upper) { limit = state.upper }
+                    modeText = oneTime.pending
+                        ? "本次充满进行中 · 原上限 \(oneTime.restoreUpper ?? limit)%"
+                        : (state.active ? "原生固件限充至 \(state.upper)%" : "原生固件限充未启用")
+                    statusMessage = "MauLeaf 原生固件服务已启用。"
+                    isError = false
+                    isBusy = false
+                    return
+                } catch {
+                    isBusy = false
+                    backendReady = false
+                    modeText = "原生固件服务未启用"
+                    statusMessage = "无法启用原生固件服务：\(AppText(error: error))"
+                    isError = true
+                    return
+                }
+            }
+            backendReady = false
+            currentState = nil
+            modeText = "原生固件控制不可用"
+            statusMessage = AppText(error: error)
+            isError = true
         }
-        if !isError { statusMessage = "控制服务正常 · 每 20 秒刷新" }
-        if !isError, chargeMode == .limited, highChargePolicy == .discharge, isAdapterConnected,
-           let percent = batteryPercent, percent > limit, status.upperLimit == limit,
-           status.supportsAdapterControl == true, !DischargeAgent.hasPendingJob,
-           DischargeAgent.result?.paused != true {
-            Task { [weak self] in
-                guard let self, !self.isBusy, !self.isError, self.chargeMode == .limited,
-                      self.highChargePolicy == .discharge, !DischargeAgent.hasPendingJob,
-                      DischargeAgent.result?.paused != true else { return }
-                await self.applyDesiredLimit()
-            }
+    }
+
+    private func isHelperUnavailable(_ error: Error) -> Bool {
+        guard let helperError = error as? FirmwareLimitHelperClientError else { return false }
+        switch helperError {
+        case .serviceUnavailable, .connectionInvalidated: return true
+        default: return false
+        }
+    }
+
+    private func installNativeHelper() async throws {
+        guard let resources = Bundle.main.resourceURL?
+            .appendingPathComponent("MauLeafNativeControl", isDirectory: true) else {
+            throw NativeControlError.missingBundledHelper
+        }
+        let script = resources.appendingPathComponent("install-native-firmware-helper.sh")
+        guard FileManager.default.isExecutableFile(atPath: script.path) else {
+            throw NativeControlError.missingBundledHelper
+        }
+        let command = shellQuote(script.path)
+        let escaped = command
+            .replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "\"", with: "\\\"")
+        let result = try await runProcess(
+            path: "/usr/bin/osascript",
+            arguments: ["-e", "do shell script \"\(escaped)\" with administrator privileges"]
+        )
+        guard result.status == 0 else {
+            let detail = result.output.trimmingCharacters(in: .whitespacesAndNewlines)
+            throw NativeControlError.authorizationFailed(
+                detail.isEmpty ? "管理员授权被取消或原生服务安装失败（退出码 \(result.status)）" : detail
+            )
         }
     }
 
     func requestLimit(_ value: Int, immediate: Bool = false) {
         guard !isPreparingToQuit, (50...95).contains(value) else { return }
-        if chargeMode == .full && !fullOncePending {
-            chargeMode = .limited
-            UserDefaults.standard.set(chargeMode.rawValue, forKey: "chargeModeV5")
-        }
         limit = value
         limitDebounce?.cancel()
         autoApplyFeedback = "等待自动应用 \(value)%…"
-        guard chargeMode == .limited && backendReady else { return }
-        lastChargeRequest = .limit(nil)
+        guard backendReady else {
+            statusMessage = "原生固件控制尚未就绪。"
+            isError = true
+            return
+        }
+        guard isAdapterConnected else {
+            statusMessage = "请先连接电源，再修改原生固件充电上限。"
+            isError = true
+            return
+        }
+        if !UserDefaults.standard.bool(forKey: "nativeFirmwareWriteConfirmed") {
+            pendingAction = .limit(value)
+            showNativeWriteConfirmation = true
+            return
+        }
+        lastAction = .limit(value)
         limitDebounce = Task { [weak self] in
-            if !immediate {
-                try? await Task.sleep(nanoseconds: 450_000_000)
-            }
+            if !immediate { try? await Task.sleep(nanoseconds: 450_000_000) }
             guard !Task.isCancelled else { return }
-            await self?.applyDesiredLimit()
+            await self?.applyLimit(value)
         }
     }
 
-    func selectChargeMode(_ mode: ChargeMode) {
-        guard backendReady, !isPreparingToQuit else { return }
-        if mode == .limited {
-            limitDebounce?.cancel()
-            Task { await applyDesiredLimit() }
-        } else if chargeMode != .full {
-            selectFullBehavior(fullBehavior, force: true)
+    func beginOneTimeFullCharge() {
+        guard backendReady, isAdapterConnected, !isBusy, !isPreparingToQuit,
+              (batteryPercent ?? 0) < 100 else { return }
+        if !UserDefaults.standard.bool(forKey: "nativeFirmwareWriteConfirmed") {
+            pendingAction = .full
+            showNativeWriteConfirmation = true
+            return
+        }
+        lastAction = .full
+        Task { await applyOneTimeFullCharge() }
+    }
+
+    func confirmNativeWrite() {
+        UserDefaults.standard.set(true, forKey: "nativeFirmwareWriteConfirmed")
+        showNativeWriteConfirmation = false
+        guard let action = pendingAction else { return }
+        pendingAction = nil
+        switch action {
+        case .limit(let value):
+            lastAction = .limit(value)
+            Task { await applyLimit(value) }
+        case .full:
+            lastAction = .full
+            Task { await applyOneTimeFullCharge() }
         }
     }
 
-    func selectFullBehavior(_ behavior: FullBehavior) {
-        selectFullBehavior(behavior, force: chargeMode != .full || fullBehavior != behavior
-                           || (behavior == .once && !fullOncePending))
-    }
-
-    private func selectFullBehavior(_ behavior: FullBehavior, force: Bool) {
-        guard backendReady, force, !isPreparingToQuit else { return }
-        limitDebounce?.cancel()
-        Task { await applyFullBehavior(behavior) }
+    func cancelNativeWrite() {
+        showNativeWriteConfirmation = false
+        pendingAction = nil
+        if let currentState, (50...95).contains(currentState.upper) { limit = currentState.upper }
     }
 
     func cancelFullOnce() {
-        Task { await applyDesiredLimit() }
-    }
-
-    func selectHighChargePolicy(_ policy: HighChargePolicy) {
-        guard backendReady, !isBusy, !isPreparingToQuit, chargeMode == .limited else { return }
-        guard policy != .discharge || supportsAdapterControl == true else { return }
-        limitDebounce?.cancel()
-        Task { await applyDesiredLimit(policy: policy) }
-    }
-
-    private func updateDischargeState(_ status: BattStatus? = nil) {
-        if let status { supportsAdapterControl = status.supportsAdapterControl }
-        let result = DischargeAgent.result
-        dischargePaused = result?.paused == true
-        if DischargeAgent.hasPendingJob {
-            if let result, result.paused { dischargeMessage = AppText(key: result.message) }
-            else { dischargeMessage = "正在使用电池，降至 \(limit)% 后自动恢复适配器供电。" }
-        } else if highChargePolicy == .discharge {
-            dischargeMessage = result.map { AppText(key: $0.message) } ?? "当前未主动放电；高于上限时按所选策略处理。"
-        } else {
-            dischargeMessage = "高于上限时停止充电，保持适配器供电。"
-        }
-    }
-
-    private func ensureAdapterPower() async throws {
-        let status = try await checkedStatus()
-        if status.supportsAdapterControl == true, status.adapterEnabled != true {
-            let enabled = try await invokeBatt(BattCommand.useAdapter.arguments)
-            guard enabled.status == 0 else { throw ChargingError.command(enabled.output) }
-            guard try await checkedStatus().adapterEnabled == true else {
-                throw ChargingError.verification("未确认适配器供电已恢复")
+        guard !isBusy, !isPreparingToQuit else { return }
+        lastAction = .full
+        Task {
+            isBusy = true
+            isError = false
+            statusMessage = "正在取消本次充满并恢复原生充电上限…"
+            defer { isBusy = false }
+            do {
+                let response = try await backend.cancelOneTimeCharge()
+                currentState = response.state
+                fullOncePending = response.oneTimePending
+                modeText = response.oneTimePending
+                    ? "等待接电后恢复原生充电上限"
+                    : "原生固件限充至 \(response.state.upper)%"
+                statusMessage = AppText(verbatim: response.message)
+                isError = false
+            } catch {
+                statusMessage = "取消本次充满失败：\(AppText(error: error))"
+                isError = true
             }
         }
     }
 
-    private func applyDesiredLimit(policy: HighChargePolicy? = nil) async {
-        guard backendReady, !isPreparingToQuit else { return }
-        if isBusy { queuedLimit = limit; return }
-        lastChargeRequest = .limit(policy)
+    private func applyLimit(_ value: Int) async {
+        guard backendReady, isAdapterConnected, !isBusy, !isPreparingToQuit else { return }
         isBusy = true
         isError = false
-        let value = limit
-        statusMessage = "正在应用充电上限 \(value)%…"
+        statusMessage = "正在写入原生固件充电上限 \(value)%…"
         autoApplyFeedback = "正在应用 \(value)%…"
-        defer { finishChargeCommand() }
-        var limitApplied = false
+        defer { isBusy = false }
         do {
-            try await DischargeAgent.stop()
-            try await ensureAdapterPower()
-            try await OnceChargeAgent.cancel()
-            let result = try await invokeBatt(BattCommand.setLimit(value).arguments)
-            guard result.status == 0 else { throw ChargingError.command(result.output) }
-            let current = try await checkedStatus()
-            guard current.upperLimit == value else {
-                throw ChargingError.verification("设备报告上限 \(AppText(key: current.upperLimit.map(String.init) ?? "未知"))%，预期 \(value)%")
-            }
-            limitApplied = true
-            UserDefaults.standard.set(false, forKey: "chargeControlReleasedOnQuit")
-            chargeMode = .limited
-            fullBehavior = .once
-            fullOncePending = false
-            UserDefaults.standard.set(chargeMode.rawValue, forKey: "chargeModeV5")
-            UserDefaults.standard.set(fullBehavior.rawValue, forKey: "fullBehaviorV5")
-            let desiredPolicy = policy ?? highChargePolicy
-            if desiredPolicy == .discharge && (policy != nil || DischargeAgent.result?.paused != true) {
-                guard let path = locateBatt() else { throw ChargingError.notInstalled }
-                try await DischargeAgent.start(battPath: path, limit: value)
-            }
-            highChargePolicy = desiredPolicy
-            UserDefaults.standard.set(highChargePolicy.rawValue, forKey: "highChargePolicy")
-            updateDischargeState(current)
-            modeText = "限充至 \(value)%"
-            autoApplyFeedback = "已自动应用 \(value)%"
-            statusMessage = "已验证设备充电上限 \(value)%"
+            let response = try await backend.applyLimit(
+                upper: value,
+                lower: max(5, value - 2),
+                confirmed: true
+            )
+            currentState = response.state
+            fullOncePending = response.oneTimePending
+            modeText = "原生固件限充寄存器：\(value)%"
+            autoApplyFeedback = "已写入并读回 \(value)%"
+            statusMessage = AppText(verbatim: response.message)
             isError = false
         } catch {
-            updateDischargeState()
-            autoApplyFeedback = limitApplied ? "上限已应用，但高电量策略失败：\(AppText(error: error))"
-                : "应用失败：\(AppText(error: error))"
+            autoApplyFeedback = "原生固件写入失败：\(AppText(error: error))"
             statusMessage = autoApplyFeedback
             isError = true
         }
     }
 
-    private func applyFullBehavior(_ behavior: FullBehavior) async {
-        guard backendReady, !isPreparingToQuit, let path = locateBatt() else { return }
-        if isBusy { return }
-        lastChargeRequest = .full(behavior)
+    private func applyOneTimeFullCharge() async {
+        guard backendReady, isAdapterConnected, !isBusy, !isPreparingToQuit,
+              (batteryPercent ?? 0) < 100 else { return }
         isBusy = true
         isError = false
-        statusMessage = behavior == .once ? "正在启动仅充满一次…" : "正在切换为持续充满…"
-        defer { finishChargeCommand() }
-        let previousMode = chargeMode
-        let previousBehavior = fullBehavior
-        var changedHardware = false
+        statusMessage = "正在启动原生本次充满任务…"
+        defer { isBusy = false }
         do {
-            try await DischargeAgent.stop()
-            try await ensureAdapterPower()
-            try DischargeAgent.pauseForFullCharge()
-            updateDischargeState()
-            try await OnceChargeAgent.cancel()
-            if behavior == .always {
-                let result = try await invokeBatt(BattCommand.allowFullForever.arguments)
-                guard result.status == 0 else { throw ChargingError.command(result.output) }
-                changedHardware = true
-                let current = try await checkedStatus()
-                guard current.upperLimit == 100 else {
-                    throw ChargingError.verification("未确认限充已关闭；请查看 batt 状态")
-                }
-            } else {
-                // v0.8.0 does not include 'batt charge full'. Use the supported
-                // temporary disable and a separately scheduled restoration agent.
-                let current = try await checkedStatus()
-                if current.upperLimit != limit {
-                    let reset = try await invokeBatt(BattCommand.setLimit(limit).arguments)
-                    guard reset.status == 0 else { throw ChargingError.command(reset.output) }
-                    changedHardware = true
-                    guard try await checkedStatus().upperLimit == limit else {
-                        throw ChargingError.verification("未确认已恢复原限充上限 \(limit)%")
-                    }
-                }
-                if (batteryPercent ?? 0) >= 100 {
-                    // Keep the full-charge options accessible without starting
-                    // a redundant job or claiming a full-charge task is active.
-                    chargeMode = .full
-                    fullBehavior = .once
-                    fullOncePending = false
-                    modeText = "当前已充满 · 限充至 \(limit)%"
-                    statusMessage = "当前已充满，无需启动任务；原限充上限保持不变。"
-                    UserDefaults.standard.set(chargeMode.rawValue, forKey: "chargeModeV5")
-                    UserDefaults.standard.set(fullBehavior.rawValue, forKey: "fullBehaviorV5")
-                    UserDefaults.standard.set(false, forKey: "chargeControlReleasedOnQuit")
-                    return
-                }
-                try await OnceChargeAgent.prepare(battPath: path, limit: limit)
-                let result = try await invokeBatt(BattCommand.allowFullTemporarily.arguments)
-                if result.status != 0 {
-                    try? await OnceChargeAgent.cancel()
-                    throw ChargingError.command(result.output)
-                }
-                changedHardware = true
-                // v0.8.0 shows `Charge limit: 100% (batt disabled)` and
-                // `Restoring N% limit: ...` for the durable temporary disable.
-                let temporary = try await checkedStatus()
-                guard temporary.upperLimit == 100 && temporary.scheduledRestoreLimit == limit else {
-                    throw ChargingError.verification("未确认 batt 已启用限时充满及恢复 \(limit)% 的计划")
-                }
-            }
-            chargeMode = .full
-            fullBehavior = behavior
-            fullOncePending = behavior == .once
-            UserDefaults.standard.set(chargeMode.rawValue, forKey: "chargeModeV5")
-            UserDefaults.standard.set(fullBehavior.rawValue, forKey: "fullBehaviorV5")
-            UserDefaults.standard.set(false, forKey: "chargeControlReleasedOnQuit")
-            modeText = behavior == .once ? "本次充满进行中" : "持续允许充满"
-            statusMessage = behavior == .once ? "任务已启动；达到 100% 后自动恢复上限（最长 10 小时）" : "持续充满已启用，切回控制模式可恢复原上限"
+            let response = try await backend.beginOneTimeCharge(
+                upper: limit,
+                lower: max(5, limit - 2),
+                confirmed: true
+            )
+            currentState = response.state
+            fullOncePending = response.oneTimePending
+            modeText = "本次充满进行中 · 原上限 \(limit)%"
+            statusMessage = AppText(verbatim: response.message)
             isError = false
         } catch {
-            // A failure may happen after we have changed batt but before the
-            // helper was installed or verification finished. Restore the
-            // previous selected mode, never leave the displayed state stale.
-            try? await OnceChargeAgent.cancel()
-            if changedHardware || (behavior == .once && previousMode == .full && previousBehavior == .always) {
-                if previousMode == .full && previousBehavior == .always {
-                    _ = try? await invokeBatt(BattCommand.allowFullForever.arguments)
-                } else {
-                    _ = try? await invokeBatt(BattCommand.setLimit(limit).arguments)
-                }
-            }
-            statusMessage = "切换失败：\(AppText(error: error))。已尝试恢复上一充电模式，请检查实际状态。"
+            statusMessage = "启动本次充满失败：\(AppText(error: error))"
             isError = true
         }
     }
-
-    var canRetryChargeRequest: Bool { backendReady && !isBusy && !isPreparingToQuit && lastChargeRequest != nil }
 
     func retryChargeRequest() {
         guard canRetryChargeRequest else { return }
-        switch lastChargeRequest {
-        case .limit(let policy): Task { await applyDesiredLimit(policy: policy) }
-        case .full(let behavior): selectFullBehavior(behavior, force: true)
-        case nil: break
+        if !backendReady {
+            helperInstallAttempted = false
+            Task { await refreshNativeState(allowInstall: true) }
+            return
         }
-    }
-
-    private func finishChargeCommand() {
-        isBusy = false
-        powerRefresh.refreshNow()
-        // Keep the current operation result visible; refresh normally would
-        // replace it with a generic “service connected” message.
-        if let pending = queuedLimit {
-            queuedLimit = nil
-            if pending != limit { return }
-            Task { await applyDesiredLimit() }
+        switch lastAction {
+        case .limit(let value): Task { await applyLimit(value) }
+        case .full:
+            if fullOncePending { cancelFullOnce() }
+            else { Task { await applyOneTimeFullCharge() } }
+        case nil: refresh()
         }
-    }
-
-    private func invokeBatt(_ args: [String]) async throws -> (status: Int32, output: String) {
-        guard let path = locateBatt() else { throw ChargingError.notInstalled }
-        return try await runProcess(path: path, arguments: args)
-    }
-
-    private func checkedStatus() async throws -> BattStatus {
-        let result = try await invokeBatt(BattCommand.readStatus.arguments)
-        guard result.status == 0 else { throw ChargingError.command(result.output) }
-        return BattStatus.parse(result.output)
     }
 
     func prepareForTermination() async -> Bool {
-        #if MAULEAF_INTEL_EXPERIMENTAL
-        // Never touch charging tasks or other installed batt services on Intel.
-        timer?.invalidate()
-        timer = nil
-        powerRefresh.setVisible(false)
-        terminationReady = true
-        return true
-        #endif
-        if terminationReady { return true }
-        guard !isPreparingToQuit else { return false }
+        if isPreparingToQuit { return false }
         isPreparingToQuit = true
         limitDebounce?.cancel()
-        queuedLimit = nil
-        lastChargeRequest = nil
-        powerRefresh.setVisible(false)
-        defer {
-            if !terminationReady {
+        refreshTimer?.invalidate()
+        refreshTimer = nil
+        let deadline = Date().addingTimeInterval(30)
+        while isBusy {
+            guard Date() < deadline else {
                 isPreparingToQuit = false
-                powerRefresh.setVisible(panelVisible)
-            }
-        }
-        do {
-            // Do not let a previous command complete after the final disable.
-            let deadline = Date().addingTimeInterval(30)
-            while isBusy {
-                guard Date() < deadline else { throw ChargingError.command("当前操作尚未结束，请完成或取消后重试退出") }
-                try await Task.sleep(nanoseconds: 50_000_000)
-            }
-            isBusy = true
-            defer { isBusy = false }
-            statusMessage = "正在停止后台任务并恢复系统充电…"
-            isError = false
-            let hadControl = componentPresent || backendReady || OnceChargeAgent.hasPendingJob || DischargeAgent.hasPendingJob
-            try await DischargeAgent.stop()
-            try await OnceChargeAgent.cancel()
-            if let path = locateBatt() {
-                func command(_ command: BattCommand) async throws -> String {
-                    let result = await Task.detached(priority: .utility) { ChargeProcess.run(path, command.arguments) }.value
-                    guard result.status == 0 else { throw ChargingError.command(result.output) }
-                    return result.output
-                }
-                let before = BattStatus.parse(try await command(.readStatus))
-                if before.supportsAdapterControl == true { _ = try await command(.useAdapter) }
-                _ = try await command(.allowFullForever)
-                let restored = BattStatus.parse(try await command(.readStatus))
-                guard restored.upperLimit == 100, restored.scheduledRestoreLimit == nil,
-                      before.supportsAdapterControl != true || restored.adapterEnabled == true else {
-                    throw ChargingError.verification("未确认已解除限充、取消定时恢复并恢复适配器供电")
-                }
-                // A cancelled one-time charge should not restart on next launch.
-                if chargeMode == .full && fullBehavior == .once {
-                    chargeMode = .limited
-                    UserDefaults.standard.set(chargeMode.rawValue, forKey: "chargeModeV5")
-                }
-                UserDefaults.standard.set(true, forKey: "chargeControlReleasedOnQuit")
-                fullOncePending = false
-                lastVerifiedLimit = 100
-            } else if hadControl {
-                throw ChargingError.notInstalled
-            }
-            timer?.invalidate()
-            timer = nil
-            terminationReady = true
-            statusMessage = "已解除充电控制，正在退出。"
-            return true
-        } catch {
-            statusMessage = "退出已取消：\(AppText(error: error))。未确认恢复系统充电，请检查后重试退出。"
-            isError = true
-            return false
-        }
-    }
-
-    func installBackend() {
-        #if MAULEAF_INTEL_EXPERIMENTAL
-        statusMessage = "Intel 实验预览版禁止安装充电控制组件。"
-        isError = true
-        return
-        #endif
-        guard !isBusy, !isPreparingToQuit else { return }
-        lastChargeRequest = nil
-        refresh()
-        guard !componentPresent else {
-            isError = true
-            statusMessage = "检测到现有 batt，未进行覆盖安装。请先检查当前安装方式，避免与 Homebrew 或其他服务冲突。"
-            return
-        }
-        guard let bundledBinaryURL = Bundle.main.resourceURL?.appendingPathComponent("batt"),
-              FileManager.default.isExecutableFile(atPath: bundledBinaryURL.path) else {
-            isError = true
-            statusMessage = "应用包中没有找到内置 batt。请重新构建 MauLeaf，并确认构建时成功嵌入控制组件。"
-            return
-        }
-
-        isBusy = true
-        isError = false
-        statusMessage = "正在安装内置控制组件…"
-
-        Task {
-            do {
-                let version = bundledBattVersion
-                let appVersion = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "unknown"
-                let directory = FileManager.default.temporaryDirectory.appendingPathComponent("MauLeafInstall-\(UUID().uuidString)", isDirectory: true)
-                try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
-                defer { try? FileManager.default.removeItem(at: directory) }
-
-                let scriptURL = directory.appendingPathComponent("install-as-root.sh")
-                let receipt = shellQuote(managedReceiptPath)
-                let daemonPlist = shellQuote(managedDaemonPlistPath)
-                let binary = shellQuote(bundledBinaryURL.path)
-                let script = """
-                #!/bin/bash
-                set -euo pipefail
-                RECEIPT=\(receipt)
-                DAEMON_PLIST=\(daemonPlist)
-                TARGET=/usr/local/bin/batt
-                if [ -e "$RECEIPT" ] || [ -e "$DAEMON_PLIST" ]; then
-                  echo '检测到 MauLeaf 或 batt 遗留的系统服务/安装凭据。为避免覆盖，已停止安装。请先使用卸载器清理。' >&2
-                  exit 23
-                fi
-                for candidate in /opt/homebrew/bin/batt /opt/homebrew/sbin/batt /usr/local/bin/batt /usr/local/sbin/batt; do
-                  if [ -x "$candidate" ]; then
-                    echo "检测到已有 batt：$candidate。为避免与 Homebrew 或其他安装方式冲突，已停止安装。" >&2
-                    exit 21
-                  fi
-                done
-                /bin/mkdir -p /usr/local/bin
-                /usr/bin/install -m 755 \(binary) "$TARGET"
-                /usr/bin/xattr -d com.apple.quarantine "$TARGET" >/dev/null 2>&1 || true
-                if ! "$TARGET" install --allow-non-root-access; then
-                  "$TARGET" uninstall >/dev/null 2>&1 || true
-                  /bin/launchctl bootout system/cc.chlc.batt >/dev/null 2>&1 || true
-                  /bin/rm -f "$DAEMON_PLIST" "$TARGET"
-                  echo 'batt 系统服务安装失败，已尝试清理部分安装。' >&2
-                  exit 24
-                fi
-                /bin/mkdir -p "$(/usr/bin/dirname "$RECEIPT")"
-                /usr/bin/printf 'source=MauLeaf\\nmauleaf_version=%s\\nbatt_version=%s\\n' \(shellQuote(appVersion)) \(shellQuote(version)) > "$RECEIPT"
-                /usr/sbin/chown root:wheel "$RECEIPT"
-                /bin/chmod 644 "$RECEIPT"
-                """
-                try script.write(to: scriptURL, atomically: true, encoding: .utf8)
-                try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: scriptURL.path)
-                statusMessage = "等待 macOS 管理员授权…"
-                _ = try await runPrivileged(command: "/bin/bash \(shellQuote(scriptURL.path))")
-
-                UserDefaults.standard.set(true, forKey: "chargeCapManagedBattInstall")
-                battPath = managedBinaryPath
-                isBusy = false
-                refresh()
-                if backendReady && FileManager.default.fileExists(atPath: managedReceiptPath) {
-                    statusMessage = "内置控制组件安装成功，服务已连接。"
-                    isError = false
-                } else {
-                    statusMessage = "组件已部署，但服务验证未通过。请检查设备固件兼容性后重试。"
-                    isError = true
-                }
-            } catch {
-                isBusy = false
-                let receiptExists = FileManager.default.fileExists(atPath: managedReceiptPath)
-                UserDefaults.standard.set(receiptExists, forKey: "chargeCapManagedBattInstall")
-                isManagedInstall = receiptExists && FileManager.default.isExecutableFile(atPath: managedBinaryPath)
-                refresh()
-                statusMessage = "安装未完成：\(AppText(error: error))"
+                statusMessage = "当前原生固件操作尚未结束，已取消退出。"
                 isError = true
+                return false
             }
+            try? await Task.sleep(nanoseconds: 50_000_000)
         }
-    }
-
-    func uninstallBackend() {
-        #if MAULEAF_INTEL_EXPERIMENTAL
-        statusMessage = "Intel 实验预览版禁止卸载充电控制组件。"
-        isError = true
-        return
-        #endif
-        guard !isBusy, !isPreparingToQuit else { return }
-        lastChargeRequest = nil
-        let hasReceipt = FileManager.default.fileExists(atPath: managedReceiptPath)
-        let legacyDaemonInstall = hasManagedLaunchDaemon
-            && FileManager.default.isExecutableFile(atPath: managedBinaryPath)
-        guard detectedBattPath == managedBinaryPath,
-              FileManager.default.isExecutableFile(atPath: managedBinaryPath),
-              (hasReceipt || legacyDaemonInstall) else {
-            isError = true
-            statusMessage = "未确认这是由 MauLeaf 或旧版 batt 安装流程创建的服务。为避免误删 Homebrew 或其他来源的组件，未执行卸载。"
-            return
-        }
-
-        isBusy = true
-        isError = false
-        statusMessage = "准备卸载控制组件，等待 macOS 管理员授权…"
-
-        Task {
-            do {
-                // Do not allow a previously scheduled full-once helper to issue
-                // commands after the control daemon has been removed.
-                try await DischargeAgent.stop()
-                try await OnceChargeAgent.cancel()
-                let directory = FileManager.default.temporaryDirectory.appendingPathComponent("MauLeafUninstall-\(UUID().uuidString)", isDirectory: true)
-                try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
-                defer { try? FileManager.default.removeItem(at: directory) }
-
-                let scriptURL = directory.appendingPathComponent("uninstall-as-root.sh")
-                let receipt = shellQuote(managedReceiptPath)
-                let daemonPlist = shellQuote(managedDaemonPlistPath)
-                let allowLegacy = legacyDaemonInstall ? "1" : "0"
-                let script = """
-                #!/bin/bash
-                set -euo pipefail
-                RECEIPT=\(receipt)
-                DAEMON_PLIST=\(daemonPlist)
-                ALLOW_LEGACY=\(allowLegacy)
-                TARGET=/usr/local/bin/batt
-                if [ ! -f "$RECEIPT" ]; then
-                  PLIST_LABEL=$(/usr/libexec/PlistBuddy -c 'Print :Label' "$DAEMON_PLIST" 2>/dev/null || true)
-                  PLIST_ARGS=$(/usr/libexec/PlistBuddy -c 'Print :ProgramArguments' "$DAEMON_PLIST" 2>/dev/null || true)
-                  if [ "$ALLOW_LEGACY" != "1" ] || [ "$PLIST_LABEL" != 'cc.chlc.batt' ] || [[ "$PLIST_ARGS" != *"$TARGET"* ]]; then
-                    echo '未找到 MauLeaf 安装凭据，且系统服务未指向 /usr/local/bin/batt；已停止卸载。' >&2
-                    exit 41
-                  fi
-                fi
-                for candidate in /opt/homebrew/bin/batt /opt/homebrew/sbin/batt /usr/local/sbin/batt; do
-                  if [ -x "$candidate" ]; then
-                    echo "检测到其他位置的 batt：$candidate。为避免影响另一种安装方式，已停止卸载。" >&2
-                    exit 45
-                  fi
-                done
-                if [ -f "$DAEMON_PLIST" ]; then
-                  PLIST_LABEL=$(/usr/libexec/PlistBuddy -c 'Print :Label' "$DAEMON_PLIST" 2>/dev/null || true)
-                  PLIST_ARGS=$(/usr/libexec/PlistBuddy -c 'Print :ProgramArguments' "$DAEMON_PLIST" 2>/dev/null || true)
-                  if [ "$PLIST_LABEL" != 'cc.chlc.batt' ] || [[ "$PLIST_ARGS" != *"$TARGET"* ]]; then
-                    echo '系统服务的名称或程序路径与预期不一致；已停止卸载。' >&2
-                    exit 46
-                  fi
-                fi
-                if [ -x "$TARGET" ]; then
-                  if ! "$TARGET" disable; then
-                    echo '恢复默认充电控制失败（batt disable）。为安全起见，未继续删除服务和文件。' >&2
-                    exit 43
-                  fi
-                  if ! "$TARGET" uninstall; then
-                    echo 'batt uninstall 未成功。服务和程序文件未被删除，请检查上方错误后重试。' >&2
-                    exit 44
-                  fi
-                else
-                  echo '找不到 batt 可执行文件，无法确认已恢复默认充电控制。为安全起见，未清理服务。' >&2
-                  exit 42
-                fi
-                /bin/launchctl bootout system/cc.chlc.batt >/dev/null 2>&1 || true
-                /bin/rm -f "$DAEMON_PLIST" "$TARGET"
-                /bin/rm -f /etc/batt* 2>/dev/null || true
-                /bin/rm -f "$RECEIPT"
-                /bin/rmdir "$(/usr/bin/dirname "$RECEIPT")" >/dev/null 2>&1 || true
-                """
-                try script.write(to: scriptURL, atomically: true, encoding: .utf8)
-                try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: scriptURL.path)
-                _ = try await runPrivileged(command: "/bin/bash \(shellQuote(scriptURL.path))")
-
-                UserDefaults.standard.set(false, forKey: "chargeCapManagedBattInstall")
-                isManagedInstall = false
-                battPath = nil
-                detectedBattPath = nil
-                componentPresent = false
-                backendReady = false
-                isBusy = false
-                modeText = "未启用限充"
-                statusMessage = "已卸载 MauLeaf 控制组件并清理其配置。"
-                isError = false
-                readSystemBattery()
-            } catch {
-                isBusy = false
-                // Refresh actual state first; refresh() also updates statusMessage.
-                // Preserve the actionable error after refreshing so it is not hidden.
-                refresh()
-                statusMessage = "卸载未完成：\(AppText(error: error))。组件未被强制删除，请检查提示后重试。"
-                isError = true
-            }
-        }
-    }
-
-    private var bundledBattVersion: String {
-        guard let url = Bundle.main.url(forResource: "batt-version", withExtension: "txt"),
-              let version = try? String(contentsOf: url, encoding: .utf8) else { return "unknown" }
-        return version.trimmingCharacters(in: .whitespacesAndNewlines)
-    }
-
-    private func runPrivileged(command: String) async throws -> String {
-        // Keep our dedicated NSPanel alive and visible while the system password
-        // dialog is presented by osascript. Never issue this from a MenuBarExtra.
-        NSApp.activate(ignoringOtherApps: true)
-        let escaped = command
-            .replacingOccurrences(of: "\\", with: "\\\\")
-            .replacingOccurrences(of: "\"", with: "\\\"")
-        let appleScript = "do shell script \"\(escaped)\" with administrator privileges"
-        let result = try await runProcess(path: "/usr/bin/osascript", arguments: ["-e", appleScript])
-        guard result.status == 0 else {
-            let detail = result.output.trimmingCharacters(in: .whitespacesAndNewlines)
-            throw InstallError.authorizationFailed(detail.isEmpty ? "授权被取消或操作失败（退出码 \(result.status)）" : detail)
-        }
-        return result.output
-    }
-
-    private func runProcess(path: String, arguments: [String]) async throws -> (status: Int32, output: String) {
-        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<(status: Int32, output: String), Error>) in
-            let process = Process()
-            process.executableURL = URL(fileURLWithPath: path)
-            process.arguments = arguments
-            let pipe = Pipe()
-            process.standardOutput = pipe
-            process.standardError = pipe
-            process.standardInput = FileHandle.nullDevice
-            do {
-                try process.run()
-            } catch {
-                continuation.resume(throwing: error)
-                return
-            }
-            // Drain output concurrently. Waiting for process termination before reading
-            // a Pipe can deadlock if the child writes enough stderr/stdout.
-            DispatchQueue.global(qos: .utility).async {
-                let data = pipe.fileHandleForReading.readDataToEndOfFile()
-                process.waitUntilExit()
-                let output = String(data: data, encoding: .utf8) ?? ""
-                continuation.resume(returning: (process.terminationStatus, output))
-            }
-        }
+        // The firmware keeps the configured limit after the UI exits. The
+        // privileged helper independently owns one-time restoration.
+        return true
     }
 
     private func readSystemBattery() {
-        let result = run(path: "/usr/bin/pmset", arguments: ["-g", "batt"])
-        guard result.status == 0 else { return }
-        let output = result.output
-        let lower = output.lowercased()
-
-        if let range = output.range(of: #"\d+%"#, options: .regularExpression) {
-            let value = String(output[range]).replacingOccurrences(of: "%", with: "")
-            batteryPercent = Int(value)
-        }
-
-        // Do not use lower.contains("charging") by itself: "discharging" also
-        // contains that substring, which previously misclassified battery power
-        // as charging and left discharge watts permanently unavailable.
-        let isAC = lower.contains("ac power")
-        isAdapterConnected = isAC
-        let isBattery = lower.contains("battery power")
-        let isNotCharging = lower.contains("not charging")
-        let hasDischargingToken = lower.range(of: #"\bdischarging\b"#, options: .regularExpression) != nil
-        let hasChargingToken = lower.range(of: #"\bcharging\b"#, options: .regularExpression) != nil
-        let hasChargedToken = lower.range(of: #"\bcharged\b"#, options: .regularExpression) != nil
-        let isCharging = hasChargingToken && !isNotCharging && !hasDischargingToken
-        let isDischarging = hasDischargingToken || (isBattery && !isAC && !isCharging && !isNotCharging)
-
-        if isDischarging {
-            batteryStateText = "电池供电"
-        } else if isCharging {
-            batteryStateText = "正在充电"
-        } else if isAC {
-            batteryStateText = hasChargedToken ? "已接电源，已充满" : "已接电源，未充电"
-        } else if isNotCharging {
-            batteryStateText = "未充电"
-        } else if hasChargedToken {
-            batteryStateText = "已充满"
-        } else {
-            batteryStateText = isBattery ? "电池供电" : "未充电"
-        }
-
-        readLowPowerMode(onACPower: isAC ? true : (isBattery ? false : nil))
-    }
-
-    private func applyPowerSample(_ sample: BatteryPowerSample?) {
-        if chargePowerWatts != sample?.chargeWatts { chargePowerWatts = sample?.chargeWatts }
-        if dischargePowerWatts != sample?.dischargeWatts { dischargePowerWatts = sample?.dischargeWatts }
-        guard let sample else { return }
-        if let percent = sample.percent, batteryPercent != percent { batteryPercent = percent }
-        if let connected = sample.externalConnected, isAdapterConnected != connected { isAdapterConnected = connected }
-        let state: String
-        if sample.isDischarging { state = "电池供电" }
-        else if sample.isCharging { state = "正在充电" }
-        else if sample.externalConnected == true {
-            state = sample.fullyCharged == true ? "已接电源，已充满" : "已接电源，未充电"
-        } else { return }
-        if batteryStateText != state { batteryStateText = state }
-    }
-
-    private func readLowPowerMode(onACPower: Bool?) {
-        guard let onACPower else {
-            lowPowerMode = nil
-            return
-        }
-        let result = run(path: "/usr/bin/pmset", arguments: ["-g", "custom"])
-        guard result.status == 0 else {
-            lowPowerMode = nil
-            return
-        }
-        let target = onACPower ? "AC Power:" : "Battery Power:"
-        let lines = result.output.components(separatedBy: .newlines)
-        var inTargetSection = false
-        for line in lines {
-            let trimmed = line.trimmingCharacters(in: .whitespaces)
-            if trimmed.hasSuffix("Power:") {
-                inTargetSection = trimmed.caseInsensitiveCompare(target) == .orderedSame
-                continue
-            }
-            if inTargetSection,
-               let value = extractNumber(pattern: #"^lowpowermode\s+([01])"#, from: trimmed) {
-                lowPowerMode = value == 1
-                return
-            }
-        }
-        lowPowerMode = nil
-    }
-
-    private func locateBatt() -> String? {
-        #if MAULEAF_INTEL_EXPERIMENTAL
-        return nil
-        #endif
-        if let cached = battPath, FileManager.default.isExecutableFile(atPath: cached) {
-            return cached
-        }
-        let candidates = [
-            "/opt/homebrew/bin/batt",
-            "/usr/local/bin/batt",
-            "/opt/homebrew/sbin/batt",
-            "/usr/local/sbin/batt"
-        ]
-        if let found = candidates.first(where: { FileManager.default.isExecutableFile(atPath: $0) }) {
-            battPath = found
-            return found
-        }
-        if let path = ProcessInfo.processInfo.environment["PATH"] {
-            for directory in path.split(separator: ":") {
-                let candidate = "\(directory)/batt"
-                if FileManager.default.isExecutableFile(atPath: candidate) {
-                    battPath = candidate
-                    return candidate
-                }
-            }
-        }
-        battPath = nil
-        return nil
-    }
-
-    private func run(path: String, arguments: [String]) -> (status: Int32, output: String) {
         let process = Process()
-        process.executableURL = URL(fileURLWithPath: path)
-        process.arguments = arguments
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/pmset")
+        process.arguments = ["-g", "batt"]
+        process.standardInput = FileHandle.nullDevice
         let pipe = Pipe()
         process.standardOutput = pipe
         process.standardError = pipe
-        process.standardInput = FileHandle.nullDevice
         do {
             try process.run()
             let data = pipe.fileHandleForReading.readDataToEndOfFile()
             process.waitUntilExit()
-            return (process.terminationStatus, String(data: data, encoding: .utf8) ?? "")
+            guard process.terminationStatus == 0 else { throw NativeControlError.batteryReadFailed }
+            let output = String(data: data, encoding: .utf8) ?? ""
+            isAdapterConnected = output.localizedCaseInsensitiveContains("AC Power")
+            if let range = output.range(of: #"\b\d{1,3}%"#, options: .regularExpression) {
+                let value = Int(output[range].filter(\.isNumber))
+                batteryPercent = value.flatMap { (0...100).contains($0) ? $0 : nil }
+            } else {
+                batteryPercent = nil
+            }
+            if isAdapterConnected {
+                if output.localizedCaseInsensitiveContains("charging") {
+                    batteryStateText = "正在充电"
+                } else if batteryPercent == 100 || output.localizedCaseInsensitiveContains("charged") {
+                    batteryStateText = "已接电源，已充满"
+                } else {
+                    batteryStateText = "已接电源，未充电"
+                }
+            } else {
+                batteryStateText = "电池供电"
+            }
         } catch {
-            return (-1, error.localizedDescription)
+            batteryPercent = nil
+            isAdapterConnected = false
+            batteryStateText = "电池状态不可用"
         }
     }
 
-    private func extractNumber(pattern: String, from text: String) -> Int? {
-        guard let range = text.range(of: pattern, options: .regularExpression) else { return nil }
-        let matched = String(text[range])
-        guard let digits = matched.range(of: #"-?\d+"#, options: .regularExpression) else { return nil }
-        return Int(matched[digits])
+    private func runProcess(path: String, arguments: [String]) async throws -> (status: Int32, output: String) {
+        try await Task.detached(priority: .utility) {
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: path)
+            process.arguments = arguments
+            process.standardInput = FileHandle.nullDevice
+            let pipe = Pipe()
+            process.standardOutput = pipe
+            process.standardError = pipe
+            do {
+                try process.run()
+                let data = pipe.fileHandleForReading.readDataToEndOfFile()
+                process.waitUntilExit()
+                return (process.terminationStatus, String(data: data, encoding: .utf8) ?? "")
+            } catch {
+                throw error
+            }
+        }.value
     }
 
     private func shellQuote(_ value: String) -> String {
         "'" + value.replacingOccurrences(of: "'", with: "'\\''") + "'"
     }
+}
 
-    private enum InstallError: LocalizedError {
-        case authorizationFailed(String)
+private enum NativeControlError: LocalizedError {
+    case missingBundledHelper
+    case authorizationFailed(String)
+    case batteryReadFailed
 
-        var errorDescription: String? {
-            switch self {
-            case .authorizationFailed(let message): return message
-            }
+    var errorDescription: String? {
+        switch self {
+        case .missingBundledHelper:
+            return "应用包中缺少 MauLeaf 原生固件服务文件，请重新安装预览版。"
+        case .authorizationFailed(let detail):
+            return detail
+        case .batteryReadFailed:
+            return "无法读取 macOS 电池状态。"
         }
     }
 }

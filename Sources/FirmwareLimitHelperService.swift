@@ -2,6 +2,11 @@ import Foundation
 import Security
 import Darwin
 
+private struct FirmwareLimitLegacyRestoreRequest: Codable {
+    let deviceIdentity: FirmwareLimitDeviceIdentity
+    let requestedAt: Date
+}
+
 /// Privileged native firmware controller. The app never receives a raw SMC
 /// transport; every write is guarded and verified inside this root process.
 final class FirmwareLimitHelperService: NSObject, FirmwareLimitHelperProtocol {
@@ -14,6 +19,9 @@ final class FirmwareLimitHelperService: NSObject, FirmwareLimitHelperProtocol {
     private let originalStateURL: URL
     private let restoreRequestURL: URL
     private let backgroundRecoveryURL: URL
+    private let legacyRestoreURL: URL
+    private let deferredUninstallURL: URL
+    private let deferredUninstallScriptURL: URL
     private let now: () -> Date
     private let monitorEnabled: Bool
     private let hardwareLock = NSLock()
@@ -24,6 +32,9 @@ final class FirmwareLimitHelperService: NSObject, FirmwareLimitHelperProtocol {
     private var pendingJob: FirmwareLimitOnceJob?
     private var originalStateSnapshot: FirmwareLimitOriginalStateSnapshot?
     private var originalSnapshotLoadError: String?
+    private var legacyRestoreRequest: FirmwareLimitLegacyRestoreRequest?
+    private var legacyRestoreLoadError: String?
+    private var deferredUninstallLaunched = false
     private var monitorTimer: DispatchSourceTimer?
     private let watchdogTimeout: TimeInterval = 15
 
@@ -37,6 +48,9 @@ final class FirmwareLimitHelperService: NSObject, FirmwareLimitHelperProtocol {
         originalStateURL: URL = URL(fileURLWithPath: "/Library/Application Support/MauLeaf/original-firmware-state.json"),
         restoreRequestURL: URL = URL(fileURLWithPath: "/Library/Application Support/MauLeaf/restore-original-state.pending"),
         backgroundRecoveryURL: URL = URL(fileURLWithPath: "/Library/Application Support/MauLeaf/background-recovery.pending"),
+        legacyRestoreURL: URL = URL(fileURLWithPath: "/Library/Application Support/MauLeaf/legacy-restore.json"),
+        deferredUninstallURL: URL = URL(fileURLWithPath: "/Library/Application Support/MauLeaf/deferred-uninstall.pending"),
+        deferredUninstallScriptURL: URL = URL(fileURLWithPath: "/Library/Application Support/MauLeaf/complete-deferred-uninstall.sh"),
         now: @escaping () -> Date = Date.init,
         monitorEnabled: Bool = true
     ) {
@@ -49,11 +63,15 @@ final class FirmwareLimitHelperService: NSObject, FirmwareLimitHelperProtocol {
         self.originalStateURL = originalStateURL
         self.restoreRequestURL = restoreRequestURL
         self.backgroundRecoveryURL = backgroundRecoveryURL
+        self.legacyRestoreURL = legacyRestoreURL
+        self.deferredUninstallURL = deferredUninstallURL
+        self.deferredUninstallScriptURL = deferredUninstallScriptURL
         self.now = now
         self.monitorEnabled = monitorEnabled
         super.init()
         pendingJob = loadPendingJob()
         originalStateSnapshot = loadOriginalStateSnapshot()
+        legacyRestoreRequest = loadLegacyRestoreRequest()
         if FileManager.default.fileExists(atPath: restoreRequestURL.path),
            var snapshot = originalStateSnapshot {
             snapshot.restoreRequested = true
@@ -78,7 +96,10 @@ final class FirmwareLimitHelperService: NSObject, FirmwareLimitHelperProtocol {
         } else if pendingJob != nil {
             try? persistBackgroundRecoveryMarker()
         }
-        if pendingJob != nil || originalStateSnapshot?.restoreRequested == true {
+        if legacyRestoreRequest != nil || FileManager.default.fileExists(atPath: deferredUninstallURL.path) {
+            try? persistBackgroundRecoveryMarker()
+        }
+        if hasPendingBackgroundRecovery {
             startMonitoring()
         }
     }
@@ -92,7 +113,10 @@ final class FirmwareLimitHelperService: NSObject, FirmwareLimitHelperProtocol {
     var hasPendingBackgroundRecovery: Bool {
         stateLock.lock()
         defer { stateLock.unlock() }
-        return pendingJob != nil || originalStateSnapshot?.restoreRequested == true
+        return pendingJob != nil
+            || originalStateSnapshot?.restoreRequested == true
+            || legacyRestoreRequest != nil
+            || FileManager.default.fileExists(atPath: deferredUninstallURL.path)
     }
 
     func readState(withReply reply: @escaping (NSData?, NSString?) -> Void) {
@@ -312,11 +336,13 @@ final class FirmwareLimitHelperService: NSObject, FirmwareLimitHelperProtocol {
     private func stateResponse(_ state: FirmwareLimitState) -> FirmwareLimitHelperStateResponse {
         stateLock.lock()
         let snapshot = originalStateSnapshot
+        let legacyPending = legacyRestoreRequest != nil
         stateLock.unlock()
         return FirmwareLimitHelperStateResponse(
             state: state,
             identity: identityProvider(),
-            snapshot: snapshot
+            snapshot: snapshot,
+            legacyRestorePending: legacyPending
         )
     }
 

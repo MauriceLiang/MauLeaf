@@ -18,7 +18,11 @@ The GitHub Actions workflow builds an arm64 executable targeting macOS 15 on a G
 
 For a local build with Xcode Command Line Tools, run:
 
-swiftc -O -framework IOKit -framework CoreFoundation SystemFirmwareReader.swift MauLeafHardwareProbe.swift -o MauLeafHardwareProbe
+From the repository root, run:
+
+```bash
+swiftc -O -parse-as-library -framework IOKit -framework CoreFoundation Sources/SystemFirmwareReader.swift Tools/MauLeafHardwareProbe/MauLeafHardwareProbe.swift -o MauLeafHardwareProbe
+```
 
 ## Run
 

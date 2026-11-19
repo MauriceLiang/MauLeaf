@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.local.chargecap.firmware-helper</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/Library/PrivilegedHelperTools/com.local.chargecap.firmware-helper</string>
+    </array>
+    <key>UserName</key>
+    <string>root</string>
+    <key>GroupName</key>
+    <string>wheel</string>
+    <key>MachServices</key>
+    <dict>
+        <key>com.local.chargecap.firmware-helper</key>
+        <true/>
+    </dict>
+    <key>RunAtLoad</key>
+    <false/>
+    <key>KeepAlive</key>
+    <false/>
+    <key>ProcessType</key>
+    <string>Background</string>
+    <key>ThrottleInterval</key>
+    <integer>10</integer>
+    <key>StandardOutPath</key>
+    <string>/var/log/mauleaf-firmware-helper.log</string>
+    <key>StandardErrorPath</key>
+    <string>/var/log/mauleaf-firmware-helper.log</string>
+</dict>
+</plist>

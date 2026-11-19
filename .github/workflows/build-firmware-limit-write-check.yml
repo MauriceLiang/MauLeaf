@@ -1,0 +1,73 @@
+name: Build MauLeaf Firmware Limit Write Check
+
+on:
+  push:
+    branches:
+      - feat/firmware-limit-validation-p1
+    paths:
+      - "Tools/MauLeafFirmwareLimitWriteCheck/**"
+      - ".github/workflows/build-firmware-limit-write-check.yml"
+  pull_request:
+    paths:
+      - "Tools/MauLeafFirmwareLimitWriteCheck/**"
+      - ".github/workflows/build-firmware-limit-write-check.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test-and-build:
+    name: Test and build macOS 15 arm64
+    runs-on: macos-15
+    timeout-minutes: 15
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Verify runner
+        run: |
+          set -euo pipefail
+          sw_vers
+          uname -m
+          swift --version
+
+      - name: Run pure policy tests
+        run: |
+          set -euo pipefail
+          swiftc \
+            Tools/MauLeafFirmwareLimitWriteCheck/FirmwareLimitPolicy.swift \
+            Tools/MauLeafFirmwareLimitWriteCheck/Tests/FirmwareLimitPolicyTests.swift \
+            -o /tmp/FirmwareLimitPolicyTests
+          /tmp/FirmwareLimitPolicyTests
+
+      - name: Build arm64 diagnostic
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          swiftc -O \
+            -target arm64-apple-macos15.0 \
+            -framework IOKit \
+            Tools/MauLeafFirmwareLimitWriteCheck/FirmwareLimitPolicy.swift \
+            Tools/MauLeafFirmwareLimitWriteCheck/MauLeafFirmwareLimitWriteCheck.swift \
+            -o dist/MauLeafFirmwareLimitWriteCheck
+          chmod +x dist/MauLeafFirmwareLimitWriteCheck
+          file dist/MauLeafFirmwareLimitWriteCheck
+          lipo -info dist/MauLeafFirmwareLimitWriteCheck
+
+      - name: Package source and documentation
+        run: |
+          set -euo pipefail
+          cp Tools/MauLeafFirmwareLimitWriteCheck/FirmwareLimitPolicy.swift dist/
+          cp Tools/MauLeafFirmwareLimitWriteCheck/MauLeafFirmwareLimitWriteCheck.swift dist/
+          cp Tools/MauLeafFirmwareLimitWriteCheck/README.md dist/
+          cp Tools/MauLeafFirmwareLimitWriteCheck/NOTICE.md dist/
+          shasum -a 256 dist/MauLeafFirmwareLimitWriteCheck > dist/SHA256SUMS.txt
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: MauLeafFirmwareLimitWriteCheck-macos15-arm64
+          path: dist/
+          if-no-files-found: error
+          retention-days: 14

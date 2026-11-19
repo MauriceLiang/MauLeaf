@@ -26,6 +26,7 @@
 
 This release is built automatically after changes are merged into main. It ships Apple Silicon arm64 only; Intel builds and release artifacts are discontinued.
 
+- Fix native success notifications: applying/disabling a limit and starting/canceling a one-time full charge now show compact, localized feedback. The success toast no longer truncates the message; privileged helper audit text remains in logs.
 - Charging limits are off by default on first launch. The user must click “Enable charging limit” before firmware is changed.
 - On normal Quit, users choose Keep components and quit, Remove components and quit, or Cancel. Both valid exit choices restore the original firmware on AC or validated battery power and stop the background Helper. Keep preserves the installed files for the next launch; Remove deletes system-level Helper, LaunchDaemon, scripts, recovery state and logs. The user then moves the App to Trash.
 - While disabled, slider and preset changes are saved locally and do not write to AppleSMC.

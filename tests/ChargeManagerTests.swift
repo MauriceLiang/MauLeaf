@@ -218,7 +218,8 @@ private enum ChargeManagerTests {
         let manager = try await activatedManager(backend: backend) { _ in
             throw FixtureBackendError.injected
         }
-        try check(await manager.prepareForTermination(),
+        let restored = await manager.prepareForTermination()
+        try check(restored,
                   "fixture firmware restore succeeds before cleanup failure")
         let completed = await manager.finishQuitComponentCleanup(.remove)
         try check(!completed && !manager.isPreparingToQuit
@@ -233,8 +234,8 @@ private enum ChargeManagerTests {
         }
         secondBackend.failNextRestore = true
         let denied = await noCleanup.prepareForTermination()
-        try check(!denied && actionCount == 0
-                  && !(await noCleanup.finishQuitComponentCleanup(.remove)),
+        let cleanupAllowed = await noCleanup.finishQuitComponentCleanup(.remove)
+        try check(!denied && actionCount == 0 && !cleanupAllowed,
                   "failed firmware restore must never trigger a delete-components action")
     }
 

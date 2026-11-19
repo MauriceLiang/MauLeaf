@@ -13,6 +13,11 @@ swiftc "$ROOT/Sources/FirmwareLimitCore.swift" "$ROOT/tests/FirmwareLimitCoreTes
 swiftc "$ROOT/Sources/ChargeModeCore.swift" "$ROOT/Sources/AppLocalization.swift" \
     "$ROOT/Sources/FirmwareLimitCore.swift" "$ROOT/Sources/FirmwareLimitPolicyAdapter.swift" "$ROOT/tests/FirmwareLimitPolicyAdapterTests.swift" \
     -o "$TMP/firmwarepolicytests"
+swiftc "$ROOT/Sources/ChargeModeCore.swift" "$ROOT/Sources/AppLocalization.swift" \
+    "$ROOT/Sources/FirmwareLimitCore.swift" "$ROOT/Sources/FirmwareLimitPolicyAdapter.swift" \
+    "$ROOT/Sources/FirmwareLimitReconciliation.swift" "$ROOT/tests/FirmwareLimitReconciliationTests.swift" \
+    -o "$TMP/firmwarereconciliationtests"
+"$TMP/firmwarereconciliationtests"
 "$TMP/firmwarepolicytests"
 swiftc -parse-as-library "$ROOT/Sources/ChargeModeCore.swift" "$ROOT/Sources/AppLocalization.swift" \
     "$ROOT/tests/LocalizationTests.swift" -o "$TMP/localizationtests"

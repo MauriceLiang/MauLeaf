@@ -880,7 +880,7 @@ final class ChargeManager: ObservableObject {
                     restoreReady = false
                     currentState = nil
                     modeText = "原生固件服务未启用"
-                    statusMessage = "无法启用原生固件服务：\\(AppText(error: error))"
+                    statusMessage = "无法启用原生固件服务：\(AppText(error: error))"
                     isError = true
                     return
                 }
@@ -922,11 +922,11 @@ final class ChargeManager: ObservableObject {
                 : status.localized(in: language))
             isError = false
         } else if oneTime.pending {
-            modeText = "本次充满进行中 · 原上限 \\(oneTime.restoreUpper ?? limit)%"
+            modeText = "本次充满进行中 · 原上限 \(oneTime.restoreUpper ?? limit)%"
             statusMessage = status
             isError = false
         } else if state.active && state.hasOriginalStateSnapshot {
-            modeText = "限制充电已启用 · 上限 \\(state.upper)%"
+            modeText = "限制充电已启用 · 上限 \(state.upper)%"
             statusMessage = status
             isError = false
         } else if state.active {
@@ -1100,12 +1100,10 @@ final class ChargeManager: ObservableObject {
             statusMessage = AppText(verbatim: response.message)
             isError = false
         } catch {
+            isBusy = false
             statusMessage = "恢复原始固件配置失败：\(AppText(error: error))"
             isError = true
-            if restorePending {
-                // The root helper retains the snapshot and retries in the background.
-                modeText = "等待恢复原始固件配置"
-            }
+            await refreshNativeState(allowInstall: false)
         }
     }
 
@@ -1142,7 +1140,7 @@ final class ChargeManager: ObservableObject {
         showNativeWriteConfirmation = false
         let action = pendingAction
         pendingAction = nil
-        if case .limit = action, currentState?.active == true,
+        if let action, case .limit = action, currentState?.active == true,
            let currentState, (50...95).contains(currentState.upper) {
             limit = currentState.upper
         }

@@ -138,3 +138,7 @@
 "正在停止并移除原生后台服务和脚本…" = "Stopping and removing the background helper and scripts…";
 "固件已恢复，但无法安全处理后台控制组件：%@" = "Firmware was restored, but the native background components could not be handled safely: %@";
 "原始固件配置尚未确认恢复。建议返回应用，连接电源或排查原因后重试退出。如果选择「仍然退出」，后台 Helper 和恢复快照会保留以尝试修复；此时不能直接将 MauLeaf.app 扔进废纸篓，否则可能留下后台服务或限充状态。" = "The original firmware state could not be verified. Return to the app, connect AC or resolve the problem, then retry. If you choose Quit anyway, the helper and recovery snapshot are retained; do not trash the app until restoration is complete.";
+
+"固件已恢复，但后台组件未处理完成" = "Firmware restored, but background components were not cleaned up";
+"原始固件已恢复，但 Helper 停止或脚本清理失败。建议返回应用重试；如果仍然退出，请勿直接删除 App，以免留下系统后台组件。" = "The original firmware state was restored, but the helper could not be stopped or scripts could not be cleaned up. Return to the app and retry. If you quit anyway, do not trash the app until background components are removed.";
+"管理员授权取消或后台控制组件处理失败（退出码 %@）" = "Administrator authorization was cancelled or native component cleanup failed (exit code %@)";

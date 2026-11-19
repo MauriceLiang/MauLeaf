@@ -913,7 +913,7 @@ final class ChargeManager: ObservableObject {
     private func isHelperUnavailable(_ error: Error) -> Bool {
         guard let helperError = error as? FirmwareLimitHelperClientError else { return false }
         switch helperError {
-        case .serviceUnavailable, .connectionInvalidated: return true
+        case .serviceUnavailable, .connectionInvalidated, .timedOut: return true
         default: return false
         }
     }
@@ -1137,10 +1137,12 @@ final class ChargeManager: ObservableObject {
                 batteryPercent = nil
             }
             if isAdapterConnected {
-                if output.localizedCaseInsensitiveContains("charging") {
-                    batteryStateText = "正在充电"
-                } else if batteryPercent == 100 || output.localizedCaseInsensitiveContains("charged") {
+                if batteryPercent == 100 || output.localizedCaseInsensitiveContains("charged") {
                     batteryStateText = "已接电源，已充满"
+                } else if output.localizedCaseInsensitiveContains("not charging") {
+                    batteryStateText = "已接电源，未充电"
+                } else if output.localizedCaseInsensitiveContains("charging") {
+                    batteryStateText = "正在充电"
                 } else {
                     batteryStateText = "已接电源，未充电"
                 }

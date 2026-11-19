@@ -160,13 +160,13 @@ private final class MauLeafMenuController: NSObject {
         startOutsideClickMonitoring()
         manager.setPanelVisible(true)
 
-        // Never hold a user hostage in a menu-bar utility. If even a durable
-        // recovery request could not be written, warn clearly but allow them
-        // to choose to quit anyway (without claiming restoration happened).
+        // An unverified recovery is NOT a successful normal quit. Offer an
+        // explicit emergency choice while preserving the root-owned snapshot
+        // and helper for recovery; never imply Finder deletion is safe.
         let alert = NSAlert()
         alert.alertStyle = .warning
         alert.messageText = manager.text("无法验证充电限制恢复")
-        alert.informativeText = manager.text("后台恢复请求无法得到确认。仍然退出可能暂时保留固件限充；请在方便时重新接电或使用恢复脚本。")
+        alert.informativeText = manager.text("原始固件配置尚未确认恢复。建议返回应用，连接电源或排查原因后重试退出。如果选择「仍然退出」，后台 Helper 和恢复快照会保留以尝试修复；此时不能直接将 MauLeaf.app 扔进废纸篓，否则可能留下后台服务或限充状态。")
         alert.addButton(withTitle: manager.text("仍然退出"))
         alert.addButton(withTitle: manager.text("返回应用"))
         return alert.runModal() == .alertFirstButtonReturn
@@ -1334,9 +1334,10 @@ final class ChargeManager: ObservableObject {
                 guard state.restoreSupported else {
                     return cancelTermination("当前硬件无法安全恢复：\(state.restoreBlockReason ?? "身份校验失败")")
                 }
-                // On battery, the helper atomically persists a recovery request
-                // and returns an AC-power requirement error. We accept exit
-                // after verifying the durable request, without blocking users.
+                // Always attempt exact restoration immediately, including on
+                // battery for the verified M1 Pro firmware profile. If it
+                // cannot finish, the helper persists a recovery request;
+                // normal quit is NOT reported as successful in that case.
                 do {
                     _ = try await backend.restoreOriginalState()
                 } catch {
@@ -1352,8 +1353,16 @@ final class ChargeManager: ObservableObject {
                 && !verifiedOneTime.pending
             let queued = verified.restorePending && !verifiedOneTime.pending
 
-            guard restored || queued else {
-                return cancelTermination("无法确认固件恢复或后台恢复请求已保存。")
+            // macOS users normally trash the app after quitting it. Never
+            // treat "recovery queued" as the success path for an ordinary
+            // quit: this may be the last chance for the app to restore its
+            // firmware before the user deletes it. The root helper keeps the
+            // snapshot and background recovery marker if a quit is forced.
+            guard restored else {
+                let detail = queued
+                    ? "固件尚未恢复：已保留后台恢复任务。请连接电源或改善电池状态后重试正常退出；若仍然退出，删除应用前请先确认恢复完成。"
+                    : "无法确认三个固件寄存器已恢复，请勿删除 MauLeaf 或恢复服务。"
+                return cancelTermination(detail)
             }
 
             currentState = verified
@@ -1361,10 +1370,8 @@ final class ChargeManager: ObservableObject {
             fullOnceCancelRequested = false
             backendReady = verified.writeSupported
             restoreReady = verified.restoreSupported
-            modeText = queued ? "等待接电后恢复固件配置" : "限制充电未启用"
-            statusMessage = queued
-                ? "恢复任务已安全保存；MauLeaf 可以立即退出，接电后后台服务会继续恢复。"
-                : "退出前已确认充电限制关闭。"
+            modeText = "限制充电未启用"
+            statusMessage = "退出前已将限充恢复至原始固件配置并完成校验。现在可以安全关闭应用。"
             isError = false
             isBusy = false
             refreshTimer?.invalidate()

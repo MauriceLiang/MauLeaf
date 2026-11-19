@@ -973,7 +973,13 @@ final class ChargeManager: ObservableObject {
             statusMessage = AppText(verbatim: state.writeBlockReason ?? "当前硬件配置未通过原生写入验证。")
             isError = true
         } else if !state.writeSupported && state.restoreSupported {
-            statusMessage = "当前系统不允许启用新的限充配置，但可以使用已保存快照恢复原始状态。"
+            if state.hasOriginalStateSnapshot {
+                statusMessage = "当前系统不允许启用新的限充配置，但可以使用已保存快照恢复原始状态。"
+            } else if state.active {
+                statusMessage = "当前系统不允许启用新的限充配置，但可以停用旧版限充；历史阈值无法恢复。"
+            } else {
+                statusMessage = "当前系统不支持新的充电限制写入；限制充电保持关闭。"
+            }
             isError = false
         }
     }

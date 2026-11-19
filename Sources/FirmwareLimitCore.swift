@@ -341,6 +341,11 @@ struct FirmwareLimitController {
 
     /// Read-only operation. Checks all three key shapes before reading values.
     func readState() throws -> FirmwareLimitState {
+        try validateKeyMetadata()
+        return try readRawState()
+    }
+
+    private func validateKeyMetadata() throws {
         for key in FirmwareLimitKey.allCases {
             let metadata: FirmwareLimitKeyMetadata
             do {
@@ -354,7 +359,6 @@ struct FirmwareLimitController {
                 )
             }
         }
-        return try readRawState()
     }
 
     /// Read-only planning. The returned sequence can be reviewed without
@@ -404,8 +408,8 @@ struct FirmwareLimitController {
         permit: FirmwareLimitWritePermit
     ) throws -> FirmwareLimitState {
         guard original.isValid else { throw FirmwareLimitCoreError.invalidOriginalSnapshot }
-        let current = try readState()
-        guard current != original else { return current }
+        try validateKeyMetadata()
+        if let current = try? readRawState(), current == original { return current }
 
         do {
             try writeAndVerify(.activation, bytes: [0x00])

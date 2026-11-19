@@ -48,6 +48,15 @@ struct FirmwareLimitWriteContext: Equatable {
     let userConfirmed: Bool
 }
 
+struct FirmwareLimitOfflineRestoreContext: Equatable {
+    let isAdministrator: Bool
+    let externalConnected: Bool?
+    let pmsetReportsBatteryPower: Bool
+    let batteryPercent: Int?
+    let isCharging: Bool
+    let userConfirmed: Bool
+}
+
 /// A write permit can only be issued after all target and runtime guards pass.
 /// Read-only status and plan generation do not require a permit.
 struct FirmwareLimitWritePermit {
@@ -107,6 +116,47 @@ struct FirmwareLimitWritePermit {
         }
         guard context.isOnACPower else {
             throw FirmwareLimitCoreError.externalPowerRequired
+        }
+        guard context.userConfirmed else {
+            throw FirmwareLimitCoreError.confirmationRequired
+        }
+        return FirmwareLimitWritePermit()
+    }
+
+    /// Explicitly separate from normal AC-only charge configuration.
+    /// Supported only where the full unplugged restore sequence was tested.
+    /// Snapshot-less legacy charge states are deliberately excluded.
+    static func authorizeOfflineRestore(
+        identity: FirmwareLimitDeviceIdentity,
+        snapshot: FirmwareLimitOriginalStateSnapshot,
+        context: FirmwareLimitOfflineRestoreContext
+    ) throws -> FirmwareLimitWritePermit {
+        if let reason = targetBlockReason(identity: identity) {
+            throw FirmwareLimitCoreError.unsupportedTarget(reason)
+        }
+        guard snapshot.isValid,
+              snapshot.state.activationByte == 0x00 else {
+            throw FirmwareLimitCoreError.invalidOriginalSnapshot
+        }
+        guard restoreBlockReason(
+            identity: identity,
+            snapshotIdentity: snapshot.deviceIdentity
+        ) == nil else {
+            throw FirmwareLimitCoreError.originalStateDeviceMismatch
+        }
+        guard context.isAdministrator else {
+            throw FirmwareLimitCoreError.administratorRequired
+        }
+        guard context.externalConnected == false,
+              context.pmsetReportsBatteryPower else {
+            throw FirmwareLimitCoreError.externalPowerRequired
+        }
+        guard let percent = context.batteryPercent,
+              (30...100).contains(percent),
+              !context.isCharging else {
+            throw FirmwareLimitCoreError.transportFailure(
+                "Battery-only restore requires readable battery level >= 30% and no charging."
+            )
         }
         guard context.userConfirmed else {
             throw FirmwareLimitCoreError.confirmationRequired
@@ -405,17 +455,53 @@ struct FirmwareLimitController {
     /// snapshot; the privileged helper can retry it later.
     func restore(
         _ original: FirmwareLimitState,
-        permit: FirmwareLimitWritePermit
+        permit: FirmwareLimitWritePermit,
+        preflight: () throws -> Void = {}
     ) throws -> FirmwareLimitState {
         guard original.isValid else { throw FirmwareLimitCoreError.invalidOriginalSnapshot }
         try validateKeyMetadata()
         if let current = try? readRawState(), current == original { return current }
 
         do {
-            try writeAndVerify(.activation, bytes: [0x00])
-            try writeAndVerify(.upper, bytes: FirmwareLimitPolicy.encodeUInt32LittleEndian(original.upper))
-            try writeAndVerify(.lower, bytes: FirmwareLimitPolicy.encodeUInt32LittleEndian(original.lower))
-            try writeAndVerify(.activation, bytes: [original.activationByte])
+            // Never create an invalid intermediate lower >= upper band.
+            // First deactivate the limit. When reducing the upper bound
+            // (85/83 -> 80/78), write the LOWER bound first.
+            // Conversely (75/73 -> 80/78), write the UPPER bound first.
+            // An interrupted older Preview may have left an invalid
+            // intermediate pair. Read each register independently so it can
+            // still be restored, even when readState() rejects that pair.
+            let activation = try readRaw(.activation).first ?? 0xFF
+            guard activation == 0x00 || activation == 0x02 else {
+                throw FirmwareLimitCoreError.invalidActivation(activation)
+            }
+            guard let previousUpper = FirmwareLimitPolicy.decodeUInt32LittleEndian(try readRaw(.upper)),
+                  let previousLower = FirmwareLimitPolicy.decodeUInt32LittleEndian(try readRaw(.lower)),
+                  (5...100).contains(previousUpper),
+                  (5...100).contains(previousLower) else {
+                throw FirmwareLimitCoreError.invalidOriginalSnapshot
+            }
+            if activation == 0x02 {
+                try writeAndVerify(.activation, bytes: [0x00], preflight: preflight)
+            }
+            let upperFirst = original.upper > previousLower
+            if upperFirst {
+                if previousUpper != original.upper {
+                    try writeAndVerify(.upper, bytes: FirmwareLimitPolicy.encodeUInt32LittleEndian(original.upper), preflight: preflight)
+                }
+                if previousLower != original.lower {
+                    try writeAndVerify(.lower, bytes: FirmwareLimitPolicy.encodeUInt32LittleEndian(original.lower), preflight: preflight)
+                }
+            } else {
+                if previousLower != original.lower {
+                    try writeAndVerify(.lower, bytes: FirmwareLimitPolicy.encodeUInt32LittleEndian(original.lower), preflight: preflight)
+                }
+                if previousUpper != original.upper {
+                    try writeAndVerify(.upper, bytes: FirmwareLimitPolicy.encodeUInt32LittleEndian(original.upper), preflight: preflight)
+                }
+            }
+            if original.activationByte != 0x00 {
+                try writeAndVerify(.activation, bytes: [original.activationByte], preflight: preflight)
+            }
             let restored = try readState()
             guard restored == original else {
                 throw FirmwareLimitCoreError.readbackMismatch(
@@ -428,7 +514,7 @@ struct FirmwareLimitController {
         } catch {
             // Prefer an inactive controller state while the exact original
             // snapshot remains persisted for the next restoration attempt.
-            try? writeAndVerify(.activation, bytes: [0x00])
+            try? writeAndVerify(.activation, bytes: [0x00], preflight: preflight)
             throw FirmwareLimitCoreError.transactionFailed(
                 primary: String(describing: error),
                 recovery: "the original-state snapshot was retained; restoration must be retried"
@@ -475,9 +561,16 @@ struct FirmwareLimitController {
         }
     }
 
-    private func writeAndVerify(_ key: FirmwareLimitKey, bytes: [UInt8]) throws {
+    private func writeAndVerify(
+        _ key: FirmwareLimitKey,
+        bytes: [UInt8],
+        preflight: () throws -> Void = {}
+    ) throws {
         var lastFailure = "no read-back result"
         for _ in 0..<attempts {
+            // Power source, identity and snapshot must be rechecked on
+            // every retry, not just once at the start of the transaction.
+            try preflight()
             do {
                 try transport.write(key, bytes: bytes)
                 wait(0.12)

@@ -215,8 +215,37 @@ private enum FirmwareLimitCoreTests {
         expect(transport.activation == 0x00 && transport.upper == 80 && transport.lower == 78,
                "restore writes the original activation byte and both thresholds")
         expect(transport.writes == [
-            "bfF0=00", "bfD0=50000000", "bfE0=4E000000", "bfF0=00"
-        ], "restore deactivates, restores thresholds, then restores the original activation byte")
+            "bfF0=00", "bfE0=4E000000", "bfD0=50000000"
+        ], "restore disables bfF0 before lowering the lower bound and then upper bound")
+
+        // The opposite direction must first raise the upper bound.
+        let smaller = FakeFirmwareLimitTransport()
+        smaller.activation = 0x02
+        smaller.upper = 75
+        smaller.lower = 73
+        let raised = try controller(smaller).restore(original, permit: permit())
+        expect(raised == original, "restoration from a smaller range succeeds")
+        expect(smaller.writes == [
+            "bfF0=00", "bfD0=50000000", "bfE0=4E000000"
+        ], "raising the band writes upper before lower")
+
+        // A lost power-source preflight blocks all further writes and
+        // preserves the already-disabled activation state.
+        let gated = FakeFirmwareLimitTransport()
+        gated.activation = 0x02
+        gated.upper = 85
+        gated.lower = 83
+        var preflightCount = 0
+        expectThrows({
+            _ = try controller(gated).restore(original, permit: permit(), preflight: {
+                preflightCount += 1
+                if preflightCount == 2 {
+                    throw FirmwareLimitCoreError.externalPowerRequired
+                }
+            })
+        }, "power-state change in the middle blocks subsequent threshold writes")
+        expect(gated.activation == 0x00 && gated.upper == 85 && gated.lower == 83,
+               "abort after activation-off never reactivates or mutates thresholds")
 
         let partiallyWritten = FakeFirmwareLimitTransport()
         partiallyWritten.activation = 0x02
@@ -257,6 +286,71 @@ private enum FirmwareLimitCoreTests {
             userConfirmed: true
         )
         _ = try FirmwareLimitWritePermit.authorize(identity: identity, context: base)
+        let originalSnapshot = try FirmwareLimitOriginalStateSnapshot(
+            deviceIdentity: identity,
+            state: FirmwareLimitState(activationByte: 0, upper: 80, lower: 78)
+        )
+        let offline = FirmwareLimitOfflineRestoreContext(
+            isAdministrator: true,
+            externalConnected: false,
+            pmsetReportsBatteryPower: true,
+            batteryPercent: 85,
+            isCharging: false,
+            userConfirmed: true
+        )
+        _ = try FirmwareLimitWritePermit.authorizeOfflineRestore(
+            identity: identity, snapshot: originalSnapshot, context: offline
+        )
+        expectThrows({
+            _ = try FirmwareLimitWritePermit.authorizeOfflineRestore(
+                identity: identity, snapshot: originalSnapshot,
+                context: FirmwareLimitOfflineRestoreContext(
+                    isAdministrator: true, externalConnected: true,
+                    pmsetReportsBatteryPower: true, batteryPercent: 85,
+                    isCharging: false, userConfirmed: true
+                )
+            )
+        }, "offline restoration refuses AC mismatch")
+        expectThrows({
+            _ = try FirmwareLimitWritePermit.authorizeOfflineRestore(
+                identity: identity, snapshot: originalSnapshot,
+                context: FirmwareLimitOfflineRestoreContext(
+                    isAdministrator: true, externalConnected: false,
+                    pmsetReportsBatteryPower: false, batteryPercent: 85,
+                    isCharging: false, userConfirmed: true
+                )
+            )
+        }, "offline restoration requires pmset confirmation")
+        expectThrows({
+            _ = try FirmwareLimitWritePermit.authorizeOfflineRestore(
+                identity: identity, snapshot: originalSnapshot,
+                context: FirmwareLimitOfflineRestoreContext(
+                    isAdministrator: true, externalConnected: false,
+                    pmsetReportsBatteryPower: true, batteryPercent: 20,
+                    isCharging: false, userConfirmed: true
+                )
+            )
+        }, "offline restoration refuses low battery")
+        expectThrows({
+            _ = try FirmwareLimitWritePermit.authorizeOfflineRestore(
+                identity: identity, snapshot: originalSnapshot,
+                context: FirmwareLimitOfflineRestoreContext(
+                    isAdministrator: true, externalConnected: false,
+                    pmsetReportsBatteryPower: true, batteryPercent: 85,
+                    isCharging: true, userConfirmed: true
+                )
+            )
+        }, "offline restoration refuses contradictory charging telemetry")
+        let oldActive = try FirmwareLimitOriginalStateSnapshot(
+            deviceIdentity: identity,
+            state: FirmwareLimitState(activationByte: 2, upper: 80, lower: 78)
+        )
+        expectThrows({
+            _ = try FirmwareLimitWritePermit.authorizeOfflineRestore(
+                identity: identity, snapshot: oldActive, context: offline
+            )
+        }, "offline restoration refuses originally active state")
+
         let missingFirmware = FirmwareLimitDeviceIdentity(
             modelIdentifier: identity.modelIdentifier,
             systemFirmware: "",

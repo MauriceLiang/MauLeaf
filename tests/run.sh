@@ -83,7 +83,10 @@ if grep -Eq 'componentSetupSection|installBackend|uninstallBackend' "$ROOT/Sourc
     echo "The legacy component installer UI must not return" >&2
     exit 1
 fi
-if grep -RniE 'MAULEAF_INTEL_EXPERIMENTAL|x86_64|macos-15-intel|EXPERIMENTAL.dmg|(^|[^[:alnum:]_])batt([^[:alnum:]_]|$)' \
+# The word "batt" is also the name of Apple's built-in `pmset -g batt`
+# status subcommand. Reject legacy backend symbols and paths above, not this
+# unrelated native battery-read argument.
+if grep -RniE 'MAULEAF_INTEL_EXPERIMENTAL|x86_64|macos-15-intel|EXPERIMENTAL.dmg' \
     "$ROOT/Sources" "$ROOT/Scripts/ci/package-macos.sh" "$ROOT/build.command"; then
     echo "Intel build support must not ship in Preview 5." >&2
     exit 1
@@ -103,6 +106,14 @@ bash -n "$ROOT/Scripts/ci/package-macos.sh"
 bash -n "$ROOT/build.command"
 bash -n "$ROOT/Scripts/install-native-firmware-helper.sh"
 bash -n "$ROOT/Scripts/uninstall-native-firmware-helper.sh"
+# Normal quit must restore first, then stop or remove the native daemon.
+grep -Fq -- '--keep-components' "$ROOT/Scripts/uninstall-native-firmware-helper.sh"
+grep -Fq -- '--remove-components' "$ROOT/Scripts/uninstall-native-firmware-helper.sh"
+grep -Fq 'MODE="keep"' "$ROOT/Scripts/uninstall-native-firmware-helper.sh"
+grep -Fq 'MODE="remove"' "$ROOT/Scripts/uninstall-native-firmware-helper.sh"
+grep -Fq 'launchctl bootout' "$ROOT/Scripts/uninstall-native-firmware-helper.sh"
+grep -A1 '<key>RunAtLoad</key>' "$ROOT/Support/com.local.chargecap.firmware-helper.plist" | grep -Fq '<false/>'
+
 bash -n "$ROOT/Scripts/complete-deferred-uninstall.sh"
 grep -Fq 'complete-deferred-uninstall.sh' "$ROOT/Scripts/install-native-firmware-helper.sh"
 grep -Fq 'complete-deferred-uninstall.sh' "$ROOT/Scripts/ci/package-macos.sh"

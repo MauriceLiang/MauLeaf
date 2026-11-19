@@ -17,6 +17,12 @@ struct MauLeafApp: App {
 }
 #endif
 
+/// Both choices restore the original SMC state before the app can quit.
+enum QuitComponentPolicy: String {
+    case keep = "--keep-components"
+    case remove = "--remove-components"
+}
+
 @MainActor
 final class MauLeafAppDelegate: NSObject, NSApplicationDelegate {
     private var controller: MauLeafMenuController?
@@ -151,8 +157,31 @@ private final class MauLeafMenuController: NSObject {
     }
 
     func prepareForTermination() async -> Bool {
-        let allowed = await manager.prepareForTermination()
-        guard !allowed else { return true }
+        positionPanel()
+        panel.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+
+        let question = NSAlert()
+        question.alertStyle = .informational
+        question.messageText = manager.text("退出时是否保留控制组件？")
+        question.informativeText = manager.text("两种方式都会先恢复并验证原始充电配置，停止后台服务。保留组件便于下次启动；移除组件会删除特权 Helper、LaunchDaemon 和系统脚本，退出后可将 App 移入废纸篓。")
+        question.addButton(withTitle: manager.text("保留组件并退出"))
+        question.addButton(withTitle: manager.text("移除组件并退出"))
+        question.addButton(withTitle: manager.text("取消"))
+        let answer = question.runModal()
+        let policy: QuitComponentPolicy
+        switch answer {
+        case .alertFirstButtonReturn: policy = .keep
+        case .alertSecondButtonReturn: policy = .remove
+        default: return false
+        }
+
+        let restored = await manager.prepareForTermination()
+        var completed = false
+        if restored {
+            completed = await manager.finishQuitComponentCleanup(policy)
+        }
+        guard !completed else { return true }
 
         positionPanel()
         panel.makeKeyAndOrderFront(nil)
@@ -160,13 +189,17 @@ private final class MauLeafMenuController: NSObject {
         startOutsideClickMonitoring()
         manager.setPanelVisible(true)
 
-        // Never hold a user hostage in a menu-bar utility. If even a durable
-        // recovery request could not be written, warn clearly but allow them
-        // to choose to quit anyway (without claiming restoration happened).
+        // An unverified recovery is NOT a successful normal quit. Offer an
+        // explicit emergency choice while preserving the root-owned snapshot
+        // and helper for recovery; never imply Finder deletion is safe.
         let alert = NSAlert()
         alert.alertStyle = .warning
-        alert.messageText = manager.text("无法验证充电限制恢复")
-        alert.informativeText = manager.text("后台恢复请求无法得到确认。仍然退出可能暂时保留固件限充；请在方便时重新接电或使用恢复脚本。")
+        alert.messageText = manager.didVerifyFirmwareOnQuit
+            ? manager.text("固件已恢复，但后台组件未处理完成")
+            : manager.text("无法验证充电限制恢复")
+        alert.informativeText = manager.didVerifyFirmwareOnQuit
+            ? manager.text("原始固件已恢复，但 Helper 停止或脚本清理失败。建议返回应用重试；如果仍然退出，请勿直接删除 App，以免留下系统后台组件。")
+            : manager.text("原始固件配置尚未确认恢复。建议返回应用，连接电源或排查原因后重试退出。如果选择「仍然退出」，后台 Helper 和恢复快照会保留以尝试修复；此时不能直接将 MauLeaf.app 扔进废纸篓，否则可能留下后台服务或限充状态。")
         alert.addButton(withTitle: manager.text("仍然退出"))
         alert.addButton(withTitle: manager.text("返回应用"))
         return alert.runModal() == .alertFirstButtonReturn
@@ -759,12 +792,14 @@ final class ChargeManager: ObservableObject {
     @Published private(set) var restoreReady = false
     @Published var isBusy = false
     @Published private(set) var isPreparingToQuit = false
+    @Published private(set) var didVerifyFirmwareOnQuit = false
     @Published var isError = false
     @Published var showNativeWriteConfirmation = false
     @Published var showLegacyDisableConfirmation = false
 
     private let backend: NativeFirmwareBackend
     private let autoInstallNativeHelper: Bool
+    private let exitLifecycleForTesting: ((QuitComponentPolicy) async throws -> Void)?
     private var helperInstallAttempted = false
     private var started = false
     private var refreshTimer: Timer?
@@ -781,10 +816,12 @@ final class ChargeManager: ObservableObject {
 
     init(
         backend: NativeFirmwareBackend = FirmwareLimitHelperClient(),
-        autoInstallNativeHelper: Bool = true
+        autoInstallNativeHelper: Bool = true,
+        exitLifecycleForTesting: ((QuitComponentPolicy) async throws -> Void)? = nil
     ) {
         self.backend = backend
         self.autoInstallNativeHelper = autoInstallNativeHelper
+        self.exitLifecycleForTesting = exitLifecycleForTesting
         let saved = UserDefaults.standard.integer(forKey: "chargeLimit")
         limit = (50...95).contains(saved) ? saved : 80
     }
@@ -1304,6 +1341,7 @@ final class ChargeManager: ObservableObject {
     func prepareForTermination() async -> Bool {
         guard !isPreparingToQuit else { return false }
         isPreparingToQuit = true
+        didVerifyFirmwareOnQuit = false
         limitDebounce?.cancel()
         limitDebounce = nil
         pendingAction = nil
@@ -1334,9 +1372,10 @@ final class ChargeManager: ObservableObject {
                 guard state.restoreSupported else {
                     return cancelTermination("当前硬件无法安全恢复：\(state.restoreBlockReason ?? "身份校验失败")")
                 }
-                // On battery, the helper atomically persists a recovery request
-                // and returns an AC-power requirement error. We accept exit
-                // after verifying the durable request, without blocking users.
+                // Always attempt exact restoration immediately, including on
+                // battery for the verified M1 Pro firmware profile. If it
+                // cannot finish, the helper persists a recovery request;
+                // normal quit is NOT reported as successful in that case.
                 do {
                     _ = try await backend.restoreOriginalState()
                 } catch {
@@ -1352,8 +1391,25 @@ final class ChargeManager: ObservableObject {
                 && !verifiedOneTime.pending
             let queued = verified.restorePending && !verifiedOneTime.pending
 
-            guard restored || queued else {
-                return cancelTermination("无法确认固件恢复或后台恢复请求已保存。")
+            // Publish the observed pending-restore state even when normal quit
+            // is denied, so the UI accurately reports the retained snapshot
+            // instead of incorrectly showing the pre-exit state.
+            currentState = verified
+            fullOncePending = verifiedOneTime.pending
+            fullOnceCancelRequested = verifiedOneTime.cancelRequested
+            backendReady = verified.writeSupported
+            restoreReady = verified.restoreSupported
+
+            // macOS users normally trash the app after quitting it. Never
+            // treat "recovery queued" as the success path for an ordinary
+            // quit: this may be the last chance for the app to restore its
+            // firmware before the user deletes it. The root helper keeps the
+            // snapshot and background recovery marker if a quit is forced.
+            guard restored else {
+                let detail = queued
+                    ? "固件尚未恢复：已保留后台恢复任务。请连接电源或改善电池状态后重试正常退出；若仍然退出，删除应用前请先确认恢复完成。"
+                    : "无法确认三个固件寄存器已恢复，请勿删除 MauLeaf 或恢复服务。"
+                return cancelTermination(AppText(key: detail))
             }
 
             currentState = verified
@@ -1361,17 +1417,74 @@ final class ChargeManager: ObservableObject {
             fullOnceCancelRequested = false
             backendReady = verified.writeSupported
             restoreReady = verified.restoreSupported
-            modeText = queued ? "等待接电后恢复固件配置" : "限制充电未启用"
-            statusMessage = queued
-                ? "恢复任务已安全保存；MauLeaf 可以立即退出，接电后后台服务会继续恢复。"
-                : "退出前已确认充电限制关闭。"
+            modeText = "限制充电未启用"
+            didVerifyFirmwareOnQuit = true
+            statusMessage = "退出前已将限充恢复至原始固件配置并完成校验。现在可以安全关闭应用。"
             isError = false
+            isBusy = false
+            // The helper still needs to stop or remove its own running
+            // system components before we reply to NSApp that quit is safe.
+            return true
+        } catch {
+            return cancelTermination("退出时无法确认固件恢复状态：\(AppText(error: error))")
+        }
+    }
+
+    /// Never remove any component before normal quit has verified the
+    /// original SMC state. Even when choosing Keep, stop the launchd helper.
+    /// The next application launch can bootstrap the retained files again.
+    func finishQuitComponentCleanup(_ policy: QuitComponentPolicy) async -> Bool {
+        guard isPreparingToQuit, didVerifyFirmwareOnQuit, !isBusy else { return false }
+
+        // A fake callback is used only for deterministic UI tests; production
+        // always executes the privileged bundled helper lifecycle script.
+        if !autoInstallNativeHelper && exitLifecycleForTesting == nil {
+            return true
+        }
+
+        isBusy = true
+        statusMessage = policy == .keep
+            ? "正在停止原生后台服务并保留控制组件…"
+            : "正在停止并移除原生后台服务和脚本…"
+        do {
+            if let exitLifecycleForTesting {
+                try await exitLifecycleForTesting(policy)
+            } else {
+                try await runPrivilegedNativeExitScript(policy: policy)
+            }
             isBusy = false
             refreshTimer?.invalidate()
             refreshTimer = nil
             return true
         } catch {
-            return cancelTermination("退出时无法确认固件恢复状态：\(AppText(error: error))")
+            return cancelTermination("固件已恢复，但无法安全处理后台控制组件：\(AppText(error: error))")
+        }
+    }
+
+    private func runPrivilegedNativeExitScript(policy: QuitComponentPolicy) async throws {
+        guard let resources = Bundle.main.resourceURL?
+            .appendingPathComponent("MauLeafNativeControl", isDirectory: true) else {
+            throw NativeControlError.missingBundledHelper
+        }
+        let script = resources.appendingPathComponent("uninstall-native-firmware-helper.sh")
+        guard FileManager.default.isExecutableFile(atPath: script.path) else {
+            throw NativeControlError.missingBundledHelper
+        }
+        let command = shellQuote(script.path) + " " + shellQuote(policy.rawValue)
+        let escaped = command
+            .replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "\"", with: "\\\"")
+        let result = try await runProcess(
+            path: "/usr/bin/osascript",
+            arguments: ["-e", "do shell script \"\(escaped)\" with administrator privileges"]
+        )
+        guard result.status == 0 else {
+            let detail = result.output.trimmingCharacters(in: .whitespacesAndNewlines)
+            throw NativeControlError.authorizationFailed(
+                detail.isEmpty
+                    ? "管理员授权取消或后台控制组件处理失败（退出码 \(result.status)）"
+                    : detail
+            )
         }
     }
 

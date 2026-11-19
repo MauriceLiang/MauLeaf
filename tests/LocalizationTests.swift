@@ -61,6 +61,14 @@ struct LocalizationTests {
               "adapter idle status is translated")
         check(AppText(key: "unknown detail").localized(in: .english) == "unknown detail",
               "unknown diagnostics are preserved")
+        check(translations["退出时是否保留控制组件？"] == "Keep the native control components when quitting?",
+              "native quit question has an English translation")
+        check(translations["保留组件并退出"] == "Keep components and quit"
+              && translations["移除组件并退出"] == "Remove components and quit",
+              "both quit component lifecycle choices have bilingual labels")
+        check(translations["固件已恢复，但后台组件未处理完成"] != nil,
+              "component cleanup failure is distinguished from unverified firmware")
+
         print("LocalizationTests: PASS (\(checks) checks; real bundled string tables)")
     }
 }

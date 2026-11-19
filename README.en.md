@@ -1,7 +1,7 @@
 [简体中文](README.md) | [English](README.en.md)
 
 > [!CAUTION]
-> **Preview 5 targets Apple Silicon, macOS 15, and the validated MacBookPro18,1 / mBoot-20457.41.3 hardware profile only. Intel builds are discontinued. macOS 26/27 and other unverified environments cannot enable new charging limits. Restoration of a saved original state uses a separate hardware-identity check.**
+> **The native preview targets Apple Silicon, macOS 15, and the validated MacBookPro18,1 / mBoot-20457.41.3 hardware profile only. Intel builds are discontinued. macOS 26/27 and other unverified environments cannot enable new charging limits. Restoration of a saved original state uses a separate hardware-identity check.**
 
 <p align="center">
   <img src="Assets/MauLeafIcon-1024.png" width="128" alt="MauLeaf leaf icon">
@@ -43,8 +43,8 @@ When the limit is enabled for the first time, the root helper reads all three re
 The snapshot is root-owned with mode 0600 and is stored outside the app bundle. Changing the charging limit never overwrites this original snapshot.
 
 - **Disable charging limit:** The helper disables the limit, restores the original upper threshold, resume threshold, and activation byte, then verifies all three values before deleting the snapshot.
-- **Uninstall the native service:** The uninstaller stops MauLeaf and asks the helper to restore the original firmware state. Only after successful verification does it remove the LaunchDaemon, helper, and snapshot.
-- **No AC power:** Normal quit and app removal remain available. The helper saves a durable restore request; a minimal independent root-owned recovery service remains until power returns. After verifying the firmware restore, it automatically removes itself. The app never claims an incomplete restore has succeeded.
+- **Complete uninstall:** After normal app quit, the bundled uninstaller restores the exact original bfF0/bfD0/bfE0 registers on either AC or verified battery-only power, then independently rechecks the SMC state and pending jobs before deleting the app, privileged Helper, LaunchDaemon, recovery files, and every bundled install/uninstall/recovery script.
+- **No AC power:** Immediate full restore is enabled only on the physically verified MacBookPro18,1, mBoot-20457.41.3, macOS 15, arm64. IOKit and pmset must both confirm battery-only supply, battery level must be >=30%, charging inactive, and the original inactive snapshot must be valid. If any step fails, the app, helper, and snapshot are retained for a later safe retry; an incomplete uninstall is never reported as success.
 - **OS upgrades:** Restoration is allowed only when the model, system firmware, and Apple Silicon architecture still match the snapshot. A saved original state can therefore be restored even if the new OS blocks enabling new limits.
 
 **Preview 4 and earlier releases did not save the pre-activation thresholds.** If an upgraded installation has an active limit but no snapshot, MauLeaf displays a migration warning. Disabling that legacy state clears only the activation flag and keeps the current thresholds; the historical values cannot be reconstructed. If Preview 5 is enabled again afterward, those retained values become the new snapshot baseline. They represent the currently readable state, not the true values from before Preview 4.
@@ -82,23 +82,31 @@ Only Apple Silicon arm64 packages are built and published. Intel builds are disc
 - **Change the limit:** Once enabled, the slider and presets apply immediately without overwriting the original snapshot.
 - **Disable charging limit:** Click “Disable charging limit” to restore the three original register values.
 - **One-time full charge:** Available only while a MauLeaf limit is enabled. When the one-time task finishes, the current MauLeaf limit is restored. You can then disable the limit to restore the original snapshot.
-- **Quit normally:** On AC power, restore and verify the original firmware immediately. On battery, save a durable recovery request and allow the app to quit; the root helper resumes restoration when AC power returns. No manual Disable action is required. If the helper or recovery record is unavailable, show a clear warning with a **Quit anyway** option rather than locking the app open. Force Quit, crashes, and unexpected power loss cannot guarantee immediate restoration.
+- **Quit normally:** Choose **Keep components and quit**, **Remove components and quit**, or **Cancel**. Both exit paths restore and verify the original firmware immediately (AC or approved battery-only restore), then stop or remove the privileged helper according to your choice. Failed recovery/cleanup cancels normal quit.
 
-## Uninstall the native service
+## Normal quit: keep or remove native control components
 
-Launch the current MauLeaf app once so its native helper is upgraded, then quit normally. **AC power is not required** to start uninstallation. Run:
+On **Quit** from the menu bar, MauLeaf asks what to do with its native components. All successful normal quits restore and verify the exact pre-MauLeaf `bfF0 / bfD0 / bfE0` values first, whether AC is connected or the validated M1 Pro battery-only safety requirements are met.
 
-    sudo "/Applications/MauLeaf.app/Contents/Resources/MauLeafNativeControl/uninstall-native-firmware-helper.sh"
+| Choice | Firmware | Running helper | System-level scripts and helper | Application |
+| --- | --- | --- | --- | --- |
+| **Keep components and quit** | Restore and verify | Stop | Retain for next launch | Retain |
+| **Remove components and quit** | Restore and verify | Stop | Remove helper, LaunchDaemon, root scripts, markers and log | Retain until moved to Trash in Finder |
+| **Cancel** | No quit transaction | Unchanged | Unchanged | Retain |
 
-When AC is available and restoration succeeds, the helper and data are removed immediately. When unplugged, the uninstaller queues restoration, allows MauLeaf.app to be deleted immediately, and retains only the independent helper and recovery files until AC returns. After verified restoration, a root-owned finalizer removes the service itself. If the hardware identity is incompatible or restoration remains impossible, manual diagnostics may still be needed. Do not manually delete unrecovered snapshots.
+If restoration, privileged authorization, service shutdown, or cleanup fails, normal quit is cancelled and the recovery files are retained. An explicit **Quit anyway** emergency override is not confirmation that cleanup succeeded.
 
-**Remove every background component immediately (high-risk opt-in):** If you do not want any temporary recovery service, you may explicitly discard all recovery records and remove the helper even when unplugged. **Firmware charge limiting may remain active and recovery is not guaranteed.** Only run this if you accept that risk:
+**Keep** stops the installed helper service but keeps its files for next use. On the next launch, macOS may require authorization to bootstrap it again. **Remove** stops and removes the privileged components, then exits; move `/Applications/MauLeaf.app` to Trash to remove the application and its bundled scripts. Moving the application to Trash without executing the normal quit does not run firmware restoration or root-component cleanup.
 
-    sudo "/Applications/MauLeaf.app/Contents/Resources/MauLeafNativeControl/uninstall-native-firmware-helper.sh" --force-remove-without-restore --i-accept-persistent-charge-limit-risk
+## Alternate command-line complete uninstall
 
-The recommended default needs neither option and preserves safe deferred restoration.
+If the application is already closed but you previously kept the native components, this command can safely restore any remaining original snapshot and remove both the app and system-level components:
 
-Preview 4 and earlier releases have no original-state snapshot. When uninstalling one of those legacy states, the script can only deactivate the old charging limit and explicitly reports that the historical thresholds cannot be restored.
+```bash
+sudo "/Applications/MauLeaf.app/Contents/Resources/MauLeafNativeControl/uninstall-native-firmware-helper.sh"
+```
+
+No option skips original-state verification. Legacy pre-snapshot firmware thresholds cannot be reconstructed.
 
 ## Development and tests
 

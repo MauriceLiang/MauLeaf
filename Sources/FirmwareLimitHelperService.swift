@@ -395,10 +395,15 @@ final class FirmwareLimitHelperListener: NSObject, NSXPCListenerDelegate {
         ) { [weak self] in
             guard let self else { return }
             self.stateLock.lock()
-            let shouldExit = self.activeConnections == 0 && self.idleGeneration == generation
-                && !self.service.hasPendingOneTimeCharge
+            let idle = self.activeConnections == 0 && self.idleGeneration == generation
             self.stateLock.unlock()
-            if shouldExit { exit(0) }
+            if idle {
+                if self.service.hasPendingOneTimeCharge {
+                    self.scheduleIdleExit()
+                } else {
+                    exit(0)
+                }
+            }
         }
     }
 

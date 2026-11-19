@@ -83,7 +83,7 @@ The script stops the LaunchDaemon and runs the installed helper in standalone re
 
 If AC power is unavailable or the restore fails, the script retains the snapshot, helper, and LaunchDaemon. When the restore marker exists, it reboots the LaunchDaemon so the background helper can retry after AC power returns. The user can rerun the uninstaller after the restore completes.
 
-Preview 4 and earlier did not persist the original thresholds. If an active legacy limit exists without a snapshot, the helper can only clear the activation byte and preserve the current threshold values. It explicitly reports that the historical original thresholds cannot be reconstructed.
+Preview 4 and earlier did not persist the original thresholds. If an active legacy limit exists without a snapshot, the helper can only clear the activation byte and preserve the current threshold values. It explicitly reports that the historical original thresholds cannot be reconstructed. If the user enables Preview 5 again afterward, those retained values become the new snapshot baseline; they are not the true pre-Preview-4 values.
 
 ## Safety and validation
 

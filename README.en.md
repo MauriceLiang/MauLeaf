@@ -47,7 +47,7 @@ The snapshot is root-owned with mode 0600 and is stored outside the app bundle. 
 - **No AC power or failed restore:** The snapshot and recovery service are retained. The uninstaller does not claim success. The helper retries after AC power returns, and the user can rerun the uninstaller.
 - **OS upgrades:** Restoration is allowed only when the model, system firmware, and Apple Silicon architecture still match the snapshot. A saved original state can therefore be restored even if the new OS blocks enabling new limits.
 
-**Preview 4 and earlier releases did not save the pre-activation thresholds.** If an upgraded installation has an active limit but no snapshot, MauLeaf displays a migration warning. Disabling that legacy state clears only the activation flag and keeps the current thresholds; the historical values cannot be reconstructed.
+**Preview 4 and earlier releases did not save the pre-activation thresholds.** If an upgraded installation has an active limit but no snapshot, MauLeaf displays a migration warning. Disabling that legacy state clears only the activation flag and keeps the current thresholds; the historical values cannot be reconstructed. If Preview 5 is enabled again afterward, those retained values become the new snapshot baseline. They represent the currently readable state, not the true values from before Preview 4.
 
 ## Hardware scope and safety
 

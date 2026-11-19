@@ -243,10 +243,10 @@ private enum FirmwareLimitHelperServiceTests {
         var legacyError: NSString?
         legacyService.restoreOriginalState { data, error in legacyData = data; legacyError = error }
         precondition(legacyError == nil, "legacy Preview 4 limits can be safely deactivated")
-        let legacyResponse = try JSONDecoder().decode(FirmwareLimitHelperOperationResponse.self, from: legacyData! as Data)
-        precondition(!legacyResponse.state.active && legacyTransport.upper == 85 && legacyTransport.lower == 83,
+        let legacyRestoreResponse = try JSONDecoder().decode(FirmwareLimitHelperOperationResponse.self, from: legacyData! as Data)
+        precondition(!legacyRestoreResponse.state.active && legacyTransport.upper == 85 && legacyTransport.lower == 83,
                      "legacy migration only clears the activation flag and never invents original thresholds")
-        precondition(legacyResponse.message.contains("cannot be reconstructed"),
+        precondition(legacyRestoreResponse.message.contains("cannot be reconstructed"),
                      "legacy migration explicitly reports that historical thresholds are unavailable")
 
         print("FirmwareLimitHelperServiceTests: PASS (snapshot, exact restore, deferred restore, legacy migration)")

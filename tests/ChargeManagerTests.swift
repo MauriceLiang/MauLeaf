@@ -71,6 +71,7 @@ private enum ChargeManagerTests {
 
         try await testAutomaticQuitRestore()
         try await testQuitDuringOneTimeFullCharge()
+        try await testUnpluggedManualDisableQueuesRestore()
         try await testUnpluggedQuitQueuesRestore()
         try await testUnpluggedLegacyQuitQueuesDeactivation()
         try await testUnpluggedOneTimeQuitCancelsAndQueuesRestore()
@@ -132,6 +133,24 @@ private enum ChargeManagerTests {
                   "quitting cancels one-time full charge and restores the original pre-activation firmware state")
         try check(backend.cancelCount == 0,
                   "quit never reactivates the current MauLeaf limit through cancelOneTimeCharge")
+    }
+
+    @MainActor
+    private static func testUnpluggedManualDisableQueuesRestore() async throws {
+        let backend = FixtureNativeFirmwareBackend()
+        let manager = try await activatedManager(backend: backend)
+        backend.acConnected = false
+        manager.isAdapterConnected = false
+        try check(manager.canDisableLimit,
+                  "the Disable charging limit button stays usable on battery")
+        manager.disableLimit()
+        try await wait { backend.restoreCount == 1 && !manager.isBusy }
+        try check(manager.restorePending && !manager.isError,
+                  "manual disable on battery queues recovery without pretending firmware is already restored")
+        backend.acConnected = true
+        _ = try await backend.restoreOriginalState()
+        try check(!backend.state.active && !backend.state.hasOriginalStateSnapshot,
+                  "queued manual disable completes when AC power returns")
     }
 
     @MainActor

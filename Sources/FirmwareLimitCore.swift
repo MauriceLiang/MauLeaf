@@ -35,7 +35,7 @@ protocol FirmwareLimitTransport {
     func write(_ key: FirmwareLimitKey, bytes: [UInt8]) throws
 }
 
-struct FirmwareLimitDeviceIdentity: Equatable {
+struct FirmwareLimitDeviceIdentity: Equatable, Codable {
     let modelIdentifier: String
     let systemFirmware: String
     let macOSMajorVersion: Int
@@ -70,6 +70,48 @@ struct FirmwareLimitWritePermit {
             return "Expected arm64; found \(identity.architecture)."
         }
         return nil
+    }
+
+    /// Restoration is narrower than a normal write: it may run after a macOS
+    /// upgrade, but only for the exact model, system firmware, and architecture
+    /// recorded in the snapshot. It can never be used to select a new limit.
+    static func restoreBlockReason(
+        identity: FirmwareLimitDeviceIdentity,
+        snapshotIdentity: FirmwareLimitDeviceIdentity
+    ) -> String? {
+        guard identity.modelIdentifier == "MacBookPro18,1",
+              identity.modelIdentifier == snapshotIdentity.modelIdentifier else {
+            return "The saved state does not belong to this Mac model."
+        }
+        guard identity.systemFirmware == "mBoot-20457.41.3",
+              identity.systemFirmware == snapshotIdentity.systemFirmware else {
+            return "The saved state does not match the current system firmware."
+        }
+        guard identity.architecture == "arm64",
+              identity.architecture == snapshotIdentity.architecture else {
+            return "The saved state does not match the current Apple Silicon architecture."
+        }
+        return nil
+    }
+
+    static func authorizeRestore(
+        identity: FirmwareLimitDeviceIdentity,
+        snapshotIdentity: FirmwareLimitDeviceIdentity,
+        context: FirmwareLimitWriteContext
+    ) throws -> FirmwareLimitWritePermit {
+        guard restoreBlockReason(identity: identity, snapshotIdentity: snapshotIdentity) == nil else {
+            throw FirmwareLimitCoreError.originalStateDeviceMismatch
+        }
+        guard context.isAdministrator else {
+            throw FirmwareLimitCoreError.administratorRequired
+        }
+        guard context.isOnACPower else {
+            throw FirmwareLimitCoreError.externalPowerRequired
+        }
+        guard context.userConfirmed else {
+            throw FirmwareLimitCoreError.confirmationRequired
+        }
+        return FirmwareLimitWritePermit()
     }
 
     static func authorize(
@@ -113,12 +155,52 @@ struct FirmwareLimitRequest: Equatable {
     }
 }
 
-struct FirmwareLimitState: Equatable {
+struct FirmwareLimitState: Equatable, Codable {
     let activationByte: UInt8
     let upper: Int
     let lower: Int
 
     var isActive: Bool { activationByte == 0x02 }
+    var isValid: Bool {
+        (activationByte == 0x00 || activationByte == 0x02)
+            && (5...100).contains(upper)
+            && (5...100).contains(lower)
+            && lower < upper
+    }
+}
+
+/// Captures the exact firmware state before MauLeaf first enables a limit.
+/// This snapshot is root-owned and survives app upgrades and uninstallation.
+struct FirmwareLimitOriginalStateSnapshot: Codable, Equatable {
+    static let currentSchemaVersion = 1
+
+    let schemaVersion: Int
+    let deviceIdentity: FirmwareLimitDeviceIdentity
+    let state: FirmwareLimitState
+    let capturedAt: Date
+    var restoreRequested: Bool
+
+    init(
+        deviceIdentity: FirmwareLimitDeviceIdentity,
+        state: FirmwareLimitState,
+        capturedAt: Date = Date(),
+        restoreRequested: Bool = false
+    ) throws {
+        guard state.isValid, capturedAt.timeIntervalSince1970.isFinite else {
+            throw FirmwareLimitCoreError.invalidOriginalSnapshot
+        }
+        schemaVersion = Self.currentSchemaVersion
+        self.deviceIdentity = deviceIdentity
+        self.state = state
+        self.capturedAt = capturedAt
+        self.restoreRequested = restoreRequested
+    }
+
+    var isValid: Bool {
+        schemaVersion == Self.currentSchemaVersion
+            && state.isValid
+            && capturedAt.timeIntervalSince1970.isFinite
+    }
 }
 
 enum FirmwareLimitStep: Equatable, CustomStringConvertible {
@@ -155,6 +237,9 @@ enum FirmwareLimitCoreError: Error, Equatable, LocalizedError {
     case invalidReadLength(key: String, expected: Int, actual: Int)
     case invalidActivation(UInt8)
     case invalidStoredBand(upper: Int, lower: Int)
+    case invalidOriginalSnapshot
+    case legacyActiveStateWithoutSnapshot
+    case originalStateDeviceMismatch
     case readbackMismatch(key: String, expected: String, actual: String)
     case transportFailure(String)
     case transactionFailed(primary: String, recovery: String)
@@ -175,6 +260,12 @@ enum FirmwareLimitCoreError: Error, Equatable, LocalizedError {
             return String(format: "bfF0 contains an unknown activation value: 0x%02X.", value)
         case .invalidStoredBand(let upper, let lower):
             return "Stored firmware limits are invalid: upper \(upper)%, lower \(lower)%."
+        case .invalidOriginalSnapshot:
+            return "The saved original firmware state is invalid; it will be retained for manual recovery."
+        case .legacyActiveStateWithoutSnapshot:
+            return "An active firmware limit exists without a MauLeaf original-state snapshot. Disable the legacy limit before enabling a new managed limit."
+        case .originalStateDeviceMismatch:
+            return "The saved original firmware state belongs to a different hardware or firmware identity; restoration is blocked."
         case .readbackMismatch(let key, let expected, let actual):
             return "\(key) read-back mismatch: expected \(expected), got \(actual)."
         case .transportFailure(let detail):
@@ -301,6 +392,42 @@ struct FirmwareLimitController {
             throw FirmwareLimitCoreError.transactionFailed(
                 primary: String(describing: error),
                 recovery: recovery
+            )
+        }
+    }
+
+    /// Restores the exact activation byte and thresholds captured before
+    /// MauLeaf first enabled its limit. A failed restore never discards the
+    /// snapshot; the privileged helper can retry it later.
+    func restore(
+        _ original: FirmwareLimitState,
+        permit: FirmwareLimitWritePermit
+    ) throws -> FirmwareLimitState {
+        guard original.isValid else { throw FirmwareLimitCoreError.invalidOriginalSnapshot }
+        let current = try readState()
+        guard current != original else { return current }
+
+        do {
+            try writeAndVerify(.activation, bytes: [0x00])
+            try writeAndVerify(.upper, bytes: FirmwareLimitPolicy.encodeUInt32LittleEndian(original.upper))
+            try writeAndVerify(.lower, bytes: FirmwareLimitPolicy.encodeUInt32LittleEndian(original.lower))
+            try writeAndVerify(.activation, bytes: [original.activationByte])
+            let restored = try readState()
+            guard restored == original else {
+                throw FirmwareLimitCoreError.readbackMismatch(
+                    key: "bfF0/bfD0/bfE0",
+                    expected: "\(original.activationByte) \(original.upper)/\(original.lower)",
+                    actual: "\(restored.activationByte) \(restored.upper)/\(restored.lower)"
+                )
+            }
+            return restored
+        } catch {
+            // Prefer an inactive controller state while the exact original
+            // snapshot remains persisted for the next restoration attempt.
+            try? writeAndVerify(.activation, bytes: [0x00])
+            throw FirmwareLimitCoreError.transactionFailed(
+                primary: String(describing: error),
+                recovery: "the original-state snapshot was retained; restoration must be retried"
             )
         }
     }

@@ -8,6 +8,12 @@ The helper is the only process allowed to perform AppleSMC firmware writes. It i
 
 It runs as root through the LaunchDaemon com.local.chargecap.firmware-helper. The XPC client accepts only the code-signing identifier com.local.chargecap. Intel builds are not produced.
 
+## User-controlled removal policy
+
+Normal Quit and uninstall do not require AC power. When the device is unplugged, the privileged helper writes a durable restoration request (including the activation-only legacy Preview 4 case) and users may immediately exit or remove MauLeaf.app. A standalone root-owned finalizer, installed outside the app bundle, validates that the limit is inactive and all recovery records are gone before removing the helper and LaunchDaemon after AC reconnects. The main app is not needed for deferred cleanup.
+
+If users explicitly refuse even temporary background recovery, the uninstaller offers a documented two-flag forced removal mode. It immediately deletes the service and snapshots after warning that the hardware charge limit may remain in effect, with no guaranteed restoration. This is never the default.
+
 ## Installation and upgrade
 
 On first app launch, MauLeaf checks the native helper connection and protocol version. If the service is missing or an older helper is installed, the app runs the bundled installer with administrator authorization, then verifies the updated helper version before enabling controls.

@@ -17,6 +17,12 @@ struct MauLeafApp: App {
 }
 #endif
 
+/// Both choices restore the original SMC state before the app can quit.
+enum QuitComponentPolicy: String {
+    case keep = "--keep-components"
+    case remove = "--remove-components"
+}
+
 @MainActor
 final class MauLeafAppDelegate: NSObject, NSApplicationDelegate {
     private var controller: MauLeafMenuController?
@@ -151,8 +157,28 @@ private final class MauLeafMenuController: NSObject {
     }
 
     func prepareForTermination() async -> Bool {
-        let allowed = await manager.prepareForTermination()
-        guard !allowed else { return true }
+        positionPanel()
+        panel.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+
+        let question = NSAlert()
+        question.alertStyle = .informational
+        question.messageText = manager.text("退出时是否保留控制组件？")
+        question.informativeText = manager.text("两种方式都会先恢复并验证原始充电配置，停止后台服务。保留组件便于下次启动；移除组件会删除特权 Helper、LaunchDaemon 和系统脚本，退出后可将 App 移入废纸篓。")
+        question.addButton(withTitle: manager.text("保留组件并退出"))
+        question.addButton(withTitle: manager.text("移除组件并退出"))
+        question.addButton(withTitle: manager.text("取消"))
+        let answer = question.runModal()
+        let policy: QuitComponentPolicy
+        switch answer {
+        case .alertFirstButtonReturn: policy = .keep
+        case .alertSecondButtonReturn: policy = .remove
+        default: return false
+        }
+
+        let restored = await manager.prepareForTermination()
+        let completed = restored ? await manager.finishQuitComponentCleanup(policy) : false
+        guard !completed else { return true }
 
         positionPanel()
         panel.makeKeyAndOrderFront(nil)
@@ -1374,11 +1400,61 @@ final class ChargeManager: ObservableObject {
             statusMessage = "退出前已将限充恢复至原始固件配置并完成校验。现在可以安全关闭应用。"
             isError = false
             isBusy = false
+            // The helper still needs to stop or remove its own running
+            // system components before we reply to NSApp that quit is safe.
+            return true
+        } catch {
+            return cancelTermination("退出时无法确认固件恢复状态：\(AppText(error: error))")
+        }
+    }
+
+    /// Never remove any component before normal quit has verified the
+    /// original SMC state. Even when choosing Keep, stop the launchd helper.
+    /// The next application launch can bootstrap the retained files again.
+    func finishQuitComponentCleanup(_ policy: QuitComponentPolicy) async -> Bool {
+        guard isPreparingToQuit, !isBusy else { return false }
+        // Pure in-memory test backends do not install privileged components.
+        guard autoInstallNativeHelper else { return true }
+
+        isBusy = true
+        statusMessage = policy == .keep
+            ? "正在停止原生后台服务并保留控制组件…"
+            : "正在停止并移除原生后台服务和脚本…"
+        do {
+            try await runPrivilegedNativeExitScript(policy: policy)
+            isBusy = false
             refreshTimer?.invalidate()
             refreshTimer = nil
             return true
         } catch {
-            return cancelTermination("退出时无法确认固件恢复状态：\(AppText(error: error))")
+            return cancelTermination("固件已恢复，但无法安全处理后台控制组件：\(AppText(error: error))")
+        }
+    }
+
+    private func runPrivilegedNativeExitScript(policy: QuitComponentPolicy) async throws {
+        guard let resources = Bundle.main.resourceURL?
+            .appendingPathComponent("MauLeafNativeControl", isDirectory: true) else {
+            throw NativeControlError.missingBundledHelper
+        }
+        let script = resources.appendingPathComponent("uninstall-native-firmware-helper.sh")
+        guard FileManager.default.isExecutableFile(atPath: script.path) else {
+            throw NativeControlError.missingBundledHelper
+        }
+        let command = shellQuote(script.path) + " " + shellQuote(policy.rawValue)
+        let escaped = command
+            .replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "\"", with: "\\\"")
+        let result = try await runProcess(
+            path: "/usr/bin/osascript",
+            arguments: ["-e", "do shell script \"\(escaped)\" with administrator privileges"]
+        )
+        guard result.status == 0 else {
+            let detail = result.output.trimmingCharacters(in: .whitespacesAndNewlines)
+            throw NativeControlError.authorizationFailed(
+                detail.isEmpty
+                    ? "管理员授权取消或后台控制组件处理失败（退出码 \(result.status)）"
+                    : detail
+            )
         }
     }
 

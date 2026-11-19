@@ -54,19 +54,19 @@ xcrun swiftc "${FLAGS[@]}" -framework SwiftUI -framework AppKit -framework Combi
   -o "$APP/Contents/MacOS/MauLeaf"
 
 NATIVE="$APP/Contents/Resources/MauLeafNativeControl"
-  mkdir -p "$NATIVE"
-  xcrun swiftc -O -parse-as-library -target arm64-apple-macos13.0 \
-    -framework IOKit -framework Security \
-    Sources/FirmwareLimitCore.swift Sources/FirmwareLimitReconciliation.swift \
-    Sources/BatteryStatusReader.swift Sources/SystemFirmwareReader.swift Sources/FirmwareLimitRuntime.swift Sources/FirmwareLimitSMCTransport.swift \
-    Sources/FirmwareLimitHelperProtocol.swift Sources/FirmwareLimitHelperService.swift \
-    Sources/FirmwareLimitHelperMain.swift \
-    -o "$NATIVE/MauLeafFirmwareHelper"
-  chmod 755 "$NATIVE/MauLeafFirmwareHelper"
-  codesign --force --sign - --identifier com.local.chargecap.firmware-helper "$NATIVE/MauLeafFirmwareHelper"
-  codesign --verify --strict "$NATIVE/MauLeafFirmwareHelper"
-  cp Support/com.local.chargecap.firmware-helper.plist "$NATIVE/"
-  cp Scripts/install-native-firmware-helper.sh Scripts/uninstall-native-firmware-helper.sh "$NATIVE/"
+mkdir -p "$NATIVE"
+xcrun swiftc -O -parse-as-library -target arm64-apple-macos13.0 \
+  -framework IOKit -framework Security \
+  Sources/FirmwareLimitCore.swift Sources/FirmwareLimitReconciliation.swift \
+  Sources/BatteryStatusReader.swift Sources/SystemFirmwareReader.swift Sources/FirmwareLimitRuntime.swift Sources/FirmwareLimitSMCTransport.swift \
+  Sources/FirmwareLimitHelperProtocol.swift Sources/FirmwareLimitHelperService.swift \
+  Sources/FirmwareLimitHelperMain.swift \
+  -o "$NATIVE/MauLeafFirmwareHelper"
+chmod 755 "$NATIVE/MauLeafFirmwareHelper"
+codesign --force --sign - --identifier com.local.chargecap.firmware-helper "$NATIVE/MauLeafFirmwareHelper"
+codesign --verify --strict "$NATIVE/MauLeafFirmwareHelper"
+cp Support/com.local.chargecap.firmware-helper.plist "$NATIVE/"
+cp Scripts/install-native-firmware-helper.sh Scripts/uninstall-native-firmware-helper.sh "$NATIVE/"
 chmod 755 "$NATIVE/"*.sh
 
 xcrun swift Scripts/GenerateAppIcon.swift Assets/MauLeafIcon-1024.png "$STAGE/MauLeaf.iconset"

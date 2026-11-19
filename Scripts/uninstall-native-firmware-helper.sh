@@ -112,6 +112,9 @@ if [[ -e "$SNAPSHOT" || -e "$JOB" || -e "$RESTORE_REQUEST" || -e "$LEGACY_RESTOR
 fi
 /bin/rm -f "$BACKGROUND_RECOVERY" "$DEFERRED_UNINSTALL" "$DEFERRED_SCRIPT"
 /bin/rm -f "$PLIST_TARGET" "$TARGET"
+/bin/rm -f "/var/log/mauleaf-firmware-helper.log"
+# Preserve unexpected files for inspection rather than recursively deleting
+# unknown data. If this directory is not empty, report incomplete cleanup.
 /bin/rmdir "$SUPPORT_DIR" >/dev/null 2>&1 || true
 
 # Remove the application only after the privileged restore has succeeded.
@@ -123,7 +126,8 @@ fi
 /bin/rm -rf "$APP"
 
 if [[ -e "$APP" || -e "$TARGET" || -e "$PLIST_TARGET" \
-      || -e "$DEFERRED_SCRIPT" || -e "$SNAPSHOT" || -e "$RESTORE_REQUEST" ]]; then
+      || -e "$DEFERRED_SCRIPT" || -e "$SNAPSHOT" || -e "$RESTORE_REQUEST" \
+      || -e "$SUPPORT_DIR" || -e "/var/log/mauleaf-firmware-helper.log" ]]; then
   echo "恢复已成功，但部分文件未能移除。请检查权限及残留路径。" >&2
   exit 8
 fi

@@ -24,6 +24,8 @@ final class FixtureNativeFirmwareBackend: NativeFirmwareBackend {
     var failNextApply = false
     var failNextRestore = false
     var failNextRead = false
+    var helperAvailable = true
+    var readCount = 0
     var falselyReportRestoreSuccess = false
     var acConnected = true
     // Simulates the verified target machine with a safe, readable battery
@@ -32,6 +34,8 @@ final class FixtureNativeFirmwareBackend: NativeFirmwareBackend {
     var pendingLegacyRestore = false
 
     func readState() async throws -> FirmwareLimitHelperStateResponse {
+        readCount += 1
+        guard helperAvailable else { throw FirmwareLimitHelperClientError.serviceUnavailable }
         if failNextRead {
             failNextRead = false
             throw FixtureBackendError.injected
@@ -175,6 +179,7 @@ final class FixtureNativeFirmwareBackend: NativeFirmwareBackend {
     }
 
     func oneTimeChargeStatus() async throws -> FirmwareLimitHelperOneTimeStatusResponse {
+        guard helperAvailable else { throw FirmwareLimitHelperClientError.serviceUnavailable }
         FirmwareLimitHelperOneTimeStatusResponse(
             pending: pending,
             restoreUpper: pending ? state.upper : nil,

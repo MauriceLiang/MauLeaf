@@ -35,9 +35,11 @@ if [[ "$(uname -s)" == Darwin ]]; then
     "$TMP/firmwarehelpertests"
 
     swiftc -parse-as-library -D MAULEAF_TESTING \
-        -framework SwiftUI -framework AppKit -framework Combine \
+        -framework SwiftUI -framework AppKit -framework Combine -framework IOKit \
         "$ROOT/Sources/MauLeaf.swift" "$ROOT/Sources/AppLocalization.swift" \
-        "$ROOT/Sources/BatteryStatusReader.swift" "$ROOT/Sources/FirmwareLimitCore.swift" "$ROOT/Sources/FirmwareLimitHelperProtocol.swift" \
+        "$ROOT/Sources/BatteryStatusReader.swift" "$ROOT/Sources/FirmwareLimitCore.swift" \
+        "$ROOT/Sources/FirmwareLimitReconciliation.swift" "$ROOT/Sources/SystemFirmwareReader.swift" "$ROOT/Sources/FirmwareLimitRuntime.swift" \
+        "$ROOT/Sources/FirmwareLimitHelperProtocol.swift" \
         "$ROOT/Sources/FirmwareLimitHelperClient.swift" \
         "$ROOT/tests/NativeFirmwareBackendFixture.swift" "$ROOT/tests/ChargeManagerTests.swift" \
         -o "$TMP/managertests"
@@ -55,9 +57,11 @@ if [[ "$(uname -s)" == Darwin ]]; then
 <?xml version="1.0" encoding="UTF-8"?><plist version="1.0"><dict><key>CFBundleIdentifier</key><string>dev.mauriceliang.MauLeafLayoutTests</string><key>CFBundleExecutable</key><string>layouttests</string><key>CFBundlePackageType</key><string>APPL</string></dict></plist>
 PLIST
     swiftc -parse-as-library -D MAULEAF_TESTING -D MAULEAF_LAYOUT_TESTING \
-        -framework SwiftUI -framework AppKit -framework Combine \
+        -framework SwiftUI -framework AppKit -framework Combine -framework IOKit \
         "$ROOT/Sources/MauLeaf.swift" "$ROOT/Sources/AppLocalization.swift" \
-        "$ROOT/Sources/BatteryStatusReader.swift" "$ROOT/Sources/FirmwareLimitCore.swift" "$ROOT/Sources/FirmwareLimitHelperProtocol.swift" \
+        "$ROOT/Sources/BatteryStatusReader.swift" "$ROOT/Sources/FirmwareLimitCore.swift" \
+        "$ROOT/Sources/FirmwareLimitReconciliation.swift" "$ROOT/Sources/SystemFirmwareReader.swift" "$ROOT/Sources/FirmwareLimitRuntime.swift" \
+        "$ROOT/Sources/FirmwareLimitHelperProtocol.swift" \
         "$ROOT/Sources/FirmwareLimitHelperClient.swift" \
         "$ROOT/tests/NativeFirmwareBackendFixture.swift" "$ROOT/tests/FeedbackLayoutTests.swift" \
         "$ROOT/tests/BatteryRingRenderingTests.swift" -o "$LAYOUT_APP/Contents/MacOS/layouttests"
@@ -134,10 +138,18 @@ bash -n "$ROOT/Scripts/ci/package-macos.sh"
 bash -n "$ROOT/build.command"
 bash -n "$ROOT/Scripts/install-native-firmware-helper.sh"
 bash -n "$ROOT/Scripts/uninstall-native-firmware-helper.sh"
-# Normal quit must restore first, then stop or remove the native daemon.
+# Normal quit restores first; Keep retains launchd registration, Remove needs administrator authorization.
 grep -Fq -- '--keep-components' "$ROOT/Scripts/uninstall-native-firmware-helper.sh"
 grep -Fq -- '--remove-components' "$ROOT/Scripts/uninstall-native-firmware-helper.sh"
 grep -Fq 'MODE="keep"' "$ROOT/Scripts/uninstall-native-firmware-helper.sh"
+# No privilege on launch or read-only refresh, and Keep must never bootout.
+if grep -q 'refreshNativeState(allowInstall:' "$ROOT/Sources/MauLeaf.swift"; then
+    echo "Startup/refresh must remain read-only" >&2
+    exit 1
+fi
+grep -Fq 'Task { await refreshNativeState() }' "$ROOT/Sources/MauLeaf.swift"
+grep -Fq 'private func enableLimitAfterConsent() async' "$ROOT/Sources/MauLeaf.swift"
+grep -Fq 'policy == .remove' "$ROOT/Sources/MauLeaf.swift"
 grep -Fq 'MODE="remove"' "$ROOT/Scripts/uninstall-native-firmware-helper.sh"
 grep -Fq 'launchctl bootout' "$ROOT/Scripts/uninstall-native-firmware-helper.sh"
 grep -A1 '<key>RunAtLoad</key>' "$ROOT/Support/com.local.chargecap.firmware-helper.plist" | grep -Fq '<false/>'

@@ -86,6 +86,23 @@ if grep -Fq 'AppText(verbatim: response.message)' "$ROOT/Sources/MauLeaf.swift";
     exit 1
 fi
 
+# The approved design is a single menu-bar popover, never a full window.
+# Keep the icon/status overview and both inline controls in the same view.
+POPOVER_SOURCE="$(sed -n '/^struct ContentView: View {/,/^\/\/\/ This view overlays the scroll viewport/p' "$ROOT/Sources/MauLeaf.swift")"
+if grep -Fq 'BatteryStatusRing(' <<< "$POPOVER_SOURCE"; then
+    echo "The oversized battery ring must not return to the compact menu-bar overview" >&2
+    exit 1
+fi
+for required in 'manager.popoverPowerStatus' 'manager.popoverLimitStatus' \
+    'manager.popoverFullChargeStatus' 'limitExpanded' 'settingsExpanded' \
+    'manager.cancelFullOnce()' 'manager.beginOneTimeFullCharge()' \
+    'manager.disableLimit()' 'manager.enableLimit()' 'NSApp.terminate(nil)'; do
+    if ! grep -Fq "$required" <<< "$POPOVER_SOURCE"; then
+        echo "Missing a required compact popover state or action: $required" >&2
+        exit 1
+    fi
+done
+
 if grep -Eq 'componentSetupSection|installBackend|uninstallBackend' "$ROOT/Sources/MauLeaf.swift"; then
     echo "The legacy component installer UI must not return" >&2
     exit 1

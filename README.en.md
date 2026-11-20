@@ -1,7 +1,7 @@
 [简体中文](README.md) | [English](README.en.md)
 
 > [!CAUTION]
-> **The native preview targets Apple Silicon, macOS 15, and the validated MacBookPro18,1 / mBoot-20457.41.3 hardware profile only. Intel builds are discontinued. macOS 26/27 and other unverified environments cannot enable new charging limits. Restoration of a saved original state uses a separate hardware-identity check.**
+> **Native firmware writes are currently restricted to Apple Silicon, macOS 15, and the validated MacBookPro18,1 / mBoot-20457.41.3 hardware profile only. Intel builds are discontinued. macOS 26/27 and other unverified environments cannot enable new charging limits. Restoration of a saved original state uses a separate hardware-identity check.**
 
 <p align="center">
   <img src="Assets/MauLeafIcon-1024.png" width="128" alt="MauLeaf leaf icon">
@@ -12,14 +12,14 @@
 <p align="center">A lightweight, native macOS menu-bar charging utility</p>
 
 <p align="center">
-  <a href="https://github.com/MauriceLiang/MauLeaf/releases">Download Preview</a> ·
+  <a href="https://github.com/MauriceLiang/MauLeaf/releases/latest">Download stable release</a> ·
   <a href="CHANGELOG.md">Changelog</a> ·
   <a href="https://github.com/MauriceLiang/MauLeaf/issues">Report an issue</a>
 </p>
 
 MauLeaf keeps only daily charging limits and one-time full charge. The menu bar always displays a green leaf. In the compact popover, click the charging-limit or one-time-full status pill in the top card to turn that feature on or off. Power supply is read-only; expanding Charging Limit only reveals the slider and presets, without a duplicate enable button.
 
-This preview uses MauLeaf's own AppleSMC controller and bundled privileged native service. It contains no batt executable, third-party firmware assets, or third-party control invocations.
+MauLeaf 0.8.0 uses its own AppleSMC controller and bundled privileged native service. It contains no batt executable, third-party firmware assets, or third-party control invocations.
 
 ## Features
 
@@ -62,7 +62,7 @@ The currently validated write target is:
 Before enabling or changing a charging limit, the helper checks the model, firmware, OS, register metadata, AC power, and explicit user consent. Every write is read back; failures trigger an attempt to restore the previous state. New limit writes are blocked without AC power or when the hardware profile does not match.
 
 > [!IMPORTANT]
-> The actual charge-stop and resume percentages still require AC-powered testing on the target M1 Pro. A successful register write and read-back do not prove that the battery will stop charging at the selected percentage. Treat this as a hardware-validation preview, not a verified battery-management release.
+> The actual charge-stop and resume percentages still require AC-powered testing on the target M1 Pro. A successful register write and read-back do not prove that the battery will stop charging at the selected percentage. Version 0.8.0 is a stable distribution milestone, not confirmation of complete hardware qualification; do not rely on unverified charging behavior for critical battery management.
 
 **Opening MauLeaf is read-only and never requests administrator authorization or enables a charge limit.** On the first explicit charging-limit activation, the app installs or upgrades its restricted AppleSMC helper as needed (normally one macOS administrator authorization), then checks the original firmware state before writing. A healthy installed helper is reused for later operations without repeated passwords.
 

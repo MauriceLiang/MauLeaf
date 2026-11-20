@@ -108,6 +108,12 @@ private enum ChargeManagerTests {
         try check(!backend.state.active && !backend.pending && backend.restoreCount == 1,
                   "quitting after manual disable leaves the original firmware state intact")
 
+        try await testFirstLaunchDefersAuthorization()
+        try await testMissingHelperQuitsWithoutAuthorization()
+        try await testUnknownInstalledHelperDoesNotAssumeSafeState()
+        try await testUpgradeRequiresExplicitEnable()
+        try await testOutdatedActiveHelperCanBeRepairedWithoutFirmwareWrite()
+        try await testInstallFailureDoesNotWriteFirmware()
         try await testAutomaticQuitRestore()
         try await testQuitDuringOneTimeFullCharge()
         try await testUnpluggedManualDisableRestoresImmediately()
@@ -125,7 +131,175 @@ private enum ChargeManagerTests {
         try await testUnknownFirmwareStateBlocksQuit()
 
         UserDefaults.standard.removeObject(forKey: "nativeFirmwareWriteConfirmed")
-        print("ChargeManagerTests: PASS (AC/battery quit restore, keep/remove native lifecycle, cleanup-failure protection, manual disable, one-time full and legacy migration)")
+        print("ChargeManagerTests: PASS (deferred first-use install, password-free Keep, safe read-only launch, recovery guards, existing restore and legacy coverage)")
+    }
+
+    @MainActor
+    private static func testFirstLaunchDefersAuthorization() async throws {
+        let backend = FixtureNativeFirmwareBackend()
+        backend.helperAvailable = false
+        var installs = 0
+        let manager = ChargeManager(
+            backend: backend,
+            autoInstallNativeHelper: false,
+            helperInstallerForTesting: {
+                installs += 1
+                backend.helperAvailable = true
+            },
+            helperArtifactsPresent: { false }
+        )
+        UserDefaults.standard.set(false, forKey: "nativeFirmwareWriteConfirmed")
+        manager.start()
+        try await wait { manager.helperNeedsInstallation }
+        try check(installs == 0 && backend.applyCount == 0
+                  && manager.currentState == nil && manager.popoverLimitStatus.source == "未启用",
+                  "launch remains read-only and does not install a privileged helper")
+        manager.isAdapterConnected = true
+        manager.batteryPercent = 50
+        manager.requestLimit(85, immediate: true)
+        try check(installs == 0 && backend.applyCount == 0 && manager.limit == 85,
+                  "setting charging limit before opting in only saves preference")
+        manager.toggleLimitFromCard()
+        try check(manager.showNativeWriteConfirmation && installs == 0,
+                  "first card action requests in-app firmware consent before administrator privileges")
+        manager.confirmNativeWrite()
+        try await wait { installs == 1 && backend.applyCount == 1 && !manager.isBusy }
+        try check(!manager.isError && backend.state.active && manager.hasOriginalStateSnapshot,
+                  "a single authorized helper installation is followed by verified firmware activation")
+        manager.disableLimit()
+        try await wait { backend.restoreCount == 1 && !manager.isBusy }
+        manager.enableLimit()
+        try await wait { backend.applyCount == 2 && !manager.isBusy }
+        try check(installs == 1, "later limit actions reuse the registered helper with no new password")
+        let restored = await manager.prepareForTermination()
+        let kept = await manager.finishQuitComponentCleanup(.keep)
+        try check(restored && kept && installs == 1 && !backend.state.active,
+                  "Keep exit performs exact restoration without re-installing or removing the helper")
+        UserDefaults.standard.removeObject(forKey: "nativeFirmwareWriteConfirmed")
+    }
+
+    @MainActor
+    private static func testMissingHelperQuitsWithoutAuthorization() async throws {
+        let backend = FixtureNativeFirmwareBackend()
+        backend.helperAvailable = false
+        var installs = 0
+        let manager = ChargeManager(
+            backend: backend,
+            autoInstallNativeHelper: false,
+            helperInstallerForTesting: { installs += 1 },
+            helperArtifactsPresent: { false }
+        )
+        manager.start()
+        try await wait { manager.helperNeedsInstallation }
+        let safe = await manager.prepareForTermination()
+        let removed = await manager.finishQuitComponentCleanup(.remove)
+        try check(safe,
+                  "a fresh read-only installation can quit without root state to restore")
+        try check(removed && installs == 0,
+                  "removing a never-installed Helper does not require a password")
+    }
+
+    @MainActor
+    private static func testUnknownInstalledHelperDoesNotAssumeSafeState() async throws {
+        let backend = FixtureNativeFirmwareBackend()
+        backend.helperAvailable = false
+        var installs = 0
+        let manager = ChargeManager(
+            backend: backend,
+            autoInstallNativeHelper: false,
+            helperInstallerForTesting: { installs += 1 },
+            helperArtifactsPresent: { true }
+        )
+        manager.start()
+        try await wait { manager.helperStateUnknown }
+        manager.isAdapterConnected = true
+        try check(!manager.canEnableLimit && manager.popoverLimitStatus.source == "状态未知"
+                  && installs == 0,
+                  "unreachable installed helper or recovery artifacts never masquerade as an inactive limit")
+        let allowed = await manager.prepareForTermination()
+        try check(!allowed && installs == 0,
+                  "unknown firmware state blocks safe quit rather than requesting surprise admin privileges")
+    }
+
+    @MainActor
+    private static func testUpgradeRequiresExplicitEnable() async throws {
+        let backend = FixtureNativeFirmwareBackend()
+        backend.reportedHelperVersion = FirmwareLimitHelperProtocolVersion.current - 1
+        var installs = 0
+        let manager = ChargeManager(
+            backend: backend,
+            autoInstallNativeHelper: false,
+            helperInstallerForTesting: {
+                installs += 1
+                backend.reportedHelperVersion = nil
+            },
+            helperArtifactsPresent: { true }
+        )
+        UserDefaults.standard.set(true, forKey: "nativeFirmwareWriteConfirmed")
+        manager.start()
+        try await wait { manager.helperNeedsUpgrade }
+        try check(installs == 0 && backend.applyCount == 0
+                  && manager.popoverLimitStatus.source == "未启用",
+                  "startup detects stale helper without performing a privileged upgrade")
+        manager.isAdapterConnected = true
+        manager.enableLimit()
+        try await wait { installs == 1 && backend.applyCount == 1 && !manager.isBusy }
+        try check(!manager.isError && backend.state.active && manager.hasOriginalStateSnapshot,
+                  "explicit enable upgrades once, checks new protocol and then writes safely")
+    }
+
+    @MainActor
+    private static func testOutdatedActiveHelperCanBeRepairedWithoutFirmwareWrite() async throws {
+        let backend = FixtureNativeFirmwareBackend()
+        backend.state = FirmwareLimitHelperStateResponse(
+            state: FirmwareLimitState(activationByte: 0x02, upper: 85, lower: 83)
+        )
+        backend.reportedHelperVersion = FirmwareLimitHelperProtocolVersion.current - 1
+        var installs = 0
+        let manager = ChargeManager(
+            backend: backend,
+            autoInstallNativeHelper: false,
+            helperInstallerForTesting: {
+                installs += 1
+                backend.reportedHelperVersion = nil
+            },
+            helperArtifactsPresent: { true }
+        )
+        manager.start()
+        try await wait { manager.helperNeedsUpgrade }
+        try check(manager.canToggleLimitFromCard && !manager.canEnableLimit && installs == 0,
+                  "stale active Helper never auto-upgrades, but offers explicit repair")
+        try check(manager.limitCardActionHint.source == "修复控制服务",
+                  "the card explicitly names the repair action rather than pretending the limit is inactive")
+        manager.toggleLimitFromCard()
+        try await wait { installs == 1 && !manager.isBusy && !manager.helperNeedsUpgrade }
+        try check(backend.applyCount == 0 && backend.state.active
+                  && manager.isLegacyActive && manager.canDisableLegacyLimit,
+                  "manual Helper repair changes no SMC values and restores safe legacy-disable access")
+    }
+
+    @MainActor
+    private static func testInstallFailureDoesNotWriteFirmware() async throws {
+        let backend = FixtureNativeFirmwareBackend()
+        backend.helperAvailable = false
+        var installs = 0
+        let manager = ChargeManager(
+            backend: backend,
+            autoInstallNativeHelper: false,
+            helperInstallerForTesting: {
+                installs += 1
+                throw FixtureBackendError.injected
+            },
+            helperArtifactsPresent: { false }
+        )
+        UserDefaults.standard.set(true, forKey: "nativeFirmwareWriteConfirmed")
+        manager.start()
+        try await wait { manager.helperNeedsInstallation }
+        manager.isAdapterConnected = true
+        manager.enableLimit()
+        try await wait { installs == 1 && manager.isError && !manager.isBusy }
+        try check(backend.applyCount == 0 && manager.helperNeedsInstallation,
+                  "cancelled or failed administrator authorization never writes firmware")
     }
 
     @MainActor
@@ -230,9 +404,9 @@ private enum ChargeManagerTests {
         try check(restored && manager.didVerifyFirmwareOnQuit && actions.isEmpty,
                   "no helper stop or removal occurs before firmware restoration")
         let completed = await manager.finishQuitComponentCleanup(.keep)
-        try check(completed && actions == [.keep] && !backend.state.active
+        try check(completed && actions.isEmpty && !backend.state.active
                   && backend.state.upper == 80 && backend.state.lower == 78,
-                  "keep mode starts only after full unplugged restore and retains files")
+                  "keep mode restores firmware without executing an admin script or unregistering launchd")
     }
 
     @MainActor

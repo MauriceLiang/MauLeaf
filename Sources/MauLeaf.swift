@@ -828,11 +828,16 @@ final class ChargeManager: ObservableObject {
     @Published var isError = false
     @Published var showNativeWriteConfirmation = false
     @Published var showLegacyDisableConfirmation = false
+    @Published private(set) var helperNeedsInstallation = false
+    @Published private(set) var helperNeedsUpgrade = false
+    @Published private(set) var helperStateUnknown = false
 
     private let backend: NativeFirmwareBackend
     private let autoInstallNativeHelper: Bool
     private let exitLifecycleForTesting: ((QuitComponentPolicy) async throws -> Void)?
-    private var helperInstallAttempted = false
+    private let helperInstallerForTesting: (() async throws -> Void)?
+    private let helperArtifactsPresent: () -> Bool
+    private let hardwareWriteBlockReason: String?
     private var started = false
     private var refreshTimer: Timer?
     private var limitDebounce: Task<Void, Never>?
@@ -849,11 +854,32 @@ final class ChargeManager: ObservableObject {
     init(
         backend: NativeFirmwareBackend = FirmwareLimitHelperClient(),
         autoInstallNativeHelper: Bool = true,
-        exitLifecycleForTesting: ((QuitComponentPolicy) async throws -> Void)? = nil
+        exitLifecycleForTesting: ((QuitComponentPolicy) async throws -> Void)? = nil,
+        helperInstallerForTesting: (() async throws -> Void)? = nil,
+        helperArtifactsPresent: @escaping () -> Bool = {
+            let fs = FileManager.default
+            return [
+                "/Library/PrivilegedHelperTools/com.local.chargecap.firmware-helper",
+                "/Library/LaunchDaemons/com.local.chargecap.firmware-helper.plist",
+                "/Library/Application Support/MauLeaf"
+            ].contains { fs.fileExists(atPath: $0) }
+        },
+        hardwarePreflightForTesting: (() -> String?)? = nil
     ) {
         self.backend = backend
         self.autoInstallNativeHelper = autoInstallNativeHelper
         self.exitLifecycleForTesting = exitLifecycleForTesting
+        self.helperInstallerForTesting = helperInstallerForTesting
+        self.helperArtifactsPresent = helperArtifactsPresent
+        if let hardwarePreflightForTesting {
+            self.hardwareWriteBlockReason = hardwarePreflightForTesting()
+        } else if autoInstallNativeHelper {
+            self.hardwareWriteBlockReason = FirmwareLimitWritePermit.targetBlockReason(
+                identity: FirmwareLimitRuntime.identity()
+            )
+        } else {
+            self.hardwareWriteBlockReason = nil
+        }
         let saved = UserDefaults.standard.integer(forKey: "chargeLimit")
         limit = (50...95).contains(saved) ? saved : 80
     }
@@ -887,6 +913,16 @@ final class ChargeManager: ObservableObject {
     }
 
     var popoverLimitStatus: AppText {
+        if helperStateUnknown { return "状态未知" }
+        if helperNeedsUpgrade {
+            // For a known inactive old helper, the first click still means
+            // Enable (and upgrades the helper first). Do not label it as an
+            // update-only action when it would also modify AppleSMC.
+            if currentState?.active == false && !hasOriginalStateSnapshot && !restorePending {
+                return "未启用"
+            }
+            return "需要更新"
+        }
         if restorePending { return "等待恢复" }
         if isLegacyActive { return "旧版限充" }
         if fullOncePending && hasOriginalStateSnapshot {
@@ -941,9 +977,14 @@ final class ChargeManager: ObservableObject {
     }
 
     var canEnableLimit: Bool {
-        backendReady && currentState != nil && currentState?.active == false
-            && !hasOriginalStateSnapshot && !restorePending && isAdapterConnected
-            && !isBusy && !isPreparingToQuit && !fullOncePending
+        let clean = currentState?.active == false && !hasOriginalStateSnapshot
+            && !restorePending && !fullOncePending
+        let needsFirstInstall = helperNeedsInstallation && currentState == nil && !helperArtifactsPresent()
+        let needsExplicitUpgrade = helperNeedsUpgrade && clean
+        return isAdapterConnected && !isBusy && !isPreparingToQuit && !fullOncePending
+            && ((clean && backendReady) || (
+                hardwareWriteBlockReason == nil && (needsFirstInstall || needsExplicitUpgrade)
+            ))
     }
 
     var canDisableLimit: Bool {
@@ -966,8 +1007,17 @@ final class ChargeManager: ObservableObject {
             && isAdapterConnected && !isBusy && !isPreparingToQuit && !fullOncePending
     }
 
+    /// A stale/unknown installed Helper can be repaired explicitly without
+    /// enabling a limit. This is essential when an older version was active.
+    var canRepairNativeHelper: Bool {
+        (helperNeedsUpgrade || helperStateUnknown) && helperArtifactsPresent()
+            && !isBusy && !isPreparingToQuit
+            && !(helperNeedsUpgrade && canEnableLimit)
+    }
+
     /// All card actions reuse the existing hardware and restore safeguards.
     var canToggleLimitFromCard: Bool {
+        if canRepairNativeHelper { return true }
         if isLegacyActive { return canDisableLegacyLimit }
         if hasOriginalStateSnapshot || restorePending {
             return canDisableLimit || canRetryOriginalRestore
@@ -976,6 +1026,7 @@ final class ChargeManager: ObservableObject {
     }
 
     var limitCardActionHint: AppText {
+        if canRepairNativeHelper { return "修复控制服务" }
         if isLegacyActive { return "停用旧版限制" }
         if restorePending || (hasOriginalStateSnapshot && currentState?.active != true && !fullOncePending) {
             return "恢复原始配置"
@@ -985,7 +1036,9 @@ final class ChargeManager: ObservableObject {
 
     func toggleLimitFromCard() {
         guard canToggleLimitFromCard else { return }
-        if isLegacyActive {
+        if canRepairNativeHelper {
+            Task { await repairNativeHelperAfterUserAction() }
+        } else if isLegacyActive {
             requestLegacyDisableConfirmation()
         } else if hasOriginalStateSnapshot || restorePending {
             disableLimit()
@@ -1018,12 +1071,12 @@ final class ChargeManager: ObservableObject {
         guard !started else { return }
         started = true
         readSystemBattery()
-        Task { await refreshNativeState(allowInstall: true) }
+        Task { await refreshNativeState() }
         refreshTimer = Timer.scheduledTimer(withTimeInterval: 20, repeats: true) { [weak self] _ in
             Task { @MainActor in
                 guard let self, !self.isBusy else { return }
                 self.readSystemBattery()
-                await self.refreshNativeState(allowInstall: false)
+                await self.refreshNativeState()
             }
         }
     }
@@ -1036,45 +1089,55 @@ final class ChargeManager: ObservableObject {
         guard !isPreparingToQuit else { return }
         readSystemBattery()
         guard started, !isBusy else { return }
-        Task { await refreshNativeState(allowInstall: false) }
+        Task { await refreshNativeState() }
     }
 
-    private func refreshNativeState(allowInstall: Bool) async {
+    private func refreshNativeState() async {
         guard !isPreparingToQuit, !isBusy else { return }
         do {
-            let initialState = try await backend.readState()
-            let state = try await ensureCurrentNativeHelper(initialState, allowInstall: allowInstall)
-            let oneTime = try await backend.oneTimeChargeStatus()
-            updateFromNativeState(state, oneTime: oneTime, status: "已读取原生固件状态。")
-        } catch {
-            if allowInstall, autoInstallNativeHelper, !helperInstallAttempted, isHelperUnavailable(error) {
-                helperInstallAttempted = true
-                isBusy = true
-                statusMessage = "正在启用 MauLeaf 原生固件服务，需要一次管理员授权…"
-                do {
-                    try await installNativeHelper()
-                    let state = try await backend.readState()
-                    let oneTime = try await backend.oneTimeChargeStatus()
-                    updateFromNativeState(state, oneTime: oneTime, status: "MauLeaf 原生固件服务已启用。")
-                    isBusy = false
-                    return
-                } catch {
-                    isBusy = false
-                    backendReady = false
-                    restoreReady = false
-                    currentState = nil
-                    modeText = "原生固件服务未启用"
-                    statusMessage = "无法启用原生固件服务：\(AppText(error: error))"
-                    isError = true
-                    return
-                }
+            let state = try await backend.readState()
+            guard !isPreparingToQuit else { return }
+            if state.helperVersion < FirmwareLimitHelperProtocolVersion.current {
+                // Never silently reinstall root code on launch or timer refresh.
+                currentState = state
+                helperNeedsInstallation = false
+                helperNeedsUpgrade = true
+                helperStateUnknown = false
+                backendReady = false
+                restoreReady = false
+                modeText = "原生控制服务需要更新"
+                statusMessage = state.active || state.hasOriginalStateSnapshot || state.restorePending
+                    ? "旧版控制服务存在未确认的限充或恢复状态，请勿移除恢复组件。"
+                    : "点击启用限制充电时才会申请管理员授权更新服务。"
+                isError = state.active || state.hasOriginalStateSnapshot || state.restorePending
+                return
             }
+            let once = try await backend.oneTimeChargeStatus()
+            guard !isPreparingToQuit else { return }
+            updateFromNativeState(state, oneTime: once, status: "已读取原生固件状态。")
+        } catch {
+            guard !isPreparingToQuit else { return }
             backendReady = false
             restoreReady = false
-            currentState = nil
-            modeText = "原生固件控制不可用"
-            statusMessage = AppText(error: error)
-            isError = true
+            helperNeedsUpgrade = false
+            if isHelperUnavailable(error) && !helperArtifactsPresent() {
+                // First launch, no Helper or root-owned recovery files.
+                helperNeedsInstallation = true
+                helperStateUnknown = false
+                currentState = nil
+                fullOncePending = false
+                fullOnceCancelRequested = false
+                modeText = "限制充电未启用"
+                statusMessage = "未安装原生固件控制服务；点击启用限制充电时再请求授权。"
+                isError = false
+            } else {
+                // Connection failure with existing files is NOT clean state.
+                helperNeedsInstallation = false
+                helperStateUnknown = true
+                modeText = "固件控制状态未知"
+                statusMessage = "无法连接固件控制服务；请保留恢复组件：\(AppText(error: error))"
+                isError = true
+            }
         }
     }
 
@@ -1084,6 +1147,9 @@ final class ChargeManager: ObservableObject {
         status: AppText
     ) {
         currentState = state
+        helperNeedsInstallation = false
+        helperNeedsUpgrade = false
+        helperStateUnknown = false
         fullOncePending = oneTime.pending
         fullOnceCancelRequested = oneTime.cancelRequested
         backendReady = state.writeSupported
@@ -1136,32 +1202,6 @@ final class ChargeManager: ObservableObject {
             }
             isError = false
         }
-    }
-
-    private func ensureCurrentNativeHelper(
-        _ state: FirmwareLimitHelperStateResponse,
-        allowInstall: Bool
-    ) async throws -> FirmwareLimitHelperStateResponse {
-        let required = FirmwareLimitHelperProtocolVersion.current
-        guard state.helperVersion < required else { return state }
-        guard allowInstall, autoInstallNativeHelper, !helperInstallAttempted else {
-            throw NativeControlError.outdatedHelper(found: state.helperVersion, required: required)
-        }
-
-        helperInstallAttempted = true
-        isBusy = true
-        statusMessage = "检测到旧版 MauLeaf 原生固件服务，正在更新，需要管理员授权…"
-        defer { isBusy = false }
-        try await installNativeHelper()
-
-        let updated = try await backend.readState()
-        guard updated.helperVersion >= required else {
-            throw NativeControlError.helperUpgradeFailed(
-                found: updated.helperVersion,
-                required: required
-            )
-        }
-        return updated
     }
 
     private func isHelperUnavailable(_ error: Error) -> Bool {
@@ -1237,6 +1277,37 @@ final class ChargeManager: ObservableObject {
         }
     }
 
+    /// Explicit recovery of an installed but outdated/unreachable Helper.
+    /// No charging-limit write occurs in this path.
+    private func repairNativeHelperAfterUserAction() async {
+        guard canRepairNativeHelper else { return }
+        isBusy = true
+        isError = false
+        statusMessage = "正在修复原生控制服务，需要管理员授权…"
+        do {
+            if let helperInstallerForTesting {
+                try await helperInstallerForTesting()
+            } else {
+                try await installNativeHelper()
+            }
+            let state = try await backend.readState()
+            guard state.helperVersion >= FirmwareLimitHelperProtocolVersion.current else {
+                throw NativeControlError.helperUpgradeFailed(
+                    found: state.helperVersion,
+                    required: FirmwareLimitHelperProtocolVersion.current
+                )
+            }
+            let once = try await backend.oneTimeChargeStatus()
+            updateFromNativeState(state, oneTime: once, status: "原生控制服务已修复。")
+            isBusy = false
+        } catch {
+            isBusy = false
+            await refreshNativeState()
+            statusMessage = "无法修复原生控制服务：\(AppText(error: error))"
+            isError = true
+        }
+    }
+
     func enableLimit() {
         guard canEnableLimit else {
             statusMessage = isAdapterConnected
@@ -1251,7 +1322,51 @@ final class ChargeManager: ObservableObject {
             return
         }
         lastAction = .enable
-        Task { await applyLimit(limit) }
+        Task { await enableLimitAfterConsent() }
+    }
+
+    /// The only privileged install/upgrade trigger is explicit opt-in.
+    private func enableLimitAfterConsent() async {
+        guard canEnableLimit else { return }
+        if helperNeedsInstallation || helperNeedsUpgrade {
+            isBusy = true
+            isError = false
+            statusMessage = "正在安装或更新原生固件服务，需要管理员授权…"
+            do {
+                if let helperInstallerForTesting {
+                    try await helperInstallerForTesting()
+                } else {
+                    try await installNativeHelper()
+                }
+                // Re-read real firmware before any write, even after install.
+                let state = try await backend.readState()
+                guard state.helperVersion >= FirmwareLimitHelperProtocolVersion.current else {
+                    throw NativeControlError.helperUpgradeFailed(
+                        found: state.helperVersion,
+                        required: FirmwareLimitHelperProtocolVersion.current
+                    )
+                }
+                let once = try await backend.oneTimeChargeStatus()
+                updateFromNativeState(state, oneTime: once, status: "原生控制服务已就绪。")
+                guard state.writeSupported, !state.active, !state.hasOriginalStateSnapshot,
+                      !state.restorePending, !once.pending else {
+                    throw NativeControlError.unsafeStateAfterInstall
+                }
+            } catch {
+                isBusy = false
+                await refreshNativeState()
+                statusMessage = "无法准备原生控制服务：\(AppText(error: error))"
+                isError = true
+                return
+            }
+            isBusy = false
+        }
+        guard canEnableLimit else {
+            statusMessage = "无法确认固件控制状态，未写入充电限制。"
+            isError = true
+            return
+        }
+        await applyLimit(limit)
     }
 
     func disableLimit() {
@@ -1304,7 +1419,7 @@ final class ChargeManager: ObservableObject {
             isError = false
         } catch {
             isBusy = false
-            await refreshNativeState(allowInstall: false)
+            await refreshNativeState()
             if restorePending && !fullOncePending {
                 modeText = "等待接电后恢复固件配置"
                 statusMessage = "已提交持久恢复请求，接入电源后后台服务会自动恢复。"
@@ -1335,7 +1450,7 @@ final class ChargeManager: ObservableObject {
         switch action {
         case .enable:
             lastAction = .enable
-            Task { await applyLimit(limit) }
+            Task { await enableLimitAfterConsent() }
         case .limit(let value):
             lastAction = .limit(value)
             Task { await applyLimit(value) }
@@ -1446,8 +1561,7 @@ final class ChargeManager: ObservableObject {
     func retryChargeRequest() {
         guard canRetryChargeRequest else { return }
         if !backendReady {
-            helperInstallAttempted = false
-            Task { await refreshNativeState(allowInstall: true) }
+            Task { await refreshNativeState() }
             return
         }
         switch lastAction {
@@ -1487,8 +1601,18 @@ final class ChargeManager: ObservableObject {
         statusMessage = "退出前正在核对固件状态并提交恢复请求…"
 
         do {
-            let initial = try await backend.readState()
-            let state = try await ensureCurrentNativeHelper(initial, allowInstall: true)
+            if currentState == nil && !helperArtifactsPresent() {
+                // No root helper or saved recovery artifacts to restore.
+                didVerifyFirmwareOnQuit = true
+                statusMessage = "未安装控制组件，无须恢复固件。"
+                isError = false
+                isBusy = false
+                return true
+            }
+            let state = try await backend.readState()
+            guard state.helperVersion >= FirmwareLimitHelperProtocolVersion.current else {
+                return cancelTermination("控制服务版本过旧；退出不会自动授权升级。")
+            }
             let oneTime = try await backend.oneTimeChargeStatus()
             let needsRestore = state.active || state.hasOriginalStateSnapshot
                 || state.restorePending || oneTime.pending
@@ -1555,28 +1679,20 @@ final class ChargeManager: ObservableObject {
         }
     }
 
-    /// Never remove any component before normal quit has verified the
-    /// original SMC state. Even when choosing Keep, stop the launchd helper.
-    /// The next application launch can bootstrap the retained files again.
+    /// Keep the launchd MachService registered for password-free relaunch.
+    /// Its root process self-exits after 20s idle with no pending recovery.
     func finishQuitComponentCleanup(_ policy: QuitComponentPolicy) async -> Bool {
         guard isPreparingToQuit, didVerifyFirmwareOnQuit, !isBusy else { return false }
-
-        // A fake callback is used only for deterministic UI tests; production
-        // always executes the privileged bundled helper lifecycle script.
-        if !autoInstallNativeHelper && exitLifecycleForTesting == nil {
-            return true
-        }
-
         isBusy = true
-        statusMessage = policy == .keep
-            ? "正在停止原生后台服务并保留控制组件…"
-            : "正在停止并移除原生后台服务和脚本…"
         do {
-            if let exitLifecycleForTesting {
-                try await exitLifecycleForTesting(policy)
-            } else {
-                try await runPrivilegedNativeExitScript(policy: policy)
+            if policy == .remove {
+                if let exitLifecycleForTesting {
+                    try await exitLifecycleForTesting(policy)
+                } else if autoInstallNativeHelper && helperArtifactsPresent() {
+                    try await runPrivilegedNativeExitScript(policy: .remove)
+                }
             }
+            // Keep needs no root script, no launchctl bootout, no password.
             isBusy = false
             refreshTimer?.invalidate()
             refreshTimer = nil
@@ -1672,6 +1788,7 @@ private enum NativeControlError: LocalizedError {
     case authorizationFailed(String)
     case outdatedHelper(found: Int, required: Int)
     case helperUpgradeFailed(found: Int, required: Int)
+    case unsafeStateAfterInstall
 
     var errorDescription: String? {
         switch self {
@@ -1679,6 +1796,8 @@ private enum NativeControlError: LocalizedError {
             return "应用包中缺少 MauLeaf 原生固件服务文件，请重新安装预览版。"
         case .authorizationFailed(let detail):
             return detail
+        case .unsafeStateAfterInstall:
+            return "安装后的服务存在活动限充或待恢复任务，拒绝覆盖固件状态。"
         case .outdatedHelper(let found, let required):
             return "MauLeaf 原生固件服务版本过旧（当前协议版本 \(found)，需要 \(required)），请重新启动应用并允许更新服务。"
         case .helperUpgradeFailed(let found, let required):

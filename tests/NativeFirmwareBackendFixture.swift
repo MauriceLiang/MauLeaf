@@ -24,6 +24,9 @@ final class FixtureNativeFirmwareBackend: NativeFirmwareBackend {
     var failNextApply = false
     var failNextRestore = false
     var failNextRead = false
+    var helperAvailable = true
+    var reportedHelperVersion: Int?
+    var readCount = 0
     var falselyReportRestoreSuccess = false
     var acConnected = true
     // Simulates the verified target machine with a safe, readable battery
@@ -32,9 +35,20 @@ final class FixtureNativeFirmwareBackend: NativeFirmwareBackend {
     var pendingLegacyRestore = false
 
     func readState() async throws -> FirmwareLimitHelperStateResponse {
+        readCount += 1
+        guard helperAvailable else { throw FirmwareLimitHelperClientError.serviceUnavailable }
         if failNextRead {
             failNextRead = false
             throw FixtureBackendError.injected
+        }
+        if let reportedHelperVersion {
+            let data = try JSONEncoder().encode(state)
+            var body = try JSONSerialization.jsonObject(with: data) as! [String: Any]
+            body["helperVersion"] = reportedHelperVersion
+            return try JSONDecoder().decode(
+                FirmwareLimitHelperStateResponse.self,
+                from: JSONSerialization.data(withJSONObject: body)
+            )
         }
         return state
     }
@@ -175,7 +189,8 @@ final class FixtureNativeFirmwareBackend: NativeFirmwareBackend {
     }
 
     func oneTimeChargeStatus() async throws -> FirmwareLimitHelperOneTimeStatusResponse {
-        FirmwareLimitHelperOneTimeStatusResponse(
+        guard helperAvailable else { throw FirmwareLimitHelperClientError.serviceUnavailable }
+        return FirmwareLimitHelperOneTimeStatusResponse(
             pending: pending,
             restoreUpper: pending ? state.upper : nil,
             deadlineUnixSeconds: pending ? Date().addingTimeInterval(3600).timeIntervalSince1970 : nil,

@@ -64,25 +64,25 @@ Before enabling or changing a charging limit, the helper checks the model, firmw
 > [!IMPORTANT]
 > The actual charge-stop and resume percentages still require AC-powered testing on the target M1 Pro. A successful register write and read-back do not prove that the battery will stop charging at the selected percentage. Treat this as a hardware-validation preview, not a verified battery-management release.
 
-On first launch, the app requests administrator authorization to install MauLeaf's own AppleSMC privileged service. The service is built from this repository and does not expose a generic SMC write interface.
+**Opening MauLeaf is read-only and never requests administrator authorization or enables a charge limit.** On the first explicit charging-limit activation, the app installs or upgrades its restricted AppleSMC helper as needed (normally one macOS administrator authorization), then checks the original firmware state before writing. A healthy installed helper is reused for later operations without repeated passwords.
 
 ## Installation
 
 1. Download MauLeaf-<version>-macos-arm64.dmg from [GitHub Releases](https://github.com/MauriceLiang/MauLeaf/releases).
 2. Drag MauLeaf.app into Applications and launch it.
-3. On first launch, approve installation of the MauLeaf native firmware service when macOS asks.
-4. Select a charging limit, connect AC power, and click “Enable charging limit”.
+3. Open the app without entering a password. You can inspect power status and set a local charge-limit preference.
+4. To activate charging limits for the first time, connect AC power, click the **Disabled** status pill in the top card, confirm, and authorize helper installation when prompted by macOS.
 
 Only Apple Silicon arm64 packages are built and published. Intel builds are discontinued.
 
 ## Everyday use
 
 - **While disabled:** Moving the slider or choosing a preset only saves the local preference; no firmware register is written.
-- **Enable charging limit:** Click the prominent “Enable charging limit” button. The first hardware write requires explicit confirmation, and the helper saves the original snapshot first.
+- **Enable charging limit:** Click **Disabled** in the top status card. Only the first opt-in may request administrator authorization to install or update the native Helper. The first hardware write still requires explicit confirmation and saves an original-state snapshot.
 - **Change the limit:** Once enabled, the slider and presets apply immediately without overwriting the original snapshot.
 - **Disable charging limit:** Click “Disable charging limit” to restore the three original register values.
 - **One-time full charge:** Available only while a MauLeaf limit is enabled. When the one-time task finishes, the current MauLeaf limit is restored. You can then disable the limit to restore the original snapshot.
-- **Quit normally:** Choose **Keep components and quit**, **Remove components and quit**, or **Cancel**. Both exit paths restore and verify the original firmware immediately (AC or approved battery-only restore), then stop or remove the privileged helper according to your choice. Failed recovery/cleanup cancels normal quit.
+- **Quit normally:** Choose **Keep components and quit**, **Remove components and quit**, or **Cancel**. Both paths restore and verify original firmware first. Keep preserves the registered on-demand service without an administrator prompt; Remove asks for authorization only when deleting installed privileged components. Failed recovery/cleanup cancels normal quit.
 
 ## Normal quit: keep or remove native control components
 
@@ -90,13 +90,13 @@ On **Quit** from the menu bar, MauLeaf asks what to do with its native component
 
 | Choice | Firmware | Running helper | System-level scripts and helper | Application |
 | --- | --- | --- | --- | --- |
-| **Keep components and quit** | Restore and verify | Stop | Retain for next launch | Retain |
+| **Keep components and quit** | Restore and verify | Exits after idle timeout | Retain files and launchd registration | Retain |
 | **Remove components and quit** | Restore and verify | Stop | Remove helper, LaunchDaemon, root scripts, markers and log | Retain until moved to Trash in Finder |
 | **Cancel** | No quit transaction | Unchanged | Unchanged | Retain |
 
 If restoration, privileged authorization, service shutdown, or cleanup fails, normal quit is cancelled and the recovery files are retained. An explicit **Quit anyway** emergency override is not confirmation that cleanup succeeded.
 
-**Keep** stops the installed helper service but keeps its files for next use. On the next launch, macOS may require authorization to bootstrap it again. **Remove** stops and removes the privileged components, then exits; move `/Applications/MauLeaf.app` to Trash to remove the application and its bundled scripts. Moving the application to Trash without executing the normal quit does not run firmware restoration or root-component cleanup.
+**Keep** preserves the installed launchd MachService registration. With no pending recovery the Helper automatically exits after approximately 20 idle seconds, then starts on demand at the next app launch without another administrator password. **Remove** stops and removes the privileged components, then exits; move `/Applications/MauLeaf.app` to Trash to remove the application and its bundled scripts. Moving the application to Trash without executing the normal quit does not run firmware restoration or root-component cleanup.
 
 ## Alternate command-line complete uninstall
 

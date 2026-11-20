@@ -16,7 +16,7 @@ If users explicitly refuse even temporary background recovery, the uninstaller o
 
 ## Installation and upgrade
 
-On first app launch, MauLeaf checks the native helper connection and protocol version. If the service is missing or an older helper is installed, the app runs the bundled installer with administrator authorization, then verifies the updated helper version before enabling controls.
+On app launch, MauLeaf performs read-only battery and helper state checks without administrator authorization. If no helper or recovery artifacts exist, battery display and local charge-limit preferences still work. The bundled installer runs only after the user explicitly clicks to enable a charging limit and confirms the firmware action. A stale helper is upgraded on that same explicit action, followed by a fresh XPC firmware state read before any write. If an installed helper is unreachable, the app does not silently install or claim the hardware limit is inactive.
 
 The installer validates the helper's code-signing identifier and existing LaunchDaemon metadata. It upgrades only an existing helper whose label, path, and signing identifier all match MauLeaf; unrelated same-name services are not overwritten. Snapshot and pending recovery files are preserved during helper upgrades.
 
@@ -80,6 +80,8 @@ The one-time full-charge job remains separate:
 One-time completion restores the current MauLeaf limit; disabling MauLeaf restores the original pre-MauLeaf state instead.
 
 ## Normal app quit and uninstallation
+
+Normal app termination is a verified restore transaction. In Keep mode, the app retains the registered launchd MachService (no bootout and no administrator script) and the helper self-exits after its existing 20-second idle timeout, unless recovery is pending. In Remove mode, the app requests administrator authorization to delete installed privileged components only after verified restoration. On a fresh system with no helper or recovery artifacts, quitting needs no administrator authorization.
 
 Normal app termination is now treated as a verified restore transaction. The app waits for any in-flight firmware operation to finish, invokes the privileged restore operation if a managed snapshot, active limit, or one-time full-charge job exists, and then performs independent state and job read-back. It asks macOS to terminate only when the firmware limit is inactive and both the recovery snapshot and one-time task have been cleared. On failure or missing AC power, the app cancels normal termination and displays an error; the root-owned snapshot and background recovery mechanisms remain available. Legacy Preview 4 states without an original snapshot can only have the activation flag cleared, never historical thresholds reconstructed. Force Quit, crash, and sudden power loss can bypass graceful termination and do not guarantee immediate restoration.
 

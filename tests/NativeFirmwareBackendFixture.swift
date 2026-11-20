@@ -25,6 +25,7 @@ final class FixtureNativeFirmwareBackend: NativeFirmwareBackend {
     var failNextRestore = false
     var failNextRead = false
     var helperAvailable = true
+    var reportedHelperVersion: Int?
     var readCount = 0
     var falselyReportRestoreSuccess = false
     var acConnected = true
@@ -39,6 +40,15 @@ final class FixtureNativeFirmwareBackend: NativeFirmwareBackend {
         if failNextRead {
             failNextRead = false
             throw FixtureBackendError.injected
+        }
+        if let reportedHelperVersion {
+            let data = try JSONEncoder().encode(state)
+            var body = try JSONSerialization.jsonObject(with: data) as! [String: Any]
+            body["helperVersion"] = reportedHelperVersion
+            return try JSONDecoder().decode(
+                FirmwareLimitHelperStateResponse.self,
+                from: JSONSerialization.data(withJSONObject: body)
+            )
         }
         return state
     }

@@ -190,7 +190,7 @@ final class FixtureNativeFirmwareBackend: NativeFirmwareBackend {
 
     func oneTimeChargeStatus() async throws -> FirmwareLimitHelperOneTimeStatusResponse {
         guard helperAvailable else { throw FirmwareLimitHelperClientError.serviceUnavailable }
-        FirmwareLimitHelperOneTimeStatusResponse(
+        return FirmwareLimitHelperOneTimeStatusResponse(
             pending: pending,
             restoreUpper: pending ? state.upper : nil,
             deadlineUnixSeconds: pending ? Date().addingTimeInterval(3600).timeIntervalSince1970 : nil,

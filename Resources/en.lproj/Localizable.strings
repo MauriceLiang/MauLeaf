@@ -8,6 +8,7 @@
 "充电上限" = "Charging limit";
 "连接电源后自动写入原生固件；本次充满期间暂不可修改上限。" = "Connect AC power to write the native firmware limit. The limit cannot be changed during a one-time full charge.";
 "本次充满" = "One-time full charge";
+"取消本次充满" = "Cancel one-time full charge";
 "进行中" = "In progress";
 "取消本次充满并恢复上限" = "Cancel this charge and restore the limit";
 "仅本次允许充至 100%；完成后由原生后台服务恢复当前充电上限。" = "Allow charging to 100% once; the native background service restores the current limit afterward.";

@@ -16,8 +16,10 @@ private enum ChargeManagerTests {
         try check(manager.menuBarLeafStyle == .green, "menu-bar leaf is fixed to green")
         try check(manager.limit == 80 && manager.modeText.source == "限制充电未启用"
                   && manager.popoverLimitStatus.source == "未启用"
-                  && manager.popoverFullChargeStatus.source == "未开启",
-                  "initial compact popover reflects truly inactive limit and one-time task")
+                  && manager.popoverFullChargeStatus.source == "未开启"
+                  && manager.canToggleLimitFromCard && !manager.canToggleFullChargeFromCard
+                  && manager.limitCardActionHint.source == "启用限制充电",
+                  "initial card can enable limit but cannot start one-time full charge")
         manager.batteryStateText = "正在充电"
         try check(manager.popoverPowerStatus.source == "已接电源，充电中",
                   "power status in compact popover explicitly identifies AC while charging")
@@ -29,7 +31,7 @@ private enum ChargeManagerTests {
         try check(manager.limit == 85 && backend.applyCount == 0 && !manager.showNativeWriteConfirmation,
                   "changing the limit before activation only saves the local preference")
 
-        manager.enableLimit()
+        manager.toggleLimitFromCard()
         try check(manager.showNativeWriteConfirmation && backend.applyCount == 0,
                   "first activation requires explicit hardware-write confirmation")
         manager.confirmNativeWrite()
@@ -38,8 +40,10 @@ private enum ChargeManagerTests {
                   "confirmed activation writes the requested native upper and resume thresholds")
         try check(manager.hasOriginalStateSnapshot
                   && manager.popoverLimitStatus.source == "已启用（85%）"
-                  && manager.popoverLimitStatus.localized(in: .english) == "Enabled (85%)",
-                  "firmware-active badge is based on SMC state and translates the active limit")
+                  && manager.popoverLimitStatus.localized(in: .english) == "Enabled (85%)"
+                  && manager.canToggleLimitFromCard && manager.canToggleFullChargeFromCard
+                  && manager.limitCardActionHint.source == "关闭限制充电",
+                  "active card offers direct disable and one-time full actions")
         try check(!manager.isError
                   && manager.statusMessage.source == "充电上限已设为 85%，固件写入已验证。"
                   && manager.statusMessage.localized(in: .english) == "Charging limit set to 85%. Firmware write verified."
@@ -47,16 +51,18 @@ private enum ChargeManagerTests {
                   "limit success is concise and localized; raw helper audit text is never user-facing")
 
         manager.batteryPercent = 90
-        manager.beginOneTimeFullCharge()
+        manager.toggleFullChargeFromCard()
         try await wait { backend.beginCount == 1 && !manager.isBusy }
         try check(manager.fullOncePending && !backend.state.active && manager.hasOriginalStateSnapshot
                   && manager.popoverFullChargeStatus.source == "进行中"
-                  && manager.popoverLimitStatus.source == "已暂停（85%）",
-                  "one-time charge displays active task and temporarily paused limit truthfully")
+                  && manager.popoverLimitStatus.source == "已暂停（85%）"
+                  && manager.canToggleFullChargeFromCard
+                  && manager.fullChargeCardActionHint.source == "取消本次充满",
+                  "one-time card switches into actionable cancel state")
         try check(manager.statusMessage.source == "本次充满已开启，固件限充暂时关闭。"
                   && manager.statusMessage.localized(in: .english) == "One-time full charge started. Firmware charging limit temporarily disabled.",
                   "one-time full success uses localized compact feedback")
-        manager.cancelFullOnce()
+        manager.toggleFullChargeFromCard()
         try await wait { backend.cancelCount == 1 && !manager.isBusy }
         try check(!manager.fullOncePending && backend.state.active && backend.state.upper == 85
                   && manager.popoverFullChargeStatus.source == "未开启"
@@ -78,17 +84,20 @@ private enum ChargeManagerTests {
                   "automatic limit changes use the same localized confirmation")
 
         manager.isAdapterConnected = false
+        try check(!manager.canToggleFullChargeFromCard && manager.canToggleLimitFromCard,
+                  "loss of AC blocks one-time full but preserves safe restoration")
         manager.requestLimit(95, immediate: true)
         try check(backend.applyCount == 3 && manager.isError,
                   "native firmware writes are blocked without AC power")
         manager.isAdapterConnected = true
 
-        manager.disableLimit()
+        manager.toggleLimitFromCard()
         try await wait { backend.restoreCount == 1 && !manager.isBusy }
         try check(!manager.hasOriginalStateSnapshot && !backend.state.active
                   && backend.state.upper == 80 && backend.state.lower == 78
-                  && manager.popoverLimitStatus.source == "未启用",
-                  "disabling restores exact original firmware state and shows inactive badge")
+                  && manager.popoverLimitStatus.source == "未启用"
+                  && manager.canToggleLimitFromCard && !manager.canToggleFullChargeFromCard,
+                  "card disable restores original firmware and disables one-time full pill")
         try check(manager.statusMessage.source == "已关闭限制充电，原始固件配置已恢复。"
                   && manager.statusMessage.localized(in: .english) == "Charging limit disabled. Original firmware configuration restored."
                   && manager.statusMessage.source.count < 30,

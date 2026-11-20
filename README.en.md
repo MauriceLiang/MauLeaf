@@ -17,7 +17,7 @@
   <a href="https://github.com/MauriceLiang/MauLeaf/issues">Report an issue</a>
 </p>
 
-MauLeaf keeps only daily charging limits and one-time full charge. The menu bar always displays a green leaf.
+MauLeaf keeps only daily charging limits and one-time full charge. The menu bar always displays a green leaf. In the compact popover, click the charging-limit or one-time-full status pill in the top card to turn that feature on or off. Power supply is read-only; expanding Charging Limit only reveals the slider and presets, without a duplicate enable button.
 
 This preview uses MauLeaf's own AppleSMC controller and bundled privileged native service. It contains no batt executable, third-party firmware assets, or third-party control invocations.
 
@@ -25,7 +25,7 @@ This preview uses MauLeaf's own AppleSMC controller and bundled privileged nativ
 
 | Feature | Description |
 | --- | --- |
-| Opt-in limit control | Limits are off on first launch; the user must select “Enable charging limit” before firmware is changed |
+| Opt-in limit control | Limits are off on first launch; click the charging-limit status pill in the top card and confirm before firmware is changed |
 | Charging limit | 50–95%, with a slider and 70/75/80/85/90/95% presets; while disabled, changes are saved locally only |
 | Disable limit | Restore the original bfF0, bfD0, and bfE0 values captured before activation; remove the snapshot only after read-back verification |
 | One-time full charge | Temporarily disable the current limit; restore it at 100%, on cancellation, or after a 10-hour deadline |

@@ -423,9 +423,6 @@ struct ContentView: View {
             }
             rowDivider
 
-            oneTimeToggleRow
-            rowDivider
-
             menuRow(
                 icon: "gearshape",
                 title: "设置",
@@ -514,14 +511,20 @@ struct ContentView: View {
                 highlighted: manager.currentState?.active == true
                     && manager.hasOriginalStateSnapshot
                     && !manager.fullOncePending
-                    && !manager.restorePending
+                    && !manager.restorePending,
+                actionEnabled: manager.canToggleLimitFromCard,
+                actionHint: manager.limitCardActionHint,
+                action: { manager.toggleLimitFromCard() }
             )
             statusDivider
             statusRow(
                 icon: "bolt",
                 title: "本次充满",
                 status: manager.popoverFullChargeStatus,
-                highlighted: manager.fullOncePending && !manager.fullOnceCancelRequested
+                highlighted: manager.fullOncePending && !manager.fullOnceCancelRequested,
+                actionEnabled: manager.canToggleFullChargeFromCard,
+                actionHint: manager.fullChargeCardActionHint,
+                action: { manager.toggleFullChargeFromCard() }
             )
         }
         .padding(17)
@@ -529,11 +532,15 @@ struct ContentView: View {
         .background(Color.primary.opacity(0.045), in: RoundedRectangle(cornerRadius: 16))
     }
 
+    /// Power status remains read-only; charge status capsules are buttons.
     private func statusRow(
         icon: String,
         title: AppText,
         status: AppText,
-        highlighted: Bool = false
+        highlighted: Bool = false,
+        actionEnabled: Bool = false,
+        actionHint: AppText = "",
+        action: (() -> Void)? = nil
     ) -> some View {
         HStack(alignment: .center, spacing: 10) {
             Image(systemName: icon)
@@ -548,20 +555,43 @@ struct ContentView: View {
 
             Spacer(minLength: 5)
 
-            Text(manager.text(status))
-                .font(.subheadline.weight(.medium))
-                .foregroundStyle(highlighted ? Color.green : Color.primary)
-                .multilineTextAlignment(.trailing)
-                .lineLimit(2)
-                .fixedSize(horizontal: false, vertical: true)
-                .padding(.horizontal, 9)
-                .padding(.vertical, 4)
-                .background(
-                    highlighted ? Color.green.opacity(0.15) : Color.primary.opacity(0.055),
-                    in: Capsule()
-                )
+            if let action {
+                Button(action: action) {
+                    statusPill(status, highlighted: highlighted, interactive: true)
+                }
+                .buttonStyle(.plain)
+                .disabled(!actionEnabled)
+                .help(manager.text(actionHint))
+                .accessibilityLabel("\(manager.text(title))：\(manager.text(status))")
+                .accessibilityHint(manager.text(actionHint))
+            } else {
+                statusPill(status, highlighted: highlighted, interactive: false)
+            }
         }
         .frame(minHeight: 33)
+    }
+
+    private func statusPill(_ status: AppText, highlighted: Bool, interactive: Bool) -> some View {
+        Text(manager.text(status))
+            .font(.subheadline.weight(.medium))
+            .foregroundStyle(highlighted ? Color.green : Color.primary)
+            .multilineTextAlignment(.trailing)
+            .lineLimit(2)
+            .fixedSize(horizontal: false, vertical: true)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 5)
+            .background(
+                highlighted
+                    ? Color.green.opacity(0.15)
+                    : Color.primary.opacity(interactive ? 0.09 : 0.055),
+                in: Capsule()
+            )
+            .overlay {
+                if interactive {
+                    Capsule().strokeBorder(Color.primary.opacity(0.14), lineWidth: 1)
+                }
+            }
+            .contentShape(Capsule())
     }
 
     private var statusDivider: some View {
@@ -648,8 +678,6 @@ struct ContentView: View {
                 }
             }
 
-            limitAction
-
             if manager.isLegacyActive {
                 Text(manager.text("没有找到首次启用前的原始固件快照。停用旧版限制只能关闭激活标志，不能恢复未保存的阈值。"))
                     .font(.caption)
@@ -672,64 +700,6 @@ struct ContentView: View {
         !manager.isBusy && !manager.isPreparingToQuit
             && !manager.fullOncePending && !manager.isLegacyActive
             && (!manager.hasOriginalStateSnapshot || manager.isAdapterConnected)
-    }
-
-    @ViewBuilder
-    private var limitAction: some View {
-        if manager.isLegacyActive {
-            Button(manager.text("停用旧版限制")) {
-                manager.requestLegacyDisableConfirmation()
-            }
-            .disabled(!manager.canDisableLegacyLimit)
-            .buttonStyle(.bordered)
-        } else if manager.restorePending || manager.hasOriginalStateSnapshot && manager.currentState?.active != true {
-            Button(manager.text("恢复原始配置")) {
-                manager.disableLimit()
-            }
-            .disabled(!manager.canRetryOriginalRestore && !manager.canDisableLimit)
-            .buttonStyle(.bordered)
-        } else if manager.hasOriginalStateSnapshot && manager.currentState?.active == true {
-            Button(manager.text("关闭限制充电")) {
-                manager.disableLimit()
-            }
-            .disabled(!manager.canDisableLimit)
-            .buttonStyle(.bordered)
-        } else {
-            Button(manager.text("启用限制充电")) {
-                manager.enableLimit()
-            }
-            .disabled(!manager.canEnableLimit)
-            .buttonStyle(.borderedProminent)
-        }
-    }
-
-    private var oneTimeToggleRow: some View {
-        HStack(spacing: 11) {
-            Image(systemName: "bolt")
-                .font(.system(size: 16))
-                .frame(width: 20)
-                .accessibilityHidden(true)
-            Text(manager.text("本次充满"))
-                .font(.subheadline.weight(.medium))
-            Spacer()
-            Toggle(
-                manager.text("本次充满"),
-                isOn: Binding(
-                    get: { manager.fullOncePending && !manager.fullOnceCancelRequested },
-                    set: { requested in
-                        if requested { manager.beginOneTimeFullCharge() }
-                        else { manager.cancelFullOnce() }
-                    }
-                )
-            )
-            .labelsHidden()
-            .toggleStyle(.switch)
-            .controlSize(.small)
-            .disabled(manager.fullOncePending
-                ? manager.fullOnceCancelRequested || manager.isBusy || manager.isPreparingToQuit
-                : !manager.canStartFullCharge || (manager.batteryPercent ?? 0) >= 100)
-        }
-        .padding(.vertical, 10)
     }
 
     private var settingsControls: some View {
@@ -994,6 +964,54 @@ final class ChargeManager: ObservableObject {
     var canStartFullCharge: Bool {
         backendReady && hasOriginalStateSnapshot && currentState?.active == true
             && isAdapterConnected && !isBusy && !isPreparingToQuit && !fullOncePending
+    }
+
+    /// All card actions reuse the existing hardware and restore safeguards.
+    var canToggleLimitFromCard: Bool {
+        if isLegacyActive { return canDisableLegacyLimit }
+        if hasOriginalStateSnapshot || restorePending {
+            return canDisableLimit || canRetryOriginalRestore
+        }
+        return canEnableLimit
+    }
+
+    var limitCardActionHint: AppText {
+        if isLegacyActive { return "停用旧版限制" }
+        if restorePending || (hasOriginalStateSnapshot && currentState?.active != true && !fullOncePending) {
+            return "恢复原始配置"
+        }
+        return hasOriginalStateSnapshot ? "关闭限制充电" : "启用限制充电"
+    }
+
+    func toggleLimitFromCard() {
+        guard canToggleLimitFromCard else { return }
+        if isLegacyActive {
+            requestLegacyDisableConfirmation()
+        } else if hasOriginalStateSnapshot || restorePending {
+            disableLimit()
+        } else {
+            enableLimit()
+        }
+    }
+
+    var canToggleFullChargeFromCard: Bool {
+        if fullOncePending {
+            return !fullOnceCancelRequested && !isBusy && !isPreparingToQuit
+        }
+        return canStartFullCharge && (batteryPercent ?? 0) < 100
+    }
+
+    var fullChargeCardActionHint: AppText {
+        fullOncePending ? "取消本次充满" : "本次充满"
+    }
+
+    func toggleFullChargeFromCard() {
+        guard canToggleFullChargeFromCard else { return }
+        if fullOncePending {
+            cancelFullOnce()
+        } else {
+            beginOneTimeFullCharge()
+        }
     }
 
     func start() {

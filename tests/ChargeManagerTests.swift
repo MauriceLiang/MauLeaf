@@ -239,7 +239,7 @@ private enum ChargeManagerTests {
         manager.start()
         try await wait { manager.helperNeedsUpgrade }
         try check(installs == 0 && backend.applyCount == 0
-                  && manager.popoverLimitStatus.source == "需要更新",
+                  && manager.popoverLimitStatus.source == "未启用",
                   "startup detects stale helper without performing a privileged upgrade")
         manager.isAdapterConnected = true
         manager.enableLimit()

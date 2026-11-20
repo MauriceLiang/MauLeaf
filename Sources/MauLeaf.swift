@@ -914,7 +914,15 @@ final class ChargeManager: ObservableObject {
 
     var popoverLimitStatus: AppText {
         if helperStateUnknown { return "状态未知" }
-        if helperNeedsUpgrade { return "需要更新" }
+        if helperNeedsUpgrade {
+            // For a known inactive old helper, the first click still means
+            // Enable (and upgrades the helper first). Do not label it as an
+            // update-only action when it would also modify AppleSMC.
+            if currentState?.active == false && !hasOriginalStateSnapshot && !restorePending {
+                return "未启用"
+            }
+            return "需要更新"
+        }
         if restorePending { return "等待恢复" }
         if isLegacyActive { return "旧版限充" }
         if fullOncePending && hasOriginalStateSnapshot {

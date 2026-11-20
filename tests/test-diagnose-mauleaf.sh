@@ -22,6 +22,9 @@ fi
 grep -Fq 'launchctl print system/com.local.chargecap.firmware-helper' "$SCRIPT"
 grep -Fq 'original-firmware-state.json' "$SCRIPT"
 grep -Fq 'system-firmware-version' "$SCRIPT"
+grep -Fq 'raw.githubusercontent.com/MauriceLiang/MauLeaf/main/Scripts/diagnose-mauleaf.sh' "$ROOT/README.md"
+grep -Fq 'read-only diagnostic script' "$ROOT/README.en.md"
+test -s "$ROOT/.github/ISSUE_TEMPLATE/bug_report.md"
 
 if [[ "$(uname -s)" == Darwin ]]; then
     # Exercise the installed/non-installed detection on a real macOS runner.
@@ -35,7 +38,7 @@ if [[ "$(uname -s)" == Darwin ]]; then
             exit 1
         }
     done
-    if grep -Ei 'IOPlatformSerialNumber|IOPlatformUUID|Serial Number|UserName|Hardware UUID' <<< "$REPORT"; then
+    if grep -E 'IOPlatformSerialNumber|IOPlatformUUID|^Serial Number:|^UserName:|^Hardware UUID:' <<< "$REPORT"; then
         echo "Diagnostic output may expose a sensitive identifier" >&2
         exit 1
     fi

@@ -67,7 +67,7 @@ chmod 755 "$NATIVE/MauLeafFirmwareHelper"
 codesign --force --sign - --identifier com.local.chargecap.firmware-helper "$NATIVE/MauLeafFirmwareHelper"
 codesign --verify --strict "$NATIVE/MauLeafFirmwareHelper"
 cp Support/com.local.chargecap.firmware-helper.plist "$NATIVE/"
-cp Scripts/install-native-firmware-helper.sh Scripts/uninstall-native-firmware-helper.sh Scripts/complete-deferred-uninstall.sh "$NATIVE/"
+cp Scripts/install-native-firmware-helper.sh Scripts/uninstall-native-firmware-helper.sh Scripts/complete-deferred-uninstall.sh Scripts/diagnose-mauleaf.sh "$NATIVE/"
 chmod 755 "$NATIVE/"*.sh
 
 xcrun swift Scripts/GenerateAppIcon.swift Assets/MauLeafIcon-1024.png "$STAGE/MauLeaf.iconset"

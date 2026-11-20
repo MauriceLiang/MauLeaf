@@ -26,6 +26,11 @@ for doc in README.md README.en.md; do
   grep -Fq 'MacBookPro18,1' "$ROOT/$doc"
   grep -Fq 'mBoot-20457.41.3' "$ROOT/$doc"
 done
+# Guidance must remain optional and correctly reflected in both languages.
+grep -Fq '### 与 macOS「优化电池充电」一起使用' "$ROOT/README.md"
+grep -Fq 'MauLeaf 不会自动修改该系统开关' "$ROOT/README.md"
+grep -Fq '### Using MauLeaf with macOS Optimized Battery Charging' "$ROOT/README.en.md"
+grep -Fq 'MauLeaf never changes that macOS setting automatically' "$ROOT/README.en.md"
 test -s "$ROOT/docs/REPOSITORY_DISCOVERY.md"
 test -s "$ROOT/docs/COMPATIBILITY.md"
 echo "Repository discovery and README screenshots: PASS"

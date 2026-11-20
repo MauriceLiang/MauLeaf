@@ -152,3 +152,19 @@
 "已请求取消本次充满，等待恢复充电上限。" = "One-time full charge cancellation requested. Waiting to restore the limit.";
 "已取消本次充满，原充电上限已恢复。" = "One-time full charge canceled. Previous limit restored.";
 "本次充满已开启，固件限充暂时关闭。" = "One-time full charge started. Firmware charging limit temporarily disabled.";
+
+// Compact menu-bar popover.
+"供电状态" = "Power supply";
+"设置" = "Settings";
+"退出 MauLeaf" = "Quit MauLeaf";
+"界面语言" = "Interface language";
+"已接电源，充电中" = "Connected to power, charging";
+"等待恢复" = "Recovery pending";
+"旧版限充" = "Legacy limit";
+"已暂停（%@%%）" = "Paused (%@%%)";
+"已启用（%@%%）" = "Enabled (%@%%)";
+"待恢复" = "Needs restore";
+"未启用" = "Disabled";
+"正在恢复" = "Restoring";
+"未开启" = "Off";
+"恢复任务仍在等待；请先恢复原始配置。" = "Recovery is pending. Restore the original firmware configuration first.";

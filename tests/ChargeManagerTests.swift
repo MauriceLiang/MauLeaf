@@ -112,6 +112,7 @@ private enum ChargeManagerTests {
         try await testMissingHelperQuitsWithoutAuthorization()
         try await testUnknownInstalledHelperDoesNotAssumeSafeState()
         try await testUpgradeRequiresExplicitEnable()
+        try await testOutdatedActiveHelperCanBeRepairedWithoutFirmwareWrite()
         try await testInstallFailureDoesNotWriteFirmware()
         try await testAutomaticQuitRestore()
         try await testQuitDuringOneTimeFullCharge()
@@ -245,6 +246,36 @@ private enum ChargeManagerTests {
         try await wait { installs == 1 && backend.applyCount == 1 && !manager.isBusy }
         try check(!manager.isError && backend.state.active && manager.hasOriginalStateSnapshot,
                   "explicit enable upgrades once, checks new protocol and then writes safely")
+    }
+
+    @MainActor
+    private static func testOutdatedActiveHelperCanBeRepairedWithoutFirmwareWrite() async throws {
+        let backend = FixtureNativeFirmwareBackend()
+        backend.state = FirmwareLimitHelperStateResponse(
+            state: FirmwareLimitState(activationByte: 0x02, upper: 85, lower: 83)
+        )
+        backend.reportedHelperVersion = FirmwareLimitHelperProtocolVersion.current - 1
+        var installs = 0
+        let manager = ChargeManager(
+            backend: backend,
+            autoInstallNativeHelper: false,
+            helperInstallerForTesting: {
+                installs += 1
+                backend.reportedHelperVersion = nil
+            },
+            helperArtifactsPresent: { true }
+        )
+        manager.start()
+        try await wait { manager.helperNeedsUpgrade }
+        try check(manager.canToggleLimitFromCard && !manager.canEnableLimit && installs == 0,
+                  "stale active Helper never auto-upgrades, but offers explicit repair")
+        try check(manager.limitCardActionHint.source == "修复控制服务",
+                  "the card explicitly names the repair action rather than pretending the limit is inactive")
+        manager.toggleLimitFromCard()
+        try await wait { installs == 1 && !manager.isBusy && !manager.helperNeedsUpgrade }
+        try check(backend.applyCount == 0 && backend.state.active
+                  && manager.isLegacyActive && manager.canDisableLegacyLimit,
+                  "manual Helper repair changes no SMC values and restores safe legacy-disable access")
     }
 
     @MainActor

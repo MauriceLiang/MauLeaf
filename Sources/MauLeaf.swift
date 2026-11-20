@@ -973,9 +973,10 @@ final class ChargeManager: ObservableObject {
             && !restorePending && !fullOncePending
         let needsFirstInstall = helperNeedsInstallation && currentState == nil && !helperArtifactsPresent()
         let needsExplicitUpgrade = helperNeedsUpgrade && clean
-        return hardwareWriteBlockReason == nil && isAdapterConnected
-            && !isBusy && !isPreparingToQuit && !fullOncePending
-            && ((clean && backendReady) || needsFirstInstall || needsExplicitUpgrade)
+        return isAdapterConnected && !isBusy && !isPreparingToQuit && !fullOncePending
+            && ((clean && backendReady) || (
+                hardwareWriteBlockReason == nil && (needsFirstInstall || needsExplicitUpgrade)
+            ))
     }
 
     var canDisableLimit: Bool {
@@ -998,8 +999,17 @@ final class ChargeManager: ObservableObject {
             && isAdapterConnected && !isBusy && !isPreparingToQuit && !fullOncePending
     }
 
+    /// A stale/unknown installed Helper can be repaired explicitly without
+    /// enabling a limit. This is essential when an older version was active.
+    var canRepairNativeHelper: Bool {
+        (helperNeedsUpgrade || helperStateUnknown) && helperArtifactsPresent()
+            && !isBusy && !isPreparingToQuit
+            && !(helperNeedsUpgrade && canEnableLimit)
+    }
+
     /// All card actions reuse the existing hardware and restore safeguards.
     var canToggleLimitFromCard: Bool {
+        if canRepairNativeHelper { return true }
         if isLegacyActive { return canDisableLegacyLimit }
         if hasOriginalStateSnapshot || restorePending {
             return canDisableLimit || canRetryOriginalRestore
@@ -1008,6 +1018,7 @@ final class ChargeManager: ObservableObject {
     }
 
     var limitCardActionHint: AppText {
+        if canRepairNativeHelper { return "修复控制服务" }
         if isLegacyActive { return "停用旧版限制" }
         if restorePending || (hasOriginalStateSnapshot && currentState?.active != true && !fullOncePending) {
             return "恢复原始配置"
@@ -1017,7 +1028,9 @@ final class ChargeManager: ObservableObject {
 
     func toggleLimitFromCard() {
         guard canToggleLimitFromCard else { return }
-        if isLegacyActive {
+        if canRepairNativeHelper {
+            Task { await repairNativeHelperAfterUserAction() }
+        } else if isLegacyActive {
             requestLegacyDisableConfirmation()
         } else if hasOriginalStateSnapshot || restorePending {
             disableLimit()
@@ -1253,6 +1266,37 @@ final class ChargeManager: ObservableObject {
             if !immediate { try? await Task.sleep(nanoseconds: 450_000_000) }
             guard !Task.isCancelled else { return }
             await self?.applyLimit(value)
+        }
+    }
+
+    /// Explicit recovery of an installed but outdated/unreachable Helper.
+    /// No charging-limit write occurs in this path.
+    private func repairNativeHelperAfterUserAction() async {
+        guard canRepairNativeHelper else { return }
+        isBusy = true
+        isError = false
+        statusMessage = "正在修复原生控制服务，需要管理员授权…"
+        do {
+            if let helperInstallerForTesting {
+                try await helperInstallerForTesting()
+            } else {
+                try await installNativeHelper()
+            }
+            let state = try await backend.readState()
+            guard state.helperVersion >= FirmwareLimitHelperProtocolVersion.current else {
+                throw NativeControlError.helperUpgradeFailed(
+                    found: state.helperVersion,
+                    required: FirmwareLimitHelperProtocolVersion.current
+                )
+            }
+            let once = try await backend.oneTimeChargeStatus()
+            updateFromNativeState(state, oneTime: once, status: "原生控制服务已修复。")
+            isBusy = false
+        } catch {
+            isBusy = false
+            await refreshNativeState()
+            statusMessage = "无法修复原生控制服务：\(AppText(error: error))"
+            isError = true
         }
     }
 

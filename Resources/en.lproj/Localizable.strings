@@ -186,3 +186,7 @@
 "未安装控制组件，无须恢复固件。" = "No native helper was installed. No firmware restoration is needed.";
 "控制服务版本过旧；退出不会自动授权升级。" = "The native helper is outdated. Quitting will not automatically request authorization to upgrade it.";
 "安装后的服务存在活动限充或待恢复任务，拒绝覆盖固件状态。" = "The installed helper reports an active charging limit or pending restoration. Firmware state was not overwritten.";
+"修复控制服务" = "Repair control service";
+"正在修复原生控制服务，需要管理员授权…" = "Repairing the native helper requires administrator authorization…";
+"原生控制服务已修复。" = "Native helper repaired.";
+"无法修复原生控制服务：%@" = "Could not repair the native helper: %@";

@@ -33,8 +33,8 @@ title: "[Bug] "
 
 ## 诊断输出 / Read-only diagnostic report
 
-请按照 [README 指引](../../README.md#无法使用运行诊断脚本并提交-issue) 运行 \`Scripts/diagnose-mauleaf.sh\`，将终端输出粘贴在此处。**不要使用 sudo。**  
-Run \`Scripts/diagnose-mauleaf.sh\` following the [English README](../../README.en.md#not-working-run-diagnostics-and-open-an-issue), and paste the output here. **Do not use sudo.**
+请按照 [README 指引](https://github.com/MauriceLiang/MauLeaf/blob/main/README.md#无法使用运行诊断脚本并提交-issue) 运行 `Scripts/diagnose-mauleaf.sh`，将终端输出粘贴在此处。**不要使用 sudo。**  
+Run `Scripts/diagnose-mauleaf.sh` following the [English README](https://github.com/MauriceLiang/MauLeaf/blob/main/README.en.md#not-working-run-diagnostics-and-open-an-issue), and paste the output here. **Do not use sudo.**
 
 ~~~text
 [粘贴诊断输出 / Paste the report here]

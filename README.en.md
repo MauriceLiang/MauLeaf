@@ -6,7 +6,12 @@
 
 <h1 align="center">MauLeaf</h1>
 
-<p align="center">A lightweight native macOS menu-bar charging utility</p>
+<p align="center">Open-source, lightweight macOS battery charge limiter for MacBook</p>
+<p align="center">
+  <a href="https://github.com/MauriceLiang/MauLeaf/releases/latest"><img alt="Latest stable release" src="https://img.shields.io/github/v/release/MauriceLiang/MauLeaf?label=Stable%20Release"></a>
+  <a href="https://github.com/MauriceLiang/MauLeaf/actions/workflows/build-release.yml"><img alt="Build and tests" src="https://github.com/MauriceLiang/MauLeaf/actions/workflows/build-release.yml/badge.svg?branch=main"></a>
+  <a href="LICENSE"><img alt="License: Apache 2.0" src="https://img.shields.io/github/license/MauriceLiang/MauLeaf"></a>
+</p>
 
 <p align="center">
   <a href="https://github.com/MauriceLiang/MauLeaf/releases/latest">Download stable release</a> ·
@@ -14,10 +19,30 @@
   <a href="CHANGELOG.md">Changelog</a>
 </p>
 
-MauLeaf uses SwiftUI + AppKit and its own AppleSMC controller for two focused features: **charging limits** and **one-time full charge**. It lives in the menu bar as a green leaf, with no detached main window and no batt dependency.
+**MauLeaf** is a free, open-source **macOS battery charge limiter and battery care app for Apple Silicon MacBook**. Built with SwiftUI + AppKit and a native AppleSMC controller, it focuses on **charging limits** and **one-time full charge**. It lives in the menu bar as a green leaf, with no separate window or batt dependency. **Firmware writes currently support only one verified M1 Pro hardware profile**, as detailed below.
 
 > [!CAUTION]
 > **A stable release does not imply universal hardware support.** New firmware charging-limit writes are restricted to **MacBookPro18,1 (M1 Pro) + macOS 15 + mBoot-20457.41.3 + arm64**. macOS 26/27, Intel, and unverified devices cannot activate new limits. Battery viewing may still work on other devices. Actual charge-stop and resume percentages have not yet completed full physical validation; successful register read-back is not proof of real charging behavior.
+
+
+## Screenshots
+
+<p align="center">
+  <img src="docs/screenshots/en-overview.webp" width="300" alt="MauLeaf menu bar app: battery level, power supply, charging limit, and one-time full charge">
+  <img src="docs/screenshots/en-limit-expanded.webp" width="300" alt="MauLeaf charging limit slider and preset percentages in the expanded menu-bar popover">
+</p>
+<p align="center"><sub>Actual dark-mode UI · Left: overview · Right: charging-limit settings. The charging limit is disabled in these screenshots.</sub></p>
+
+中文界面：[状态总览](docs/screenshots/zh-overview.webp) · [充电上限](docs/screenshots/zh-limit-expanded.webp)
+
+## Quick links
+
+| Goal | Where to go |
+| --- | --- |
+| Download the stable installer | [Latest GitHub Release](https://github.com/MauriceLiang/MauLeaf/releases/latest) |
+| Check whether my Mac is supported | [Compatibility and safety](docs/COMPATIBILITY.md) |
+| Explore features and controls | [Features and controls](#features-and-controls) |
+| Report that it doesn't start or won't charge-limit | [Read-only diagnostics and bug report](#not-working-run-diagnostics-and-open-an-issue) |
 
 ## Download and install
 
@@ -97,6 +122,7 @@ bash tests/run.sh
 
 Automated tests use a fake SMC backend and do not write actual battery firmware. CI produces and verifies Apple Silicon arm64 DMGs. New work must preserve explicit opt-in, minimal privilege, original-state snapshots, and fail-closed recovery.
 
+- [Compatibility and safety limitations](docs/COMPATIBILITY.md)
 - [Native firmware backend and safety](docs/NATIVE_FIRMWARE_BACKEND.md)
 - [Charging behavior and known limits](docs/CHARGING.md)
 - [Changelog](CHANGELOG.md)

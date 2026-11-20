@@ -65,6 +65,17 @@ The current package is **ad-hoc code-signed, without Apple Developer ID signing 
 
 Before first activation, the privileged Helper snapshots the original bfF0, bfD0 and bfE0 values with device identity in a root-owned recovery file. Later limit changes or one-time full charge never overwrite the snapshot. Disabling a limit restores all original values with read-back verification; unknown states or failed restores are never reported as safe.
 
+### Using MauLeaf with macOS Optimized Battery Charging
+
+If you use a fixed charging limit in MauLeaf (for example, **85%**), **we recommend manually turning off macOS “Optimized Battery Charging”** so that MauLeaf is the primary charge-limit controller. macOS may learn your routine and delay charging above approximately 80%; with both features enabled, a battery may pause at 80% even when MauLeaf is set to 85%, and a **one-time full charge** may also be delayed by macOS. **This does not necessarily indicate a MauLeaf failure or a guaranteed conflict.**
+
+- **When actively using MauLeaf charging limits:** You can turn off the option under **System Settings → Battery → Battery Health (or Battery Health Information) → Optimized Battery Charging**. The exact location varies by macOS version.
+- **When you stop using MauLeaf charging limits:** Consider keeping or re-enabling macOS Optimized Battery Charging to let the system manage charging habits.
+- **Optional, not required:** MauLeaf never changes that macOS setting automatically. Do **not** disable unrelated battery-health, temperature, or other system safety protections.
+
+> [!NOTE]
+> MauLeaf's physical charge-stop and resume thresholds still require extended on-device validation. Turning off macOS Optimized Battery Charging only reduces potential overlapping behavior; **it does not guarantee that MauLeaf will stop charging at the chosen percentage**.
+
 ### Quit and uninstall
 
 | Choice | Behavior | Administrator password |

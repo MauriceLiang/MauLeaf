@@ -11,7 +11,7 @@ if bash "$SCRIPT" --unsupported >/dev/null 2>&1; then
 fi
 
 # Enforce the no-privileged-write, no-raw-log design contract.
-if grep -Eq '(^|[[:space:]])(sudo|osascript|rm|mv|killall|security|curl|wget)[[:space:]]' "$SCRIPT"; then
+if grep -Eq '^[[:space:]]*(sudo|osascript|rm|mv|killall|security|curl|wget)([[:space:]]|$)' "$SCRIPT"; then
     echo "Read-only diagnostics must not run privileged, destructive or network commands" >&2
     exit 1
 fi

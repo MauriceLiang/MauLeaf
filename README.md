@@ -6,7 +6,12 @@
 
 <h1 align="center">MauLeaf</h1>
 
-<p align="center">轻量、原生的 macOS 菜单栏充电控制工具</p>
+<p align="center">免费开源、轻量原生的 macOS 菜单栏电池充电限制工具</p>
+<p align="center">
+  <a href="https://github.com/MauriceLiang/MauLeaf/releases/latest"><img alt="Latest stable release" src="https://img.shields.io/github/v/release/MauriceLiang/MauLeaf?label=Stable%20Release"></a>
+  <a href="https://github.com/MauriceLiang/MauLeaf/actions/workflows/build-release.yml"><img alt="Build and tests" src="https://github.com/MauriceLiang/MauLeaf/actions/workflows/build-release.yml/badge.svg?branch=main"></a>
+  <a href="LICENSE"><img alt="License: Apache 2.0" src="https://img.shields.io/github/license/MauriceLiang/MauLeaf"></a>
+</p>
 
 <p align="center">
   <a href="https://github.com/MauriceLiang/MauLeaf/releases/latest">下载正式版</a> ·
@@ -14,10 +19,30 @@
   <a href="CHANGELOG.md">更新日志</a>
 </p>
 
-MauLeaf 使用 SwiftUI + AppKit 和自研 AppleSMC 控制器，专注于两项功能：**充电上限**和**本次充满**。应用常驻菜单栏，默认显示绿色叶子，没有独立主窗口，不依赖 batt。
+**MauLeaf** 是一款免费的开源 **MacBook 电池充电管理 / macOS battery charge limiter**，基于 SwiftUI + AppKit 与自研 AppleSMC 控制器。它专注于 **充电上限**和**本次充满**：常驻菜单栏、绿色叶子图标、无需独立主窗口，不依赖 batt。
 
 > [!CAUTION]
 > **正式版不等于通用硬件兼容。** 当前新建充电限制只允许 **MacBookPro18,1（M1 Pro）+ macOS 15 + mBoot-20457.41.3 + arm64**。macOS 26/27、Intel 和其他未经验证的设备不能开启新的固件限充。其他环境可以尝试查看电量，但不应期待限充可用。实际停止/恢复充电的百分比仍需要完整真机验证；寄存器读回成功不代表充电行为已经完全验证。
+
+
+## 应用预览
+
+<p align="center">
+  <img src="docs/screenshots/zh-overview.webp" width="300" alt="MauLeaf 中文菜单栏：80% 电量、供电状态、限充与本次充满开关">
+  <img src="docs/screenshots/zh-limit-expanded.webp" width="300" alt="MauLeaf 中文菜单栏：展开充电上限、滑杆和快捷预设">
+</p>
+<p align="center"><sub>深色模式真实界面 · 左：状态总览 · 右：充电上限展开。示例中限充处于未启用状态。</sub></p>
+
+English screenshots: [Overview](docs/screenshots/en-overview.webp) · [Charging-limit controls](docs/screenshots/en-limit-expanded.webp)
+
+## 快速入口
+
+| 我想要… | 入口 |
+| --- | --- |
+| 下载正式版安装包 | [GitHub 最新正式 Release](https://github.com/MauriceLiang/MauLeaf/releases/latest) |
+| 先确认我的 Mac 是否能用 | [兼容性与安全限制](docs/COMPATIBILITY.md) |
+| 了解功能和具体操作 | [下方功能与操作](#功能与操作) |
+| 下载后打不开或限制无法启用 | [只读诊断与故障 Issue](#无法使用运行诊断脚本并提交-issue) |
 
 ## 下载与安装
 
@@ -97,6 +122,7 @@ bash tests/run.sh
 
 自动化测试使用模拟 SMC，不会写入真实硬件。发布仅构建 arm64 DMG，CI 负责校验文件；新版本开发遵循明确启用、最小权限、原始快照和失败保留的保护原则。
 
+- 已验证系统与机型：[兼容性及安全限制](docs/COMPATIBILITY.md)
 - 固件实现与安全边界：[Native firmware backend](docs/NATIVE_FIRMWARE_BACKEND.md)
 - 充电行为与已知限制：[Charging behavior](docs/CHARGING.md)
 - 历史变更：[CHANGELOG.md](CHANGELOG.md)

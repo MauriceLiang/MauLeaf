@@ -390,27 +390,82 @@ struct BatteryStatusRing: View {
     }
 }
 
+/// Native menu-bar-only popover. No detached main window or navigation.
 struct ContentView: View {
     @ObservedObject var manager: ChargeManager
+    @State private var limitExpanded = false
+    @State private var settingsExpanded = false
     private let presets = [70, 75, 80, 85, 90, 95]
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
+        VStack(alignment: .leading, spacing: 0) {
             batteryCard
-            limitSection
-                .disabled(manager.isPreparingToQuit)
-            limitControlSection
-                .disabled(manager.isPreparingToQuit)
-            if manager.hasOriginalStateSnapshot || manager.fullOncePending {
-                oneTimeChargeSection
-                    .disabled(manager.isPreparingToQuit)
+                .padding(.bottom, 12)
+
+            menuRow(
+                icon: "slider.horizontal.3",
+                title: "充电上限",
+                value: "\(manager.limit)%",
+                expanded: limitExpanded
+            ) {
+                withAnimation(.easeInOut(duration: 0.18)) {
+                    limitExpanded.toggle()
+                    if limitExpanded { settingsExpanded = false }
+                }
             }
-            Divider()
-            footer
+
+            if limitExpanded {
+                limitControls
+                    .padding(.leading, 30)
+                    .padding(.trailing, 2)
+                    .padding(.bottom, 12)
+                    .transition(.opacity.combined(with: .move(edge: .top)))
+            }
+            rowDivider
+
+            oneTimeToggleRow
+            rowDivider
+
+            menuRow(
+                icon: "gearshape",
+                title: "设置",
+                expanded: settingsExpanded
+            ) {
+                withAnimation(.easeInOut(duration: 0.18)) {
+                    settingsExpanded.toggle()
+                    if settingsExpanded { limitExpanded = false }
+                }
+            }
+
+            if settingsExpanded {
+                settingsControls
+                    .padding(.leading, 30)
+                    .padding(.bottom, 10)
+                    .transition(.opacity.combined(with: .move(edge: .top)))
+            }
+            rowDivider
+
+            Button {
+                NSApp.terminate(nil)
+            } label: {
+                HStack(spacing: 11) {
+                    Image(systemName: "power")
+                        .font(.system(size: 16, weight: .medium))
+                        .frame(width: 20)
+                    Text(manager.text("退出 MauLeaf"))
+                        .font(.subheadline.weight(.medium))
+                    Spacer()
+                }
+                .contentShape(Rectangle())
+                .padding(.vertical, 13)
+            }
+            .buttonStyle(.plain)
+            .disabled(manager.isPreparingToQuit)
+            .help(manager.text("正常退出会先关闭限制充电并验证恢复。若无法安全恢复，将取消退出。"))
         }
         .padding(.horizontal, 16)
-        .padding(.top, 18)
-        .padding(.bottom, 16)
+        .padding(.top, 17)
+        .padding(.bottom, 9)
         .alert(manager.text("启用原生固件控制？"), isPresented: $manager.showNativeWriteConfirmation) {
             Button(manager.text("确认并继续"), role: .destructive) {
                 manager.confirmNativeWrite()
@@ -421,193 +476,6 @@ struct ContentView: View {
         } message: {
             Text(manager.text("此操作会直接修改本机 AppleSMC 固件充电寄存器。仅支持已限定的 MacBookPro18,1、指定固件和 macOS 15，并且必须连接电源。程序会逐项读回校验并在失败时尝试恢复；寄存器写入成功仍不代表实际充电停止点已经验证。"))
         }
-        .task { manager.start() }
-    }
-
-    private var batteryCard: some View {
-        VStack(alignment: .leading, spacing: 11) {
-            HStack(alignment: .center, spacing: 12) {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(manager.text("当前电量"))
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    Text(manager.batteryPercent.map { "\($0)%" } ?? "--")
-                        .font(.system(size: 34, weight: .semibold, design: .rounded))
-                        .monospacedDigit()
-                    Label(manager.text(manager.batteryDisplayText), systemImage: manager.batteryStateSymbol)
-                        .font(.caption)
-                        .foregroundStyle(manager.batteryTint)
-                }
-                Spacer()
-                BatteryStatusRing(
-                    percent: manager.batteryPercent,
-                    tint: manager.batteryTint,
-                    icon: manager.batteryRingIcon
-                )
-                .padding(.trailing, 3)
-            }
-
-            Divider().opacity(0.7)
-
-            HStack(spacing: 8) {
-                Circle()
-                    .fill(manager.backendReady ? Color.green : Color.secondary)
-                    .frame(width: 7, height: 7)
-                Text(manager.text(manager.modeText))
-                    .font(.subheadline.weight(.medium))
-                    .lineLimit(2)
-                Spacer(minLength: 0)
-            }
-        }
-        .padding(14)
-        .background(Color.primary.opacity(0.045), in: RoundedRectangle(cornerRadius: 14))
-    }
-
-    private var limitSection: some View {
-        VStack(alignment: .leading, spacing: 9) {
-            HStack {
-                Text(manager.text("充电上限"))
-                    .font(.subheadline.weight(.medium))
-                Spacer()
-                Text("\(manager.limit)%")
-                    .font(.subheadline.monospacedDigit().weight(.semibold))
-            }
-            Slider(
-                value: Binding(
-                    get: { Double(manager.limit) },
-                    set: { manager.requestLimit(Int(($0 / 5).rounded()) * 5) }
-                ),
-                in: 50...95,
-                step: 5
-            )
-            .disabled(manager.isBusy || manager.isPreparingToQuit || manager.fullOncePending || manager.isLegacyActive)
-
-            HStack(spacing: 5) {
-                ForEach(presets, id: \.self) { preset in
-                    Button {
-                        manager.requestLimit(preset, immediate: true)
-                    } label: {
-                        Text("\(preset)%")
-                            .font(.caption.weight(manager.limit == preset ? .semibold : .regular))
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 6)
-                            .background(manager.limit == preset ? Color.accentColor.opacity(0.17) : Color.primary.opacity(0.045))
-                            .clipShape(RoundedRectangle(cornerRadius: 6))
-                    }
-                    .buttonStyle(.plain)
-                    .disabled(manager.isBusy || manager.isPreparingToQuit || manager.fullOncePending || manager.isLegacyActive)
-                }
-            }
-            Text(manager.text("未启用时仅保存上限设置；启用后修改会立即应用。"))
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-        }
-    }
-
-    private var limitControlSection: some View {
-        VStack(alignment: .leading, spacing: 9) {
-            if manager.isLegacyActive {
-                Label(manager.text("检测到旧版或未托管的固件限充"), systemImage: "exclamationmark.triangle.fill")
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(.orange)
-                Text(manager.text("没有找到首次启用前的原始固件快照。停用旧版限制只能关闭激活标志，不能恢复未保存的阈值。"))
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-                Button {
-                    manager.requestLegacyDisableConfirmation()
-                } label: {
-                    Label(manager.text("停用旧版限制"), systemImage: "power")
-                        .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.bordered)
-                .disabled(!manager.canDisableLegacyLimit)
-            } else if manager.restorePending {
-                Label(manager.text("正在等待恢复原始固件配置"), systemImage: "arrow.triangle.2.circlepath")
-                    .font(.subheadline.weight(.semibold))
-                Text(manager.text("原始配置快照已保留。接入电源后，后台服务会继续恢复；也可以手动重试。"))
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-                Button {
-                    manager.disableLimit()
-                } label: {
-                    Label(manager.text("重试恢复原始配置"), systemImage: "arrow.clockwise")
-                        .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.bordered)
-                .disabled(!manager.canRetryOriginalRestore)
-            } else if manager.fullOncePending {
-                Label(manager.text("本次充满进行中 · 限制暂时关闭"), systemImage: "bolt.fill")
-                    .font(.subheadline.weight(.semibold))
-                Text(manager.text("本次充满结束后会恢复当前 MauLeaf 上限；也可以现在关闭 MauLeaf 限制并恢复最初的固件配置。"))
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-                Button {
-                    manager.disableLimit()
-                } label: {
-                    Label(manager.text("关闭限制充电"), systemImage: "power")
-                        .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.bordered)
-                .disabled(!manager.canDisableLimit)
-            } else if manager.hasOriginalStateSnapshot && manager.currentState?.active == true {
-                HStack {
-                    Label(manager.text("限制充电已启用"), systemImage: "checkmark.circle.fill")
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(.green)
-                    Spacer()
-                    Text(manager.text("上限") + " \(manager.limit)%")
-                        .font(.subheadline.monospacedDigit().weight(.semibold))
-                }
-                Text(manager.text("MauLeaf 已保存启用前的固件配置。关闭时会逐项恢复并验证原始值。"))
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-                Button {
-                    manager.disableLimit()
-                } label: {
-                    Label(manager.text("关闭限制充电"), systemImage: "power")
-                        .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.bordered)
-                .disabled(!manager.canDisableLimit)
-            } else if manager.hasOriginalStateSnapshot {
-                Label(manager.text("原始快照仍保留，但当前限充未启用"), systemImage: "exclamationmark.triangle")
-                    .font(.subheadline.weight(.semibold))
-                Text(manager.text("当前固件状态与 MauLeaf 保存的限充状态不一致。建议恢复原始配置，避免遗留快照。"))
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-                Button {
-                    manager.disableLimit()
-                } label: {
-                    Label(manager.text("恢复原始配置"), systemImage: "arrow.uturn.backward")
-                        .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.bordered)
-                .disabled(!manager.canDisableLimit)
-            } else {
-                Label(manager.text("限制充电尚未启用"), systemImage: "leaf")
-                    .font(.subheadline.weight(.semibold))
-                Text(manager.text("当前不会向固件写入充电上限。启用时会先保存原始配置，之后可随时关闭并恢复。"))
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-                Button {
-                    manager.enableLimit()
-                } label: {
-                    Label(manager.text("启用限制充电"), systemImage: "leaf.fill")
-                        .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.borderedProminent)
-                .disabled(!manager.canEnableLimit)
-            }
-        }
-        .padding(12)
-        .background(Color.primary.opacity(0.035), in: RoundedRectangle(cornerRadius: 11))
         .alert(manager.text("检测到旧版充电限制"), isPresented: $manager.showLegacyDisableConfirmation) {
             Button(manager.text("停用旧版限制"), role: .destructive) {
                 manager.confirmDisableLegacyLimit()
@@ -616,79 +484,268 @@ struct ContentView: View {
         } message: {
             Text(manager.text("当前固件限充没有 MauLeaf 原始快照。无法确认这些值是否由 Preview 4 或其他工具设置。继续操作只会清除 bfF0 激活标志，并保留 bfD0、bfE0 当前值；无法恢复历史阈值。"))
         }
+        .task { manager.start() }
     }
 
-    private var oneTimeChargeSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Text(manager.text("本次充满"))
+    /// Overview card follows the selected screenshot: one large battery
+    /// percentage plus three aligned icon/status rows. No circular ring.
+    private var batteryCard: some View {
+        VStack(alignment: .leading, spacing: 9) {
+            Text(manager.text("当前电量"))
+                .font(.caption.weight(.medium))
+                .foregroundStyle(.secondary)
+
+            Text(manager.batteryPercent.map { "\($0)%" } ?? "--")
+                .font(.system(size: 49, weight: .semibold, design: .rounded))
+                .monospacedDigit()
+                .minimumScaleFactor(0.8)
+                .padding(.bottom, 4)
+
+            statusRow(
+                icon: "powerplug",
+                title: "供电状态",
+                status: manager.popoverPowerStatus
+            )
+            statusDivider
+            statusRow(
+                icon: "checkmark.shield",
+                title: "限制充电",
+                status: manager.popoverLimitStatus,
+                highlighted: manager.currentState?.active == true
+                    && manager.hasOriginalStateSnapshot
+                    && !manager.fullOncePending
+                    && !manager.restorePending
+            )
+            statusDivider
+            statusRow(
+                icon: "bolt",
+                title: "本次充满",
+                status: manager.popoverFullChargeStatus,
+                highlighted: manager.fullOncePending && !manager.fullOnceCancelRequested
+            )
+        }
+        .padding(17)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.primary.opacity(0.045), in: RoundedRectangle(cornerRadius: 16))
+    }
+
+    private func statusRow(
+        icon: String,
+        title: AppText,
+        status: AppText,
+        highlighted: Bool = false
+    ) -> some View {
+        HStack(alignment: .center, spacing: 10) {
+            Image(systemName: icon)
+                .font(.system(size: 16, weight: .regular))
+                .foregroundStyle(highlighted ? Color.green : Color.secondary)
+                .frame(width: 20)
+                .accessibilityHidden(true)
+
+            Text(manager.text(title))
+                .font(.subheadline)
+                .foregroundStyle(.primary)
+
+            Spacer(minLength: 5)
+
+            Text(manager.text(status))
+                .font(.subheadline.weight(.medium))
+                .foregroundStyle(highlighted ? Color.green : Color.primary)
+                .multilineTextAlignment(.trailing)
+                .lineLimit(2)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.horizontal, 9)
+                .padding(.vertical, 4)
+                .background(
+                    highlighted ? Color.green.opacity(0.15) : Color.primary.opacity(0.055),
+                    in: Capsule()
+                )
+        }
+        .frame(minHeight: 33)
+    }
+
+    private var statusDivider: some View {
+        Divider()
+            .opacity(0.55)
+            .padding(.leading, 30)
+    }
+
+    private var rowDivider: some View {
+        Divider()
+            .opacity(0.55)
+            .padding(.leading, 30)
+    }
+
+    private func menuRow(
+        icon: String,
+        title: AppText,
+        value: String? = nil,
+        expanded: Bool,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            HStack(spacing: 11) {
+                Image(systemName: icon)
+                    .font(.system(size: 16, weight: .regular))
+                    .frame(width: 20)
+                    .accessibilityHidden(true)
+
+                Text(manager.text(title))
                     .font(.subheadline.weight(.medium))
-                Spacer()
-                if manager.fullOncePending {
-                    Text(manager.text("进行中"))
-                        .font(.caption.weight(.medium))
-                        .foregroundStyle(.green)
+
+                Spacer(minLength: 8)
+
+                if let value {
+                    Text(value)
+                        .font(.subheadline.monospacedDigit().weight(.medium))
+                }
+
+                Image(systemName: "chevron.right")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                    .rotationEffect(.degrees(expanded ? 90 : 0))
+                    .accessibilityHidden(true)
+            }
+            .contentShape(Rectangle())
+            .padding(.vertical, 12)
+        }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(.isButton)
+    }
+
+    private var limitControls: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Slider(
+                value: Binding(
+                    get: { Double(manager.limit) },
+                    set: { manager.requestLimit(Int(($0 / 5).rounded()) * 5) }
+                ),
+                in: 50...95,
+                step: 5
+            )
+            .accessibilityLabel(manager.text("充电上限"))
+            .disabled(!canAdjustLimit)
+
+            HStack(spacing: 4) {
+                ForEach(presets, id: \.self) { preset in
+                    Button {
+                        manager.requestLimit(preset, immediate: true)
+                    } label: {
+                        Text("\(preset)%")
+                            .font(.caption2.weight(manager.limit == preset ? .semibold : .regular))
+                            .monospacedDigit()
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 7)
+                            .background(
+                                manager.limit == preset
+                                    ? Color.accentColor.opacity(0.20)
+                                    : Color.primary.opacity(0.06),
+                                in: RoundedRectangle(cornerRadius: 7)
+                            )
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(!canAdjustLimit)
                 }
             }
 
-            if manager.fullOncePending {
-                Text(manager.text(manager.fullOnceCancelRequested
-                    ? "已请求恢复原上限；当前未连接电源，重新接电后会继续恢复。"
-                    : "原生固件限充已临时关闭；达到 100% 或 10 小时期限后自动恢复原上限。断开电源时会等待重新接电再恢复。"))
+            limitAction
+
+            if manager.isLegacyActive {
+                Text(manager.text("没有找到首次启用前的原始固件快照。停用旧版限制只能关闭激活标志，不能恢复未保存的阈值。"))
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
-                if !manager.fullOnceCancelRequested {
-                    Button {
-                        manager.cancelFullOnce()
-                    } label: {
-                        Label(manager.text("取消本次充满并恢复上限"), systemImage: "arrow.uturn.backward")
-                            .frame(maxWidth: .infinity)
-                    }
-                    .buttonStyle(.bordered)
-                    .disabled(manager.isBusy)
-                }
-            } else {
-                Text(manager.text("仅本次允许充至 100%；完成后由原生后台服务恢复当前充电上限。"))
+            } else if manager.restorePending || manager.hasOriginalStateSnapshot && manager.currentState?.active != true {
+                Text(manager.text("恢复任务仍在等待；请先恢复原始配置。"))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } else if !manager.hasOriginalStateSnapshot {
+                Text(manager.text("未启用时仅保存上限设置；启用后修改会立即应用。"))
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
-                Button {
-                    manager.beginOneTimeFullCharge()
-                } label: {
-                    Label(manager.text("充满至 100%"), systemImage: "bolt.fill")
-                        .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.borderedProminent)
-                .disabled(
-                    !manager.canStartFullCharge || (manager.batteryPercent ?? 0) >= 100
-                )
             }
         }
-        .padding(12)
-        .background(Color.primary.opacity(0.035), in: RoundedRectangle(cornerRadius: 11))
     }
 
-    private var footer: some View {
-        HStack(spacing: 12) {
-            Spacer()
-            Button {
-                manager.language = manager.language.other
-            } label: {
-                Label(manager.language.switchTitle, systemImage: "globe")
-            }
-            .buttonStyle(.plain)
-            .font(.caption)
-            .foregroundStyle(.secondary)
-            .help(manager.text("切换界面语言"))
+    private var canAdjustLimit: Bool {
+        !manager.isBusy && !manager.isPreparingToQuit
+            && !manager.fullOncePending && !manager.isLegacyActive
+            && (!manager.hasOriginalStateSnapshot || manager.isAdapterConnected)
+    }
 
-            Button(manager.text("退出")) { NSApp.terminate(nil) }
-                .buttonStyle(.plain)
+    @ViewBuilder
+    private var limitAction: some View {
+        if manager.isLegacyActive {
+            Button(manager.text("停用旧版限制")) {
+                manager.requestLegacyDisableConfirmation()
+            }
+            .disabled(!manager.canDisableLegacyLimit)
+            .buttonStyle(.bordered)
+        } else if manager.restorePending || manager.hasOriginalStateSnapshot && manager.currentState?.active != true {
+            Button(manager.text("恢复原始配置")) {
+                manager.disableLimit()
+            }
+            .disabled(!manager.canRetryOriginalRestore && !manager.canDisableLimit)
+            .buttonStyle(.bordered)
+        } else if manager.hasOriginalStateSnapshot && manager.currentState?.active == true {
+            Button(manager.text("关闭限制充电")) {
+                manager.disableLimit()
+            }
+            .disabled(!manager.canDisableLimit)
+            .buttonStyle(.bordered)
+        } else {
+            Button(manager.text("启用限制充电")) {
+                manager.enableLimit()
+            }
+            .disabled(!manager.canEnableLimit)
+            .buttonStyle(.borderedProminent)
+        }
+    }
+
+    private var oneTimeToggleRow: some View {
+        HStack(spacing: 11) {
+            Image(systemName: "bolt")
+                .font(.system(size: 16))
+                .frame(width: 20)
+                .accessibilityHidden(true)
+            Text(manager.text("本次充满"))
+                .font(.subheadline.weight(.medium))
+            Spacer()
+            Toggle(
+                manager.text("本次充满"),
+                isOn: Binding(
+                    get: { manager.fullOncePending && !manager.fullOnceCancelRequested },
+                    set: { requested in
+                        if requested { manager.beginOneTimeFullCharge() }
+                        else { manager.cancelFullOnce() }
+                    }
+                )
+            )
+            .labelsHidden()
+            .toggleStyle(.switch)
+            .controlSize(.small)
+            .disabled(manager.fullOncePending
+                ? manager.fullOnceCancelRequested || manager.isBusy || manager.isPreparingToQuit
+                : !manager.canStartFullCharge || (manager.batteryPercent ?? 0) >= 100)
+        }
+        .padding(.vertical, 10)
+    }
+
+    private var settingsControls: some View {
+        HStack {
+            Text(manager.text("界面语言"))
                 .font(.caption)
                 .foregroundStyle(.secondary)
-                .disabled(manager.isPreparingToQuit)
-                .help(manager.text("正常退出会先关闭限制充电并验证恢复。若无法安全恢复，将取消退出。"))
+            Spacer()
+            Button(manager.language.switchTitle) {
+                manager.language = manager.language.other
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+            .help(manager.text("切换界面语言"))
         }
+        .padding(.vertical, 5)
     }
 }
 
@@ -851,6 +908,33 @@ final class ChargeManager: ObservableObject {
     var batteryDisplayText: AppText {
         AppText(key: batteryStateText)
     }
+
+    /// Status labels for the compact popover, derived from the actual
+    /// firmware and one-time task (not merely the saved slider preference).
+    var popoverPowerStatus: AppText {
+        if batteryStateText == "正在充电" { return "已接电源，充电中" }
+        return AppText(key: batteryStateText)
+    }
+
+    var popoverLimitStatus: AppText {
+        if restorePending { return "等待恢复" }
+        if isLegacyActive { return "旧版限充" }
+        if fullOncePending && hasOriginalStateSnapshot {
+            return "已暂停（\(limit)%）"
+        }
+        if currentState?.active == true && hasOriginalStateSnapshot {
+            return "已启用（\(currentState?.upper ?? limit)%）"
+        }
+        if hasOriginalStateSnapshot { return "待恢复" }
+        return "未启用"
+    }
+
+    var popoverFullChargeStatus: AppText {
+        if fullOnceCancelRequested { return "正在恢复" }
+        return fullOncePending ? "进行中" : "未开启"
+    }
+
+
 
     var batteryStateSymbol: String {
         switch batteryStateText {

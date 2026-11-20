@@ -4,6 +4,9 @@
 
 本版本由 main 分支合并后自动构建，仅提供 Apple Silicon arm64 安装包，不再构建或发布 Intel 版本。
 
+- 按最新设计重做菜单栏专属弹出面板，无独立主窗口：大号电量 + 供电/限充/本次充满三项图标状态，移除原大圆环与重复说明。
+- 充电上限点击原位展开滑杆、预设与启用/关闭按钮；本次充满为开关；设置原位展开语言切换；退出继续使用安全恢复及保留/移除 Helper 的原流程。
+
 - 修复成功通知语言不一致：限充写入、关闭恢复、本次充满与取消本次充满均使用当前界面的简短中英文提示。成功提示可完整显示，固件 Helper 的英文审计信息不再占据悬浮提示。
 - 首次启动默认不启用充电限制；用户点击「启用限制充电」后才写入原生固件。
 - 正常退出新增「是否保留控制组件」：可选择「保留组件并退出」「移除组件并退出」「取消」。两种退出方式都立即恢复原始固件并验证；保留时停止后台 Helper、保留文件下次使用，移除时停止 Helper 并删除系统级脚本/服务，App 由用户在 Finder 删除。恢复或清理失败会取消正常退出；紧急「仍然退出」不代表成功恢复。
@@ -25,6 +28,9 @@
 ### MauLeaf {{VERSION}} — Native-control preview
 
 This release is built automatically after changes are merged into main. It ships Apple Silicon arm64 only; Intel builds and release artifacts are discontinued.
+
+- Redesigned the menu-bar-only popover to match the approved compact mockup: large battery percentage and icon-accompanied power, firmware-limit and one-time-full statuses. No detached main window, oversized battery ring or duplicated status card.
+- Charging-limit row expands inline to reveal slider, presets and explicit enable/disable; one-time full charge is a switch; Settings expands to the language switch; Quit retains the existing safe firmware restore and helper keep/remove choice.
 
 - Fix native success notifications: applying/disabling a limit and starting/canceling a one-time full charge now show compact, localized feedback. The success toast no longer truncates the message; privileged helper audit text remains in logs.
 - Charging limits are off by default on first launch. The user must click “Enable charging limit” before firmware is changed.

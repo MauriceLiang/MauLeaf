@@ -91,6 +91,22 @@ struct LocalizationTests {
         }
 
 
+        let activeLimit: AppText = "已启用（\(85)%）"
+        check(activeLimit.source == "已启用（85%）"
+              && activeLimit.localized(in: .english) == "Enabled (85%)",
+              "active compact status badge localizes numeric charge limit")
+        let pausedLimit: AppText = "已暂停（\(85)%）"
+        check(pausedLimit.localized(in: .english) == "Paused (85%)",
+              "one-time charge temporarily pauses rather than disables configured limit")
+        for key in ["供电状态", "限制充电", "本次充满", "设置", "退出 MauLeaf",
+                    "界面语言", "正在恢复", "恢复任务仍在等待；请先恢复原始配置。"] {
+            check(chinese[key] == key && translations[key] != nil,
+                  "compact popover label is available in both languages: \(key)")
+        }
+        check(translations["退出 MauLeaf"] == "Quit MauLeaf"
+              && translations["供电状态"] == "Power supply",
+              "popover quit and power status reflect English preference")
+
         print("LocalizationTests: PASS (\(checks) checks; real bundled string tables)")
     }
 }

@@ -171,3 +171,18 @@
 "恢复任务仍在等待；请先恢复原始配置。" = "Recovery is pending. Restore the original firmware configuration first.";
 
 "限制充电" = "Charging limit";
+"状态未知" = "Unknown state";
+"需要更新" = "Update required";
+"原生控制服务需要更新" = "Native control service needs an update";
+"旧版控制服务存在未确认的限充或恢复状态，请勿移除恢复组件。" = "The older helper has an unverified charging or recovery state. Do not remove recovery components.";
+"点击启用限制充电时才会申请管理员授权更新服务。" = "Administrator authorization to upgrade the helper will be requested only when enabling a charging limit.";
+"未安装原生固件控制服务；点击启用限制充电时再请求授权。" = "No native control helper is installed. Authorization will be requested only if you enable charging limits.";
+"固件控制状态未知" = "Firmware control state unknown";
+"无法连接固件控制服务；请保留恢复组件：%@" = "Cannot connect to the native helper. Preserve recovery components: %@";
+"正在安装或更新原生固件服务，需要管理员授权…" = "Installing or updating the native helper requires administrator authorization…";
+"原生控制服务已就绪。" = "Native control helper ready.";
+"无法准备原生控制服务：%@" = "Could not prepare the native helper: %@";
+"无法确认固件控制状态，未写入充电限制。" = "The firmware state could not be verified. No charging limit was written.";
+"未安装控制组件，无须恢复固件。" = "No native helper was installed. No firmware restoration is needed.";
+"控制服务版本过旧；退出不会自动授权升级。" = "The native helper is outdated. Quitting will not automatically request authorization to upgrade it.";
+"安装后的服务存在活动限充或待恢复任务，拒绝覆盖固件状态。" = "The installed helper reports an active charging limit or pending restoration. Firmware state was not overwritten.";

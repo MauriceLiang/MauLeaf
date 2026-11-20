@@ -98,11 +98,21 @@ jobs:
               echo "VERSION must contain a semantic version such as 0.8.0" >&2
               exit 1
             }
-            latest="$(git tag --list "v${BASE_VERSION}-preview.*" \
-              | sed -nE 's/^v[0-9]+\.[0-9]+\.[0-9]+-preview\.([0-9]+)$/\1/p' \
-              | sort -n | tail -n 1)"
-            next=$((${latest:-0} + 1))
-            RELEASE_TAG="v${BASE_VERSION}-preview.${next}"
+            # A version with committed, bilingual stable notes is released
+            # once. Do not generate further previews for a released version.
+            if git ls-remote --exit-code --tags origin "refs/tags/v${BASE_VERSION}" >/dev/null 2>&1; then
+              echo "Stable v${BASE_VERSION} already exists. No automatic preview will be published."
+              exit 0
+            fi
+            if [[ -s "docs/releases/v${BASE_VERSION}.md" ]]; then
+              RELEASE_TAG="v${BASE_VERSION}"
+            else
+              latest="$(git tag --list "v${BASE_VERSION}-preview.*" \
+                | sed -nE 's/^v[0-9]+\.[0-9]+\.[0-9]+-preview\.([0-9]+)$/\1/p' \
+                | sort -n | tail -n 1)"
+              next=$((${latest:-0} + 1))
+              RELEASE_TAG="v${BASE_VERSION}-preview.${next}"
+            fi
             CREATE_TAG=true
           elif [[ "$EVENT_NAME" == "workflow_dispatch" && -n "$PREVIEW_TAG" ]]; then
             [[ "$GITHUB_REF_VALUE" == "refs/heads/main" ]] || {
@@ -232,3 +242,24 @@ jobs:
           gh release create "$RELEASE_TAG" artifacts/*.dmg artifacts/SHA256SUMS.txt \
             --verify-tag --title "MauLeaf $RELEASE_TAG" \
             --notes-file artifacts/RELEASE_NOTES.md "${PRE_FLAG[@]}"
+
+  # Do not prune anything until the stable Release and both assets exist.
+  cleanup:
+    if: >-
+      needs.release.result == 'success' &&
+      needs.prepare.outputs.tag != '' &&
+      !contains(needs.prepare.outputs.tag, '-preview.')
+    needs: [prepare, release]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.tag }}
+      - name: Verify official release, remove superseded previews and merged branches
+        env:
+          GH_TOKEN: ${{ github.token }}
+          STABLE_TAG: ${{ needs.prepare.outputs.tag }}
+        run: bash Scripts/ci/cleanup-after-stable.sh "$STABLE_TAG"

@@ -68,6 +68,19 @@ private final class MauLeafCardPanel: NSPanel {
     override var canBecomeMain: Bool { true }
 }
 
+/// Gentle first-presentation reveal: the card grows downward from the
+/// menu-bar pointer without shifting its top edge or distorting SwiftUI text.
+enum MenuPanelEntrance {
+    static let duration: TimeInterval = 0.22
+
+    static func initialFrame(for target: NSRect) -> NSRect {
+        let revealDistance = min(14, max(8, target.height * 0.04))
+        let startHeight = max(1, target.height - revealDistance)
+        return NSRect(x: target.minX, y: target.maxY - startHeight,
+                      width: target.width, height: startHeight)
+    }
+}
+
 @MainActor
 private final class MauLeafMenuController: NSObject {
     private let manager = ChargeManager()
@@ -81,6 +94,8 @@ private final class MauLeafMenuController: NSObject {
     private var measuredContentHeight: CGFloat = 0
     private var lastTargetFrame: NSRect?
     private var allowAnimatedResizes = false
+    private var entranceInProgress = false
+    private var entranceGeneration: UInt64 = 0
     private let resizeDuration: TimeInterval = 0.24
 
     override init() {
@@ -223,14 +238,49 @@ private final class MauLeafMenuController: NSObject {
             dismissPanelIfAllowed()
             return
         }
-        // Initial opening uses the measured size without an entrance snap.
-        allowAnimatedResizes = measuredContentHeight > 0
-        positionPanel()
-        panel.makeKeyAndOrderFront(nil)
-        NSApp.activate(ignoringOtherApps: true)
+        showPanelFromMenuBar()
         startOutsideClickMonitoring()
         manager.refresh()
         manager.setPanelVisible(true)
+    }
+
+    /// First opening has its own entrance animation, independent of the
+    /// 240ms in-card disclosure resize. Always position the final target
+    /// first, then reveal a slightly shorter, translucent panel from its
+    /// fixed top anchor.
+    private func showPanelFromMenuBar() {
+        entranceGeneration &+= 1
+        let generation = entranceGeneration
+        allowAnimatedResizes = measuredContentHeight > 0
+        entranceInProgress = false
+        lastTargetFrame = nil
+        positionPanel()
+        let finalFrame = panel.frame
+
+        if NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
+            panel.alphaValue = 1
+            panel.makeKeyAndOrderFront(nil)
+        } else {
+            panel.alphaValue = 0
+            panel.setFrame(MenuPanelEntrance.initialFrame(for: finalFrame), display: false)
+            entranceInProgress = true
+            panel.makeKeyAndOrderFront(nil)
+            NSAnimationContext.runAnimationGroup { context in
+                context.duration = MenuPanelEntrance.duration
+                context.timingFunction = CAMediaTimingFunction(name: .easeOut)
+                panel.animator().alphaValue = 1
+                panel.animator().setFrame(finalFrame, display: true)
+            } completionHandler: { [weak self] in
+                guard let self, self.entranceGeneration == generation else { return }
+                self.entranceInProgress = false
+                if self.panel.isVisible {
+                    // Layout can change while the entrance is in flight.
+                    self.positionPanel(animatedHeight: self.allowAnimatedResizes)
+                    self.allowAnimatedResizes = true
+                }
+            }
+        }
+        NSApp.activate(ignoringOtherApps: true)
     }
 
     private func startOutsideClickMonitoring() {
@@ -256,7 +306,11 @@ private final class MauLeafMenuController: NSObject {
 
     private func dismissPanelIfAllowed() {
         guard panel.isVisible, panel.attachedSheet == nil, !manager.isBusy else { return }
+        // Invalidate stale completion handlers before closing/reopening.
+        entranceGeneration &+= 1
+        entranceInProgress = false
         panel.orderOut(nil)
+        panel.alphaValue = 1
         allowAnimatedResizes = false
         manager.setPanelVisible(false)
         if let monitor = globalMouseMonitor {
@@ -275,6 +329,9 @@ private final class MauLeafMenuController: NSObject {
         guard abs(height - measuredContentHeight) >= 1 else { return }
         measuredContentHeight = height
         if panel.isVisible {
+            // During the entrance, do not let an asynchronous geometry
+            // preference override the animated frame halfway through.
+            if entranceInProgress { return }
             positionPanel(animatedHeight: allowAnimatedResizes)
             // The initial visible fallback-size correction is immediate.
             allowAnimatedResizes = true

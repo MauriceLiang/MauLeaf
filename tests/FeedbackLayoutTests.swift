@@ -10,7 +10,8 @@ struct FeedbackLayoutTests {
         // Preview 10: one visible material surface changes shape inside a
         // stationary, full-sized canvas. Test the exact shape interpolation
         // at left/center/right leaf anchors and intermediate frames.
-        for leafX in [18.0, 175.0, 342.0] {
+        let leafPositions: [CGFloat] = [18, 175, 342]
+        for leafX in leafPositions {
             let bounds = CGRect(x: 0, y: 0, width: 360, height: 292)
             let compact = MenuCardMotion.surfaceRect(in: bounds, leafX: leafX, progress: 0)
             let expanded = MenuCardMotion.surfaceRect(in: bounds, leafX: leafX, progress: 1)

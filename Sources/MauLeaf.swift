@@ -880,6 +880,12 @@ final class ChargeManager: ObservableObject {
     private var pendingAction: PendingAction?
     private var lastAction: PendingAction?
 
+    #if MAULEAF_LAYOUT_TESTING
+    func setFeedbackOperationForTesting(_ operation: ChargeOperation?) {
+        activeOperation = operation
+    }
+    #endif
+
     private enum PendingAction {
         case enable
         case limit(Int)

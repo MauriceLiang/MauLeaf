@@ -56,13 +56,34 @@ struct FeedbackLayoutTests {
                 return (host.fittingSize.height, feedback.fittingSize.height)
             }
             let normal = measure()
+            // Measure each piece separately: the closed battery card must
+            // actually reclaim space, not merely shrink its outer popover.
+            let cardHost = NSHostingView(rootView: ContentView(manager: manager)
+                .batteryCardForTesting.frame(width: 328)
+                .environment(\.colorScheme, .dark))
+            let settingsHost = NSHostingView(rootView: ContentView(manager: manager)
+                .settingsControlsForTesting.frame(width: 298)
+                .environment(\.colorScheme, .dark))
+            RunLoop.main.run(until: Date().addingTimeInterval(0.03))
+            cardHost.layoutSubtreeIfNeeded()
+            settingsHost.layoutSubtreeIfNeeded()
+            let compactCardHeight = cardHost.fittingSize.height
+            let compactSettingsHeight = settingsHost.fittingSize.height
+            guard (118...151).contains(compactCardHeight),
+                  (59...95).contains(compactSettingsHeight) else {
+                fputs("FAIL: compact overview/settings are too tall in \(language.rawValue): card=\(compactCardHeight), settings=\(compactSettingsHeight)\n", stderr)
+                exit(1)
+            }
             guard !manager.showBatteryLevel else {
                 fatalError("Compact mode must be the default.")
             }
             manager.showBatteryLevel = true
             try await Task.sleep(nanoseconds: 280_000_000)
             let expanded = measure()
-            guard expanded.0 > normal.0 + 40 && expanded.1 == 0
+            cardHost.layoutSubtreeIfNeeded()
+            let expandedCardHeight = cardHost.fittingSize.height
+            guard expandedCardHeight > compactCardHeight + 40,
+                  expanded.0 > normal.0 + 40 && expanded.1 == 0
                   && UserDefaults.standard.bool(forKey: "showBatteryLevel") else {
                 fputs("FAIL: optional battery display should expand the panel without an overlay: compact=\(normal), expanded=\(expanded)\n", stderr)
                 exit(1)
@@ -70,7 +91,9 @@ struct FeedbackLayoutTests {
             manager.showBatteryLevel = false
             try await Task.sleep(nanoseconds: 280_000_000)
             let compactAgain = measure()
-            guard abs(compactAgain.0 - normal.0) < 1.5
+            cardHost.layoutSubtreeIfNeeded()
+            guard abs(cardHost.fittingSize.height - compactCardHeight) < 1.5,
+                  abs(compactAgain.0 - normal.0) < 1.5
                   && !UserDefaults.standard.bool(forKey: "showBatteryLevel") else {
                 fputs("FAIL: disabling battery level should reclaim header space: normal=\(normal), compactAgain=\(compactAgain)\n", stderr)
                 exit(1)
@@ -108,7 +131,7 @@ struct FeedbackLayoutTests {
                 fputs("FAIL: inline feedback layout: normal=\(normal), busy=\(busy), success=\(success), failure=\(failure); progress=\(limitProgress)\n", stderr)
                 exit(1)
             }
-            print("FeedbackLayoutTests: PASS (\(language.rawValue); optional battery panel height, compact power states, inline feedback)")
+            print("FeedbackLayoutTests: PASS (\(language.rawValue); card=\(compactCardHeight)pt, settings=\(compactSettingsHeight)pt, optional battery and inline feedback)")
         }
         _ = await manager.prepareForTermination()
         UserDefaults.standard.removeObject(forKey: "nativeFirmwareWriteConfirmed")

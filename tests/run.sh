@@ -98,36 +98,25 @@ grep -Fq 'styleMask: [.borderless]' "$ROOT/Sources/MauLeaf.swift"
 grep -Fq 'panel.isOpaque = false' "$ROOT/Sources/MauLeaf.swift"
 grep -Fq 'panel.backgroundColor = .clear' "$ROOT/Sources/MauLeaf.swift"
 grep -Fq 'panel.hasShadow = false' "$ROOT/Sources/MauLeaf.swift"
-# Preview 10 uses one fixed transparent NSPanel and one SwiftUI
-# animatable material shape. No temporary proxy panel may be spawned.
-grep -Fq 'final class MenuCardPresentation: ObservableObject' "$ROOT/Sources/MauLeaf.swift"
-grep -Fq 'private struct AnimatedFloatingCardShape: Shape' "$ROOT/Sources/MauLeaf.swift"
-grep -Fq 'struct MenuCardMorphRoot: View' "$ROOT/Sources/MauLeaf.swift"
-grep -Fq 'MenuCardMorphRoot(manager: manager, presentation: presentation)' "$ROOT/Sources/MauLeaf.swift"
-grep -Fq 'var animatableData: AnimatablePair<CGFloat, CGFloat>' "$ROOT/Sources/MauLeaf.swift"
-grep -Fq 'static let compactWidth: CGFloat = 52' "$ROOT/Sources/MauLeaf.swift"
-grep -Fq 'static let compactHeight: CGFloat = 14' "$ROOT/Sources/MauLeaf.swift"
-grep -Fq 'static let closeDuration: TimeInterval = 0.26' "$ROOT/Sources/MauLeaf.swift"
-grep -Fq 'dampingFraction: 0.9' "$ROOT/Sources/MauLeaf.swift"
-grep -Fq 'MenuCardMotion.contentOpacity(presentation.progress)' "$ROOT/Sources/MauLeaf.swift"
-grep -Fq '.clipShape(shape)' "$ROOT/Sources/MauLeaf.swift"
+# A native menu-bar card opens/closes immediately: no shape morph,
+# entrance animation, delayed dismissal or temporary proxy NSPanel.
+grep -Fq 'struct FloatingCardShape: Shape' "$ROOT/Sources/MauLeaf.swift"
+grep -Fq 'let root = ContentView(manager: manager)' "$ROOT/Sources/MauLeaf.swift"
+grep -Fq 'panel.makeKeyAndOrderFront(nil)' "$ROOT/Sources/MauLeaf.swift"
+grep -Fq 'panel.orderOut(nil)' "$ROOT/Sources/MauLeaf.swift"
 grep -Fq 'panel.hasShadow = false' "$ROOT/Sources/MauLeaf.swift"
-grep -Fq 'panel.ignoresMouseEvents = true' "$ROOT/Sources/MauLeaf.swift"
-grep -Fq 'morphGeneration &+= 1' "$ROOT/Sources/MauLeaf.swift"
-grep -Fq 'accessibilityDisplayShouldReduceMotion' "$ROOT/Sources/MauLeaf.swift"
 [[ "$(grep -Fc 'panel = MauLeafCardPanel(' "$ROOT/Sources/MauLeaf.swift")" -eq 1 ]]
-if grep -Fq 'NSPanel(contentRect:' "$ROOT/Sources/MauLeaf.swift"; then
-    echo "No second NSPanel or animation proxy is permitted" >&2
-    exit 1
-fi
 [[ "$(grep -Fc '.fill(.regularMaterial)' "$ROOT/Sources/MauLeaf.swift")" -eq 1 ]]
-if grep -Eq 'morphWindow|makeMorphWindow|MenuPanelMorph|MenuPanelEntrance|NSVisualEffectView\(frame:|private struct FloatingCardShape' "$ROOT/Sources/MauLeaf.swift"; then
-    echo "The Preview 9 proxy or a second static surface must not return" >&2
+if grep -Eq 'MenuCardMotion|MenuCardPresentation|AnimatedFloatingCardShape|MenuCardMorphRoot|MenuPanelMorph|MenuPanelEntrance|makeMorphWindow|morphGeneration|morphState|closePanelTowardsLeaf|showPanelFromMenuBar' "$ROOT/Sources/MauLeaf.swift"; then
+    echo "Menu-bar popup must appear and disappear instantly without morph state" >&2
     exit 1
 fi
-# The menu control is a non-scrollable native card: a trackpad or mouse wheel
-# must never move the entire popup or reveal rubber-band overscroll.
-grep -Fq 'let root = MenuCardMorphRoot(manager: manager, presentation: presentation)' "$ROOT/Sources/MauLeaf.swift"
+if grep -Eq 'NSPanel\(contentRect:|NSVisualEffectView\(frame:' "$ROOT/Sources/MauLeaf.swift"; then
+    echo "No secondary animated popup panel or visual-effect proxy may return" >&2
+    exit 1
+fi
+# Keep the root non-scrollable: wheel and trackpad swipes must not move
+# the menu card, but internal controls still expand its intrinsic height.
 grep -Fq '.fixedSize(horizontal: false, vertical: true)' "$ROOT/Sources/MauLeaf.swift"
 grep -Fq '.onPreferenceChange(PanelContentHeightPreferenceKey.self)' "$ROOT/Sources/MauLeaf.swift"
 if grep -Eq 'ScrollView[[:space:]]*\{|NSScrollView[[:space:]]*\(' "$ROOT/Sources/MauLeaf.swift"; then

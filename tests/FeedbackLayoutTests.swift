@@ -12,6 +12,7 @@ struct FeedbackLayoutTests {
         defer { try? FileManager.default.removeItem(at: directory) }
 
         UserDefaults.standard.set(80, forKey: "chargeLimit")
+        UserDefaults.standard.removeObject(forKey: "showBatteryLevel")
         UserDefaults.standard.set(true, forKey: "nativeFirmwareWriteConfirmed")
         let backend = FixtureNativeFirmwareBackend()
         let manager = ChargeManager(backend: backend, autoInstallNativeHelper: false)
@@ -55,6 +56,25 @@ struct FeedbackLayoutTests {
                 return (host.fittingSize.height, feedback.fittingSize.height)
             }
             let normal = measure()
+            guard !manager.showBatteryLevel else {
+                fatalError("Compact mode must be the default.")
+            }
+            manager.showBatteryLevel = true
+            RunLoop.main.run(until: Date().addingTimeInterval(0.28))
+            let expanded = measure()
+            guard expanded.0 > normal.0 + 40 && expanded.1 == 0
+                  && UserDefaults.standard.bool(forKey: "showBatteryLevel") else {
+                fputs("FAIL: optional battery display should expand the panel without an overlay: compact=\(normal), expanded=\(expanded)\n", stderr)
+                exit(1)
+            }
+            manager.showBatteryLevel = false
+            RunLoop.main.run(until: Date().addingTimeInterval(0.28))
+            let compactAgain = measure()
+            guard abs(compactAgain.0 - normal.0) < 1.5
+                  && !UserDefaults.standard.bool(forKey: "showBatteryLevel") else {
+                fputs("FAIL: disabling battery level should reclaim header space: normal=\(normal), compactAgain=\(compactAgain)\n", stderr)
+                exit(1)
+            }
             for supplyState in ["正在充电", "已接电源，未充电", "已接电源，已充满", "电池供电", "电池状态不可用"] {
                 manager.batteryStateText = supplyState
                 let variant = measure()
@@ -88,10 +108,11 @@ struct FeedbackLayoutTests {
                 fputs("FAIL: inline feedback layout: normal=\(normal), busy=\(busy), success=\(success), failure=\(failure); progress=\(limitProgress)\n", stderr)
                 exit(1)
             }
-            print("FeedbackLayoutTests: PASS (\(language.rawValue); single-line compact status, in-card progress, inline errors)")
+            print("FeedbackLayoutTests: PASS (\(language.rawValue); optional battery panel height, compact power states, inline feedback)")
         }
         _ = await manager.prepareForTermination()
         UserDefaults.standard.removeObject(forKey: "nativeFirmwareWriteConfirmed")
+        UserDefaults.standard.removeObject(forKey: "showBatteryLevel")
     }
 
     @MainActor

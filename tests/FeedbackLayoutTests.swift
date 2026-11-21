@@ -7,25 +7,42 @@ struct FeedbackLayoutTests {
     static func main() async throws {
         _ = NSApplication.shared
         NSApp.setActivationPolicy(.prohibited)
-        // The compact endpoint is the real status leaf. Opening and
-        // closing must use exactly the same geometric endpoints rather than
-        // a small asymmetric 8-14pt height change.
-        for menuX in [35.0, 580.0, 1390.0] {
-            let leaf = NSRect(x: menuX, y: 877, width: 28, height: 24)
-            let iconFrame = MenuPanelMorph.iconFrame(for: leaf)
-            for height in [292.0, 374.0, 510.0] {
-                let cardFrame = NSRect(x: max(6, menuX - 160), y: 570 - height,
-                                       width: 360, height: height)
-                guard abs(iconFrame.midX - leaf.midX) < 0.01,
-                      abs(iconFrame.midY - leaf.midY) < 0.01,
-                      iconFrame.width == MenuPanelMorph.iconSide,
-                      iconFrame.height == MenuPanelMorph.iconSide,
-                      iconFrame.width < cardFrame.width / 10,
-                      iconFrame.height < cardFrame.height / 8,
-                      MenuPanelMorph.surfaceDuration > MenuPanelMorph.contentDuration else {
-                    fatalError("Leaf-to-card and card-to-leaf endpoints must be symmetric and icon-sized")
-                }
+        // Preview 10: one visible material surface changes shape inside a
+        // stationary, full-sized canvas. Test the exact shape interpolation
+        // at left/center/right leaf anchors and intermediate frames.
+        for leafX in [18.0, 175.0, 342.0] {
+            let bounds = CGRect(x: 0, y: 0, width: 360, height: 292)
+            let compact = MenuCardMotion.surfaceRect(in: bounds, leafX: leafX, progress: 0)
+            let expanded = MenuCardMotion.surfaceRect(in: bounds, leafX: leafX, progress: 1)
+            guard compact.width == 52, compact.height == 14,
+                  compact.minY == 9, compact.minX >= MenuCardMotion.cardInset,
+                  compact.maxX <= bounds.maxX - MenuCardMotion.cardInset,
+                  expanded.minX == MenuCardMotion.cardInset,
+                  expanded.minY == 0,
+                  expanded.width == 360 - 2 * MenuCardMotion.cardInset,
+                  expanded.height == 292 - MenuCardMotion.cardInset else {
+                fatalError("One canvas must support a small capsule and the same final card")
             }
+            var lastWidth: CGFloat = 0
+            var lastHeight: CGFloat = 0
+            for step in 0...20 {
+                let p = CGFloat(step) / 20
+                let frame = MenuCardMotion.surfaceRect(in: bounds, leafX: leafX, progress: p)
+                guard frame.width >= lastWidth, frame.height >= lastHeight,
+                      frame.minX >= 0, frame.maxX <= bounds.maxX,
+                      frame.minY >= 0, frame.maxY <= bounds.maxY,
+                      frame.height > 0 else {
+                    fatalError("Opening and closing must follow a continuous, bounded path")
+                }
+                lastWidth = frame.width
+                lastHeight = frame.height
+            }
+        }
+        guard MenuCardMotion.contentOpacity(0.2) == 0,
+              MenuCardMotion.contentOpacity(1.0) == 1,
+              MenuCardMotion.contentOpacity(0.5) < 0.05,
+              MenuCardMotion.contentOpacity(0.85) > 0.85 else {
+            fatalError("Text must fade in after the shell forms and fade out before collapse")
         }
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent("mauleaf-layout-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)

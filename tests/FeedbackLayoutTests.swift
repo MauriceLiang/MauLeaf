@@ -97,6 +97,25 @@ struct FeedbackLayoutTests {
                 return (host.fittingSize.height, feedback.fittingSize.height)
             }
             let normal = measure()
+            // Exercise the same NON-SCROLLING presentation root that the
+            // real panel hosts, rather than testing ContentView in isolation.
+            let presentation = MenuCardPresentation()
+            presentation.progress = 1
+            let panelHost = NSHostingView(rootView:
+                MenuCardMorphRoot(manager: manager, presentation: presentation)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(width: 360)
+                    .environment(\.colorScheme, .dark))
+            panelHost.layoutSubtreeIfNeeded()
+            func containsScrollView(_ view: NSView) -> Bool {
+                if view is NSScrollView { return true }
+                return view.subviews.contains(where: containsScrollView)
+            }
+            guard !containsScrollView(panelHost),
+                  abs(panelHost.fittingSize.height - normal.0) < 5 else {
+                fputs("FAIL: popup must size intrinsically without an NSScrollView: panel=\(panelHost.fittingSize.height), content=\(normal.0)\n", stderr)
+                exit(1)
+            }
             // Exercise both disclosure layouts in each language. They must
             // grow the same single-card popover, not overlay or replace it.
             func measuredDisclosureHeight(limit: Bool, settings: Bool) -> CGFloat {
@@ -152,6 +171,12 @@ struct FeedbackLayoutTests {
             manager.showBatteryLevel = true
             try await Task.sleep(nanoseconds: 280_000_000)
             let expanded = measure()
+            panelHost.layoutSubtreeIfNeeded()
+            guard panelHost.fittingSize.height > normal.0 + 40,
+                  !containsScrollView(panelHost) else {
+                fputs("FAIL: non-scrolling popup did not grow with optional battery header\n", stderr)
+                exit(1)
+            }
             let expandedCardHeight = measuredCardHeight()
             guard expandedCardHeight > compactCardHeight + 40,
                   expanded.0 > normal.0 + 40 && expanded.1 == 0

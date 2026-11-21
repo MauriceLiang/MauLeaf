@@ -386,25 +386,25 @@ private final class MauLeafMenuController: NSObject {
         if NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
             presentation.progress = 1
             finishOpening(generation: generation)
+        } else if wasHidden {
+            DispatchQueue.main.async { [weak self] in
+                self?.beginSpringOpening(generation: generation)
+            }
         } else {
-            let startAnimation = { [weak self] in
-                guard let self, self.morphGeneration == generation,
-                      self.morphState == .opening else { return }
-                withAnimation(.spring(response: MenuCardMotion.openDuration,
-                                      dampingFraction: 0.9, blendDuration: 0)) {
-                    self.presentation.progress = 1
-                }
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.44) { [weak self] in
-                    self?.finishOpening(generation: generation)
-                }
-            }
-            if wasHidden {
-                DispatchQueue.main.async(execute: startAnimation)
-            } else {
-                startAnimation()
-            }
+            beginSpringOpening(generation: generation)
         }
         NSApp.activate(ignoringOtherApps: true)
+    }
+
+    private func beginSpringOpening(generation: UInt64) {
+        guard morphGeneration == generation, morphState == .opening else { return }
+        withAnimation(.spring(response: MenuCardMotion.openDuration,
+                              dampingFraction: 0.9, blendDuration: 0)) {
+            presentation.progress = 1
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.44) { [weak self] in
+            self?.finishOpening(generation: generation)
+        }
     }
 
     private func finishOpening(generation: UInt64) {

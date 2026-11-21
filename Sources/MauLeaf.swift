@@ -483,25 +483,42 @@ struct ContentView: View {
         .task { manager.start() }
     }
 
-    /// Overview card follows the selected screenshot: one large battery
-    /// percentage plus three aligned icon/status rows. No circular ring.
+    /// The default card is a compact three-row control surface. The
+    /// optional battery percentage adds a small header without reserving
+    /// empty space when disabled.
     private var batteryCard: some View {
         VStack(alignment: .leading, spacing: 9) {
-            Text(manager.text("当前电量"))
-                .font(.caption.weight(.medium))
-                .foregroundStyle(.secondary)
+            if manager.showBatteryLevel {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(manager.text("当前电量"))
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(.secondary)
 
-            Text(manager.batteryPercent.map { "\($0)%" } ?? "--")
-                .font(.system(size: 49, weight: .semibold, design: .rounded))
-                .monospacedDigit()
-                .minimumScaleFactor(0.8)
-                .padding(.bottom, 4)
+                    HStack(alignment: .firstTextBaseline, spacing: 2) {
+                        Text(manager.batteryPercent.map(String.init) ?? "--")
+                            .font(.system(size: 42, weight: .semibold, design: .rounded))
+                            .monospacedDigit()
+                            .foregroundStyle(manager.batteryNumberColor)
+                            .contentTransition(.numericText())
+
+                        if manager.batteryPercent != nil {
+                            Text("%")
+                                .font(.system(size: 24, weight: .medium, design: .rounded))
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    .animation(.easeInOut(duration: 0.2), value: manager.batteryPercent)
+                }
+                .padding(.bottom, 3)
+                .transition(.opacity.combined(with: .move(edge: .top)))
+            }
 
             statusRow(
                 icon: "powerplug",
                 title: "供电状态",
                 status: manager.popoverPowerStatus,
-                detail: manager.popoverPowerDetail
+                detail: manager.popoverPowerDetail,
+                highlighted: manager.isActivelyCharging
             )
             statusDivider
             statusRow(
@@ -532,6 +549,7 @@ struct ContentView: View {
         .padding(17)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Color.primary.opacity(0.045), in: RoundedRectangle(cornerRadius: 16))
+        .animation(.easeInOut(duration: 0.2), value: manager.showBatteryLevel)
     }
 
     /// Power status remains read-only; charge status capsules are buttons.
@@ -576,7 +594,7 @@ struct ContentView: View {
                 // and in VoiceOver while the visible value stays compact.
                 Text(manager.text(status))
                     .font(.subheadline.weight(.medium))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(highlighted ? Color.green : Color.secondary)
                     .lineLimit(1)
                     .fixedSize(horizontal: true, vertical: false)
                     .help(manager.text(detail ?? status))
@@ -726,17 +744,27 @@ struct ContentView: View {
     }
 
     private var settingsControls: some View {
-        HStack {
-            Text(manager.text("界面语言"))
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            Spacer()
-            Button(manager.language.switchTitle) {
-                manager.language = manager.language.other
+        VStack(alignment: .leading, spacing: 11) {
+            Toggle(isOn: $manager.showBatteryLevel) {
+                Text(manager.text("显示当前电量"))
+                    .font(.caption)
             }
-            .buttonStyle(.bordered)
+            .toggleStyle(.switch)
             .controlSize(.small)
-            .help(manager.text("切换界面语言"))
+            .help(manager.text("在顶部卡片中显示当前电量百分比"))
+
+            HStack {
+                Text(manager.text("界面语言"))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Button(manager.language.switchTitle) {
+                    manager.language = manager.language.other
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .help(manager.text("切换界面语言"))
+            }
         }
         .padding(.vertical, 5)
     }
@@ -861,6 +889,11 @@ final class ChargeManager: ObservableObject {
     @Published var language = AppLanguage.saved() {
         didSet { UserDefaults.standard.set(language.rawValue, forKey: AppLanguage.preferenceKey) }
     }
+    /// New installs and upgrades default to the compact card. Changing this
+    /// preference does not touch the privileged helper or firmware.
+    @Published var showBatteryLevel: Bool {
+        didSet { UserDefaults.standard.set(showBatteryLevel, forKey: "showBatteryLevel") }
+    }
     @Published private(set) var menuBarLeafStyle: MenuBarLeafStyle = .green
     @Published private(set) var fullOncePending = false
     @Published private(set) var fullOnceCancelRequested = false
@@ -936,9 +969,24 @@ final class ChargeManager: ObservableObject {
         }
         let saved = UserDefaults.standard.integer(forKey: "chargeLimit")
         limit = (50...95).contains(saved) ? saved : 80
+        showBatteryLevel = UserDefaults.standard.bool(forKey: "showBatteryLevel")
     }
 
     func text(_ message: AppText) -> String { message.localized(in: language) }
+
+    var isActivelyCharging: Bool {
+        batteryStateText == "正在充电"
+    }
+
+    /// Keep battery digits neutral while charging; only an unplugged low
+    /// battery deserves warning colors. Charging activity is shown in the
+    /// power-status row rather than competing with the limit's green badge.
+    var batteryNumberColor: Color {
+        guard !isAdapterConnected, let batteryPercent else { return .primary }
+        if batteryPercent < 10 { return .red }
+        if batteryPercent < 20 { return .orange }
+        return .primary
+    }
 
     var batteryTint: Color {
         if let batteryPercent, batteryPercent < 20 { return .red }

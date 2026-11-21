@@ -56,6 +56,17 @@ jobs:
           export RELEASE_LABEL="${RELEASE_VERSION}-preview.0"
           bash Scripts/ci/package-macos.sh
           test -s "dist/MauLeaf-${RELEASE_LABEL}-macos-arm64.dmg"
+      # Preserve a PR-only candidate so the UI can be reviewed on a real Mac
+      # before merging and publishing any release tag. Not a stable build.
+      - name: Upload arm64 preview candidate for visual QA
+        uses: actions/upload-artifact@v4
+        with:
+          name: mauleaf-arm64-pr-${{ github.event.pull_request.number }}
+          path: |
+            dist/*.dmg
+            dist/*.sha256
+          if-no-files-found: error
+          retention-days: 7
 
   prepare:
     if: >-

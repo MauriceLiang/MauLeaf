@@ -115,8 +115,17 @@ for required in 'manager.popoverPowerStatus' 'manager.popoverLimitStatus' \
     fi
 done
 
-if grep -Eq 'oneTimeToggleRow|private var limitAction|toggleStyle\(\.switch\)' <<< "$POPOVER_SOURCE"; then
+# One dedicated settings switch is allowed; the original extra charging
+# switches/actions must never be restored.
+if grep -Eq 'oneTimeToggleRow|private var limitAction' <<< "$POPOVER_SOURCE"; then
     echo "Removed lower full-charge toggle and expanded enable action must not return" >&2
+    exit 1
+fi
+grep -Fq 'Toggle(isOn: $manager.showBatteryLevel)' <<< "$POPOVER_SOURCE"
+grep -Fq 'if manager.showBatteryLevel' <<< "$POPOVER_SOURCE"
+grep -Fq 'highlighted: manager.isActivelyCharging' <<< "$POPOVER_SOURCE"
+if [[ "$(grep -Fc 'Toggle(isOn:' <<< "$POPOVER_SOURCE")" -ne 1 ]]; then
+    echo "Only the optional battery display may add a toggle" >&2
     exit 1
 fi
 if grep -Eq 'componentSetupSection|installBackend|uninstallBackend' "$ROOT/Sources/MauLeaf.swift"; then

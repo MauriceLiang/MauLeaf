@@ -7,46 +7,18 @@ struct FeedbackLayoutTests {
     static func main() async throws {
         _ = NSApplication.shared
         NSApp.setActivationPolicy(.prohibited)
-        // Preview 10: one visible material surface changes shape inside a
-        // stationary, full-sized canvas. Test the exact shape interpolation
-        // at left/center/right leaf anchors and intermediate frames.
-        let leafPositions: [CGFloat] = [18, 175, 342]
-        for leafX in leafPositions {
-            let bounds = CGRect(x: 0, y: 0, width: 360, height: 292)
-            let compact = MenuCardMotion.surfaceRect(in: bounds, leafX: leafX, progress: 0)
-            let expanded = MenuCardMotion.surfaceRect(in: bounds, leafX: leafX, progress: 1)
-            guard compact.width == 52, compact.height == 14,
-                  compact.minY == 9, compact.minX >= MenuCardMotion.cardInset,
-                  compact.maxX <= bounds.maxX - MenuCardMotion.cardInset,
-                  expanded.minX == MenuCardMotion.cardInset,
-                  expanded.minY == 0,
-                  expanded.width == 360 - 2 * MenuCardMotion.cardInset,
-                  expanded.height == 292 - MenuCardMotion.cardInset else {
-                fatalError("One canvas must support a small capsule and the same final card")
+        // Static geometry: the native menu popup has one full-sized
+        // rounded surface and pointer; there is no compact morph endpoint.
+        for height in [292.0, 374.0, 510.0] {
+            let rect = CGRect(x: 0, y: 0, width: 360, height: height)
+            let path = FloatingCardShape().path(in: rect)
+            let outline = path.boundingRect
+            guard abs(outline.minX - rect.minX) < 0.01,
+                  abs(outline.minY - rect.minY) < 0.01,
+                  abs(outline.width - rect.width) < 0.01,
+                  abs(outline.height - rect.height) < 0.01 else {
+                fatalError("The static popup shape must cover the full card")
             }
-            var lastWidth: CGFloat = 0
-            var lastHeight: CGFloat = 0
-            for step in 0...20 {
-                let p = CGFloat(step) / 20
-                let frame = MenuCardMotion.surfaceRect(in: bounds, leafX: leafX, progress: p)
-                guard frame.width >= lastWidth, frame.height >= lastHeight,
-                      frame.minX >= 0, frame.maxX <= bounds.maxX,
-                      frame.minY >= 0, frame.maxY <= bounds.maxY,
-                      frame.height > 0 else {
-                    fatalError("Opening and closing must follow a continuous, bounded path")
-                }
-                lastWidth = frame.width
-                lastHeight = frame.height
-            }
-        }
-        guard MenuCardMotion.shellOpacity(0.0) == 0,
-              MenuCardMotion.shellOpacity(1.0) == 1,
-              MenuCardMotion.shellOpacity(0.15) < 0.5,
-              MenuCardMotion.contentOpacity(0.2) == 0,
-              MenuCardMotion.contentOpacity(1.0) == 1,
-              MenuCardMotion.contentOpacity(0.5) < 0.05,
-              MenuCardMotion.contentOpacity(0.85) > 0.85 else {
-            fatalError("Text must fade in after the shell forms and fade out before collapse")
         }
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent("mauleaf-layout-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
@@ -97,12 +69,10 @@ struct FeedbackLayoutTests {
                 return (host.fittingSize.height, feedback.fittingSize.height)
             }
             let normal = measure()
-            // Exercise the same NON-SCROLLING presentation root that the
-            // real panel hosts, rather than testing ContentView in isolation.
-            let presentation = MenuCardPresentation()
-            presentation.progress = 1
+            // Exercise the same NON-SCROLLING root that the real panel
+            // hosts, including intrinsic height and static card background.
             let panelHost = NSHostingView(rootView:
-                MenuCardMorphRoot(manager: manager, presentation: presentation)
+                ContentView(manager: manager)
                     .fixedSize(horizontal: false, vertical: true)
                     .frame(width: 360)
                     .environment(\.colorScheme, .dark))

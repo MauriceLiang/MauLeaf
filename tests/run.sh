@@ -90,8 +90,25 @@ if grep -Fq 'AppText(verbatim: response.message)' "$ROOT/Sources/MauLeaf.swift";
     exit 1
 fi
 
-# The approved design is a single menu-bar popover, never a full window.
-# Charging operations use in-card progress; failures are inline below the card.
+# The approved design is one transparent borderless menu-bar panel, with
+# exactly one SwiftUI floating card rather than an outer frame + inner tile.
+# Charging operations remain in-row; errors still expand inline.
+grep -Fq 'private final class MauLeafCardPanel: NSPanel' "$ROOT/Sources/MauLeaf.swift"
+grep -Fq 'styleMask: [.borderless]' "$ROOT/Sources/MauLeaf.swift"
+grep -Fq 'panel.isOpaque = false' "$ROOT/Sources/MauLeaf.swift"
+grep -Fq 'panel.backgroundColor = .clear' "$ROOT/Sources/MauLeaf.swift"
+grep -Fq 'panel.hasShadow = true' "$ROOT/Sources/MauLeaf.swift"
+if grep -Fq 'titlebarAppearsTransparent' "$ROOT/Sources/MauLeaf.swift"; then
+    echo "The extra native titlebar/frame must not return" >&2
+    exit 1
+fi
+[[ "$(grep -Fc '.fill(.regularMaterial)' "$ROOT/Sources/MauLeaf.swift")" -eq 1 ]]
+grep -Fq 'private var groupDivider: some View' "$ROOT/Sources/MauLeaf.swift"
+if grep -Fq '.background(Color.primary.opacity(0.045), in: RoundedRectangle(cornerRadius: 16))' "$ROOT/Sources/MauLeaf.swift"; then
+    echo "The nested battery status tile must not return" >&2
+    exit 1
+fi
+# Charging operations remain in-row; errors still expand inline.
 if grep -Fq '.overlay(alignment: .bottom)' "$ROOT/Sources/MauLeaf.swift"; then
     echo "Operation feedback must never overlay the bottom menu controls" >&2
     exit 1

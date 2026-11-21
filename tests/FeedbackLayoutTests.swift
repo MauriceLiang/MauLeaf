@@ -56,6 +56,10 @@ struct FeedbackLayoutTests {
                 return (host.fittingSize.height, feedback.fittingSize.height)
             }
             let normal = measure()
+            guard (275...335).contains(normal.0) else {
+                fputs("FAIL: single-card compact popover height unexpected: \(normal.0)\n", stderr)
+                exit(1)
+            }
             // Measure each piece separately: the closed battery card must
             // actually reclaim space, not merely shrink its outer popover.
             // Each isolated card hosts a fresh view because the observed
@@ -74,7 +78,9 @@ struct FeedbackLayoutTests {
             settingsHost.layoutSubtreeIfNeeded()
             let compactCardHeight = measuredCardHeight()
             let compactSettingsHeight = settingsHost.fittingSize.height
-            guard (118...151).contains(compactCardHeight),
+            // Preview 6 removes 26pt of nested card padding/background:
+            // the overview is now an unframed content group in one card.
+            guard (100...123).contains(compactCardHeight),
                   (59...95).contains(compactSettingsHeight) else {
                 fputs("FAIL: compact overview/settings are too tall in \(language.rawValue): card=\(compactCardHeight), settings=\(compactSettingsHeight)\n", stderr)
                 exit(1)
@@ -135,7 +141,7 @@ struct FeedbackLayoutTests {
                 fputs("FAIL: inline feedback layout: normal=\(normal), busy=\(busy), success=\(success), failure=\(failure); progress=\(limitProgress)\n", stderr)
                 exit(1)
             }
-            print("FeedbackLayoutTests: PASS (\(language.rawValue); card=\(compactCardHeight)pt, settings=\(compactSettingsHeight)pt, optional battery and inline feedback)")
+            print("FeedbackLayoutTests: PASS (\(language.rawValue); single card panel=\(normal.0)pt, status group=\(compactCardHeight)pt, settings=\(compactSettingsHeight)pt, optional battery and inline feedback)")
         }
         _ = await manager.prepareForTermination()
         UserDefaults.standard.removeObject(forKey: "nativeFirmwareWriteConfirmed")

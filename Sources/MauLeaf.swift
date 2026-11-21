@@ -68,16 +68,19 @@ private final class MauLeafCardPanel: NSPanel {
     override var canBecomeMain: Bool { true }
 }
 
-/// Gentle first-presentation reveal: the card grows downward from the
-/// menu-bar pointer without shifting its top edge or distorting SwiftUI text.
-enum MenuPanelEntrance {
-    static let duration: TimeInterval = 0.22
+/// Both directions share one precise geometric path. The compact end
+/// is centered on the real status-bar leaf, not merely 14pt shorter than
+/// the expanded card. Only the temporary material surface is resized;
+/// the real controls are never squeezed or scaled.
+enum MenuPanelMorph {
+    static let surfaceDuration: TimeInterval = 0.28
+    static let contentDuration: TimeInterval = 0.10
+    static let iconSide: CGFloat = 24
 
-    static func initialFrame(for target: NSRect) -> NSRect {
-        let revealDistance = min(14, max(8, target.height * 0.04))
-        let startHeight = max(1, target.height - revealDistance)
-        return NSRect(x: target.minX, y: target.maxY - startHeight,
-                      width: target.width, height: startHeight)
+    static func iconFrame(for menuRect: NSRect) -> NSRect {
+        NSRect(x: menuRect.midX - iconSide / 2,
+               y: menuRect.midY - iconSide / 2,
+               width: iconSide, height: iconSide)
     }
 }
 
@@ -94,8 +97,10 @@ private final class MauLeafMenuController: NSObject {
     private var measuredContentHeight: CGFloat = 0
     private var lastTargetFrame: NSRect?
     private var allowAnimatedResizes = false
-    private var entranceInProgress = false
-    private var entranceGeneration: UInt64 = 0
+    private enum MorphState { case hidden, opening, visible, closing }
+    private var morphState: MorphState = .hidden
+    private var morphWindow: NSPanel?
+    private var morphGeneration: UInt64 = 0
     private let resizeDuration: TimeInterval = 0.24
 
     override init() {
@@ -179,6 +184,10 @@ private final class MauLeafMenuController: NSObject {
     }
 
     func prepareForTermination() async -> Bool {
+        // Quit confirmation must never be covered by an in-flight decorative
+        // morph. Keep the full interactive panel before showing any NSAlert.
+        cancelMorph()
+        morphState = .visible
         positionPanel()
         panel.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
@@ -228,8 +237,16 @@ private final class MauLeafMenuController: NSObject {
     }
 
     @objc private func togglePanel() {
-        if panel.isVisible {
-            // Never hide an open confirmation sheet or an in-flight privilege request.
+        if morphState == .closing {
+            // Retarget the same in-flight proxy instead of snapping back to
+            // a tiny icon or a full card on a rapid second click.
+            reverseClosingToOpen()
+            startOutsideClickMonitoring()
+            manager.refresh()
+            manager.setPanelVisible(true)
+            return
+        } else if panel.isVisible {
+            // Do not dismiss the panel during an authorization or quit prompt.
             if panel.attachedSheet != nil || manager.isBusy {
                 NSApp.activate(ignoringOtherApps: true)
                 panel.makeKeyAndOrderFront(nil)
@@ -244,43 +261,198 @@ private final class MauLeafMenuController: NSObject {
         manager.setPanelVisible(true)
     }
 
-    /// First opening has its own entrance animation, independent of the
-    /// 240ms in-card disclosure resize. Always position the final target
-    /// first, then reveal a slightly shorter, translucent panel from its
-    /// fixed top anchor.
-    private func showPanelFromMenuBar() {
-        entranceGeneration &+= 1
-        let generation = entranceGeneration
+    private func menuButtonScreenRect() -> NSRect? {
+        guard let button = statusItem.button, let window = button.window else { return nil }
+        return window.convertToScreen(button.convert(button.bounds, to: nil))
+    }
+
+    /// The proxy is a temporary noninteractive surface, never a second
+    /// permanent card. It uses native material and rounded corners while
+    /// the real full-size SwiftUI controls remain unscaled and hidden.
+    private func makeMorphWindow(frame: NSRect) -> NSPanel {
+        let proxy = NSPanel(contentRect: frame,
+                            styleMask: [.borderless, .nonactivatingPanel],
+                            backing: .buffered, defer: false)
+        proxy.isOpaque = false
+        proxy.backgroundColor = .clear
+        proxy.hasShadow = true
+        proxy.ignoresMouseEvents = true
+        proxy.isReleasedWhenClosed = false
+        proxy.level = .statusBar
+        proxy.collectionBehavior = [.moveToActiveSpace, .fullScreenAuxiliary]
+        let material = NSVisualEffectView(frame: NSRect(origin: .zero, size: frame.size))
+        material.material = .popover
+        material.blendingMode = .behindWindow
+        material.state = .active
+        material.autoresizingMask = [.width, .height]
+        material.wantsLayer = true
+        material.layer?.cornerRadius = 18
+        material.layer?.masksToBounds = true
+        proxy.contentView = material
+        return proxy
+    }
+
+    /// Cancel a superseded animation before starting an opposite direction.
+    /// Completion handlers check morphGeneration and cannot resurrect a
+    /// dismissed window or hide a newer opening.
+    private func cancelMorph() {
+        morphGeneration &+= 1
+        morphWindow?.orderOut(nil)
+        morphWindow = nil
+        panel.alphaValue = 1
+        panel.ignoresMouseEvents = false
+    }
+
+    private func reverseClosingToOpen() {
+        guard let proxy = morphWindow,
+              !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion else {
+            cancelMorph()
+            panel.orderOut(nil)
+            morphState = .hidden
+            showPanelFromMenuBar()
+            return
+        }
+        morphGeneration &+= 1
+        let generation = morphGeneration
+        morphState = .opening
         allowAnimatedResizes = measuredContentHeight > 0
-        entranceInProgress = false
         lastTargetFrame = nil
         positionPanel()
-        let finalFrame = panel.frame
+        panel.alphaValue = 0
+        panel.ignoresMouseEvents = true
+        panel.makeKeyAndOrderFront(nil)
+        proxy.alphaValue = 1
+        proxy.orderFrontRegardless()
+        animateProxyToCard(proxy, generation: generation)
+        NSApp.activate(ignoringOtherApps: true)
+    }
 
-        if NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
+    private func showPanelFromMenuBar() {
+        cancelMorph()
+        allowAnimatedResizes = measuredContentHeight > 0
+        lastTargetFrame = nil
+        positionPanel()
+        morphState = .opening
+
+        guard !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion,
+              let menuRect = menuButtonScreenRect() else {
             panel.alphaValue = 1
             panel.makeKeyAndOrderFront(nil)
-        } else {
-            panel.alphaValue = 0
-            panel.setFrame(MenuPanelEntrance.initialFrame(for: finalFrame), display: false)
-            entranceInProgress = true
-            panel.makeKeyAndOrderFront(nil)
+            morphState = .visible
+            allowAnimatedResizes = true
+            NSApp.activate(ignoringOtherApps: true)
+            return
+        }
+
+        let generation = morphGeneration
+        let proxy = makeMorphWindow(frame: MenuPanelMorph.iconFrame(for: menuRect))
+        morphWindow = proxy
+        panel.alphaValue = 0
+        panel.ignoresMouseEvents = true
+        panel.makeKeyAndOrderFront(nil)
+        proxy.orderFrontRegardless()
+
+        animateProxyToCard(proxy, generation: generation)
+        NSApp.activate(ignoringOtherApps: true)
+    }
+
+    private func animateProxyToCard(_ proxy: NSPanel, generation: UInt64) {
+        // The real panel remains at its final size; only the temporary
+        // material proxy morphs. Never stretch editable controls or text.
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = MenuPanelMorph.surfaceDuration
+            context.timingFunction = CAMediaTimingFunction(name: .easeOut)
+            proxy.animator().setFrame(panel.frame, display: true)
+        } completionHandler: { [weak self] in
+            guard let self, self.morphGeneration == generation,
+                  self.morphState == .opening else { return }
             NSAnimationContext.runAnimationGroup { context in
-                context.duration = MenuPanelEntrance.duration
-                context.timingFunction = CAMediaTimingFunction(name: .easeOut)
-                panel.animator().alphaValue = 1
-                panel.animator().setFrame(finalFrame, display: true)
+                context.duration = MenuPanelMorph.contentDuration
+                context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+                self.panel.animator().alphaValue = 1
+                proxy.animator().alphaValue = 0
             } completionHandler: { [weak self] in
-                guard let self, self.entranceGeneration == generation else { return }
-                self.entranceInProgress = false
-                if self.panel.isVisible {
-                    // Layout can change while the entrance is in flight.
-                    self.positionPanel(animatedHeight: self.allowAnimatedResizes)
-                    self.allowAnimatedResizes = true
-                }
+                guard let self, self.morphGeneration == generation,
+                      self.morphState == .opening else { return }
+                proxy.orderOut(nil)
+                self.morphWindow = nil
+                self.panel.alphaValue = 1
+                self.panel.ignoresMouseEvents = false
+                self.morphState = .visible
+                self.positionPanel(animatedHeight: self.allowAnimatedResizes)
+                self.allowAnimatedResizes = true
+                self.panel.invalidateShadow()
             }
         }
-        NSApp.activate(ignoringOtherApps: true)
+    }
+
+    private func animateProxyToLeaf(_ proxy: NSPanel, menuRect: NSRect, generation: UInt64) {
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = MenuPanelMorph.surfaceDuration
+            context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+            proxy.animator().setFrame(MenuPanelMorph.iconFrame(for: menuRect), display: true)
+        } completionHandler: { [weak self] in
+            guard let self, self.morphGeneration == generation,
+                  self.morphState == .closing else { return }
+            self.finishPanelDismissal(generation: generation)
+        }
+    }
+
+    private func closePanelTowardsLeaf() {
+        // If the card is still growing, send that same proxy directly back
+        // toward the leaf instead of flashing the full panel in between.
+        if morphState == .opening, let proxy = morphWindow,
+           !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion,
+           let menuRect = menuButtonScreenRect() {
+            morphGeneration &+= 1
+            let generation = morphGeneration
+            morphState = .closing
+            allowAnimatedResizes = false
+            panel.alphaValue = 0
+            panel.orderOut(nil)
+            proxy.alphaValue = 1
+            animateProxyToLeaf(proxy, menuRect: menuRect, generation: generation)
+            return
+        }
+
+        cancelMorph()
+        allowAnimatedResizes = false
+        morphState = .closing
+        let generation = morphGeneration
+        guard !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion,
+              let menuRect = menuButtonScreenRect() else {
+            finishPanelDismissal(generation: generation)
+            return
+        }
+
+        // First fade only the interactive content into an identical
+        // material proxy, then contract that surface back into the leaf.
+        let proxy = makeMorphWindow(frame: panel.frame)
+        proxy.alphaValue = 0
+        morphWindow = proxy
+        proxy.orderFrontRegardless()
+        panel.ignoresMouseEvents = true
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = MenuPanelMorph.contentDuration
+            context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+            panel.animator().alphaValue = 0
+            proxy.animator().alphaValue = 1
+        } completionHandler: { [weak self] in
+            guard let self, self.morphGeneration == generation,
+                  self.morphState == .closing else { return }
+            self.panel.orderOut(nil)
+            self.animateProxyToLeaf(proxy, menuRect: menuRect, generation: generation)
+        }
+    }
+
+    private func finishPanelDismissal(generation: UInt64) {
+        guard morphGeneration == generation else { return }
+        morphWindow?.orderOut(nil)
+        morphWindow = nil
+        panel.orderOut(nil)
+        panel.alphaValue = 1
+        panel.ignoresMouseEvents = false
+        morphState = .hidden
     }
 
     private func startOutsideClickMonitoring() {
@@ -305,14 +477,12 @@ private final class MauLeafMenuController: NSObject {
     }
 
     private func dismissPanelIfAllowed() {
-        guard panel.isVisible, panel.attachedSheet == nil, !manager.isBusy else { return }
-        // Invalidate stale completion handlers before closing/reopening.
-        entranceGeneration &+= 1
-        entranceInProgress = false
-        panel.orderOut(nil)
-        panel.alphaValue = 1
-        allowAnimatedResizes = false
+        guard morphState != .hidden, morphState != .closing,
+              panel.attachedSheet == nil, !manager.isBusy else { return }
+        // Stop monitors before the visual closing transition; keep panel
+        // lifecycle state separate from the temporary animated proxy.
         manager.setPanelVisible(false)
+        closePanelTowardsLeaf()
         if let monitor = globalMouseMonitor {
             NSEvent.removeMonitor(monitor)
             globalMouseMonitor = nil
@@ -329,9 +499,9 @@ private final class MauLeafMenuController: NSObject {
         guard abs(height - measuredContentHeight) >= 1 else { return }
         measuredContentHeight = height
         if panel.isVisible {
-            // During the entrance, do not let an asynchronous geometry
-            // preference override the animated frame halfway through.
-            if entranceInProgress { return }
+            // A full-size layout update must not deform either direction
+            // of the icon-to-card morph while its proxy is moving.
+            if morphState == .opening || morphState == .closing { return }
             positionPanel(animatedHeight: allowAnimatedResizes)
             // The initial visible fallback-size correction is immediate.
             allowAnimatedResizes = true

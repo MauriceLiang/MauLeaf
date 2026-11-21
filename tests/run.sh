@@ -98,16 +98,30 @@ grep -Fq 'styleMask: [.borderless]' "$ROOT/Sources/MauLeaf.swift"
 grep -Fq 'panel.isOpaque = false' "$ROOT/Sources/MauLeaf.swift"
 grep -Fq 'panel.backgroundColor = .clear' "$ROOT/Sources/MauLeaf.swift"
 grep -Fq 'panel.hasShadow = true' "$ROOT/Sources/MauLeaf.swift"
-# The menu-bar click requires its own gentle popup entrance. Preserve a
-# 220ms top-pinned reveal + fade, while reduced motion stays immediate.
-grep -Fq 'private func showPanelFromMenuBar()' "$ROOT/Sources/MauLeaf.swift"
-grep -Fq 'static let duration: TimeInterval = 0.22' "$ROOT/Sources/MauLeaf.swift"
-grep -Fq 'MenuPanelEntrance.initialFrame(for: finalFrame)' "$ROOT/Sources/MauLeaf.swift"
-grep -Fq 'panel.animator().alphaValue = 1' "$ROOT/Sources/MauLeaf.swift"
-grep -Fq 'panel.animator().setFrame(finalFrame, display: true)' "$ROOT/Sources/MauLeaf.swift"
-grep -Fq 'if NSWorkspace.shared.accessibilityDisplayShouldReduceMotion' "$ROOT/Sources/MauLeaf.swift"
-grep -Fq 'if entranceInProgress { return }' "$ROOT/Sources/MauLeaf.swift"
-grep -Fq 'entranceGeneration &+= 1' "$ROOT/Sources/MauLeaf.swift"
+# Opening and closing must share a true leaf-centered 24pt endpoint
+# and move a transient rounded material surface in BOTH directions.
+# Never resize the interactive SwiftUI controls to icon dimensions.
+grep -Fq 'enum MenuPanelMorph {' "$ROOT/Sources/MauLeaf.swift"
+grep -Fq 'static let iconSide: CGFloat = 24' "$ROOT/Sources/MauLeaf.swift"
+grep -Fq 'private func makeMorphWindow(frame: NSRect) -> NSPanel' "$ROOT/Sources/MauLeaf.swift"
+grep -Fq 'proxy.ignoresMouseEvents = true' "$ROOT/Sources/MauLeaf.swift"
+grep -Fq 'proxy.level = .statusBar' "$ROOT/Sources/MauLeaf.swift"
+grep -Fq 'panel.makeKeyAndOrderFront(nil)' "$ROOT/Sources/MauLeaf.swift"
+grep -Fq 'proxy.animator().setFrame(panel.frame, display: true)' "$ROOT/Sources/MauLeaf.swift"
+grep -Fq 'private func reverseClosingToOpen()' "$ROOT/Sources/MauLeaf.swift"
+grep -Fq 'private func animateProxyToLeaf(' "$ROOT/Sources/MauLeaf.swift"
+grep -Fq 'if morphState == .opening, let proxy = morphWindow' "$ROOT/Sources/MauLeaf.swift"
+grep -Fq 'proxy.animator().setFrame(MenuPanelMorph.iconFrame(for: menuRect), display: true)' "$ROOT/Sources/MauLeaf.swift"
+grep -Fq 'panel.animator().alphaValue = 0' "$ROOT/Sources/MauLeaf.swift"
+grep -Fq 'self.panel.animator().alphaValue = 1' "$ROOT/Sources/MauLeaf.swift"
+grep -Fq 'private func closePanelTowardsLeaf()' "$ROOT/Sources/MauLeaf.swift"
+grep -Fq 'guard morphGeneration == generation else { return }' "$ROOT/Sources/MauLeaf.swift"
+grep -Fq 'if morphState == .opening || morphState == .closing { return }' "$ROOT/Sources/MauLeaf.swift"
+grep -Fq 'accessibilityDisplayShouldReduceMotion' "$ROOT/Sources/MauLeaf.swift"
+if grep -Eq 'MenuPanelEntrance|entranceInProgress|panel.setFrame\(MenuPanel' "$ROOT/Sources/MauLeaf.swift"; then
+    echo "The old shallow one-way popup or scaling of real controls must not return" >&2
+    exit 1
+fi
 # A SwiftUI disclosure transition alone cannot animate the AppKit window
 # height; both layers must share the same 240ms timing and preserve the
 # top edge when Settings or Charge limit expands.

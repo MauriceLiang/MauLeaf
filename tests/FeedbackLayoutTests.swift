@@ -7,18 +7,24 @@ struct FeedbackLayoutTests {
     static func main() async throws {
         _ = NSApplication.shared
         NSApp.setActivationPolicy(.prohibited)
-        // Opening the popup must reveal downward from the same menu-bar
-        // pointer, independent of language or disclosure state.
-        for height in [292.0, 374.0, 510.0] {
-            let target = NSRect(x: 280, y: 540, width: 360, height: height)
-            let initial = MenuPanelEntrance.initialFrame(for: target)
-            guard abs(initial.maxY - target.maxY) < 0.01,
-                  abs(initial.width - target.width) < 0.01,
-                  abs(initial.minX - target.minX) < 0.01,
-                  initial.height < target.height,
-                  initial.height >= target.height - 14,
-                  initial.height <= target.height - 8 else {
-                fatalError("Menu-bar entrance must grow downward from a fixed top anchor")
+        // The compact endpoint is the real status leaf. Opening and
+        // closing must use exactly the same geometric endpoints rather than
+        // a small asymmetric 8-14pt height change.
+        for menuX in [35.0, 580.0, 1390.0] {
+            let leaf = NSRect(x: menuX, y: 877, width: 28, height: 24)
+            let iconFrame = MenuPanelMorph.iconFrame(for: leaf)
+            for height in [292.0, 374.0, 510.0] {
+                let cardFrame = NSRect(x: max(6, menuX - 160), y: 570 - height,
+                                       width: 360, height: height)
+                guard abs(iconFrame.midX - leaf.midX) < 0.01,
+                      abs(iconFrame.midY - leaf.midY) < 0.01,
+                      iconFrame.width == MenuPanelMorph.iconSide,
+                      iconFrame.height == MenuPanelMorph.iconSide,
+                      iconFrame.width < cardFrame.width / 10,
+                      iconFrame.height < cardFrame.height / 8,
+                      MenuPanelMorph.surfaceDuration > MenuPanelMorph.contentDuration else {
+                    fatalError("Leaf-to-card and card-to-leaf endpoints must be symmetric and icon-sized")
+                }
             }
         }
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent("mauleaf-layout-\(UUID().uuidString)")

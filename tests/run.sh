@@ -91,8 +91,16 @@ if grep -Fq 'AppText(verbatim: response.message)' "$ROOT/Sources/MauLeaf.swift";
 fi
 
 # The approved design is a single menu-bar popover, never a full window.
+# Charging operations use in-card progress; failures are inline below the card.
+if grep -Fq '.overlay(alignment: .bottom)' "$ROOT/Sources/MauLeaf.swift"; then
+    echo "Operation feedback must never overlay the bottom menu controls" >&2
+    exit 1
+fi
+grep -Fq 'OperationFeedbackView(manager: manager)' "$ROOT/Sources/MauLeaf.swift"
+grep -Fq 'activeOperation?.affectsLimit' "$ROOT/Sources/MauLeaf.swift"
+grep -Fq 'activeOperation?.affectsFullCharge' "$ROOT/Sources/MauLeaf.swift"
 # Keep the icon/status overview, direct card controls and inline settings.
-POPOVER_SOURCE="$(sed -n '/^struct ContentView: View {/,/^\/\/\/ This view overlays the scroll viewport/p' "$ROOT/Sources/MauLeaf.swift")"
+POPOVER_SOURCE="$(sed -n '/^struct ContentView: View {/,/^\/\/\/ Error and exceptional-operation feedback/p' "$ROOT/Sources/MauLeaf.swift")"
 if grep -Fq 'BatteryStatusRing(' <<< "$POPOVER_SOURCE"; then
     echo "The oversized battery ring must not return to the compact menu-bar overview" >&2
     exit 1

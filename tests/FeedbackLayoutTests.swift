@@ -43,44 +43,44 @@ struct FeedbackLayoutTests {
             manager.isBusy = false
             manager.isError = false
             manager.statusMessage = ""
-            let host = NSHostingView(rootView: ContentView(manager: manager).frame(width: 360))
-            let overlay = NSHostingView(rootView: ContentView(manager: manager).frame(width: 360)
-                .overlay(alignment: .bottom) {
-                    OperationFeedbackView(manager: manager).padding(.horizontal, 16).padding(.bottom, 44)
-                }
+            let host = NSHostingView(rootView: ContentView(manager: manager).frame(width: 360)
                 .environment(\.colorScheme, .dark))
-            let toast = NSHostingView(rootView: OperationFeedbackView(manager: manager).frame(width: 328))
+            let feedback = NSHostingView(rootView: OperationFeedbackView(manager: manager).frame(width: 328)
+                .environment(\.colorScheme, .dark))
 
             func measure() -> (CGFloat, CGFloat) {
-                RunLoop.main.run(until: Date().addingTimeInterval(0.03))
+                RunLoop.main.run(until: Date().addingTimeInterval(0.04))
                 host.layoutSubtreeIfNeeded()
-                overlay.layoutSubtreeIfNeeded()
-                toast.layoutSubtreeIfNeeded()
-                return (host.fittingSize.height, overlay.fittingSize.height)
+                feedback.layoutSubtreeIfNeeded()
+                return (host.fittingSize.height, feedback.fittingSize.height)
             }
             let normal = measure()
-            let normalToastHeight = toast.fittingSize.height
             manager.statusMessage = "正在写入原生固件充电上限 85%…"
+            manager.setFeedbackOperationForTesting(.adjustingLimit)
             manager.isBusy = true
             let busy = measure()
-            let busyToastHeight = toast.fittingSize.height
+            let limitProgress = manager.text(manager.popoverLimitStatus)
             manager.isBusy = false
+            manager.setFeedbackOperationForTesting(nil)
+            manager.isError = false
+            manager.statusMessage = "充电上限已设为 85%，固件写入已验证。"
+            let success = measure()
             manager.isError = true
             manager.statusMessage = AppText(verbatim: String(repeating: language == .english
                 ? "The native firmware write failed. Check AC power and retry. "
                 : "原生固件写入失败，请检查电源和设备状态后重试。", count: 12))
             manager.autoApplyFeedback = manager.statusMessage
             let failure = measure()
-            let failureToastHeight = toast.fittingSize.height
             guard normal.0 > 0,
-                  normalToastHeight == 0, busyToastHeight > 0, failureToastHeight > 0,
-                  abs(normal.0 - busy.0) < 0.5, abs(normal.0 - failure.0) < 0.5,
-                  abs(normal.1 - busy.1) < 0.5, abs(normal.1 - failure.1) < 0.5,
-                  abs(normal.0 - normal.1) < 0.5 else {
-                fputs("FAIL: feedback layout: normal=\(normal), busy=\(busy), failure=\(failure); toast heights=\(normalToastHeight), \(busyToastHeight), \(failureToastHeight)\n", stderr)
+                  normal.1 == 0, busy.1 == 0, success.1 == 0, failure.1 > 0,
+                  limitProgress == manager.text("正在设置…"),
+                  failure.0 > normal.0 + 20,
+                  abs(normal.0 - success.0) < 1,
+                  abs(normal.0 - busy.0) < 20 else {
+                fputs("FAIL: inline feedback layout: normal=\(normal), busy=\(busy), success=\(success), failure=\(failure); progress=\(limitProgress)\n", stderr)
                 exit(1)
             }
-            print("FeedbackLayoutTests: PASS (\(language.rawValue); content and overlay height \(normal.0) pt unchanged)")
+            print("FeedbackLayoutTests: PASS (\(language.rawValue); in-card progress, inline errors, no overlay)")
         }
         _ = await manager.prepareForTermination()
         UserDefaults.standard.removeObject(forKey: "nativeFirmwareWriteConfirmed")

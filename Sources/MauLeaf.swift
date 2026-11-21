@@ -485,7 +485,7 @@ private final class MauLeafMenuController: NSObject {
         // height and y-origin as one transaction instead of snapping both.
         let anchorTop = min(menuRect.minY - 5, visible.maxY - 2)
         let maxHeight = max(120, anchorTop - visible.minY - 6)
-        let wantedHeight = measuredContentHeight > 0 ? ceil(measuredContentHeight + 2) : 480
+        let wantedHeight = measuredContentHeight > 0 ? ceil(measuredContentHeight + 2) : 294
         let height = min(max(wantedHeight, 160), maxHeight)
         let x = min(max(menuRect.midX - panelWidth / 2, visible.minX + 6), visible.maxX - panelWidth - 6)
         let targetFrame = NSRect(x: x, y: anchorTop - height, width: panelWidth, height: height)
@@ -615,25 +615,6 @@ struct BatteryStatusRing: View {
     }
 }
 
-/// The only visible popup surface: one rounded material card with a
-/// small upward pointer. The transparent NSPanel draws no second frame.
-private struct FloatingCardShape: Shape {
-    func path(in rect: CGRect) -> Path {
-        let arrowHeight: CGFloat = 8
-        let arrowHalfWidth: CGFloat = 10
-        let body = CGRect(x: rect.minX, y: rect.minY + arrowHeight,
-                          width: rect.width, height: max(0, rect.height - arrowHeight))
-        var path = Path(roundedRect: body, cornerRadius: 20)
-        var pointer = Path()
-        pointer.move(to: CGPoint(x: rect.midX - arrowHalfWidth, y: body.minY))
-        pointer.addLine(to: CGPoint(x: rect.midX, y: rect.minY))
-        pointer.addLine(to: CGPoint(x: rect.midX + arrowHalfWidth, y: body.minY))
-        pointer.closeSubpath()
-        path.addPath(pointer)
-        return path
-    }
-}
-
 /// Native menu-bar-only popover. No detached main window or navigation.
 struct ContentView: View {
     @ObservedObject var manager: ChargeManager
@@ -732,18 +713,8 @@ struct ContentView: View {
         .padding(.top, 22)
         .padding(.bottom, 15)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background {
-            FloatingCardShape()
-                .fill(.regularMaterial)
-                .overlay {
-                    FloatingCardShape()
-                        .fill(Color(nsColor: .windowBackgroundColor).opacity(0.28))
-                }
-                .clipShape(FloatingCardShape())
-        }
-        .clipShape(FloatingCardShape())
-        // Transparent breathing room is for the card/window shadow, not
-        // another framed container or a nested background.
+        // The only material/shadow surface now lives in MenuCardMorphRoot,
+        // allowing the card to grow without a second background underneath.
         .padding(.horizontal, 6)
         .padding(.bottom, 6)
         .alert(manager.text("启用原生固件控制？"), isPresented: $manager.showNativeWriteConfirmation) {

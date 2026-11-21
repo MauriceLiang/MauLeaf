@@ -454,6 +454,18 @@ struct ContentView: View {
     }
     private let presets = [70, 75, 80, 85, 90, 95]
 
+    init(manager: ChargeManager) {
+        self.manager = manager
+    }
+
+    #if MAULEAF_LAYOUT_TESTING
+    init(manager: ChargeManager, initiallyExpandedLimit: Bool, initiallyExpandedSettings: Bool) {
+        self.manager = manager
+        self._limitExpanded = State(initialValue: initiallyExpandedLimit)
+        self._settingsExpanded = State(initialValue: initiallyExpandedSettings)
+    }
+    #endif
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             // All six primary rows belong to the same visual surface.

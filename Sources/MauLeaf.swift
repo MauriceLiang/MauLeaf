@@ -68,119 +68,28 @@ private final class MauLeafCardPanel: NSPanel {
     override var canBecomeMain: Bool { true }
 }
 
-/// Preview 10: one material surface in one transparent window. The
-/// compact capsule stays *below* the leaf instead of drawing a square over
-/// the actual menu-bar glyph. The SwiftUI shape owns all interpolation;
-/// AppKit never changes its frame for the entrance/exit morph.
-enum MenuCardMotion {
-    static let compactWidth: CGFloat = 52
-    static let compactHeight: CGFloat = 14
-    static let cardInset: CGFloat = 6
-    static let pointerHeight: CGFloat = 8
-    static let openDuration: TimeInterval = 0.34
-    static let closeDuration: TimeInterval = 0.26
-
-    static func surfaceRect(in bounds: CGRect, leafX: CGFloat, progress: CGFloat) -> CGRect {
-        let t = min(max(progress, 0), 1)
-        let full = CGRect(x: cardInset, y: 0,
-                          width: max(1, bounds.width - cardInset * 2),
-                          height: max(1, bounds.height - cardInset))
-        let miniX = min(max(leafX - compactWidth / 2, full.minX),
-                        max(full.minX, full.maxX - compactWidth))
-        let compact = CGRect(x: miniX, y: 9,
-                             width: compactWidth, height: compactHeight)
-        return CGRect(x: compact.minX + (full.minX - compact.minX) * t,
-                      y: compact.minY + (full.minY - compact.minY) * t,
-                      width: compact.width + (full.width - compact.width) * t,
-                      height: compact.height + (full.height - compact.height) * t)
-    }
-
-    /// Fade out the *shell itself* before it reaches the smallest capsule.
-    /// This avoids an opaque chip or black rectangle touching the status icon.
-    static func shellOpacity(_ progress: CGFloat) -> Double {
-        let t = min(max((progress - 0.04) / 0.25, 0), 1)
-        return Double(t * t * (3 - 2 * t))
-    }
-
-    /// Text becomes visible during—not after—the shell's expansion.
-    /// It vanishes early during closing, before the card is very small.
-    static func contentOpacity(_ progress: CGFloat) -> Double {
-        let t = min(max((progress - 0.48) / 0.42, 0), 1)
-        return Double(t * t * (3 - 2 * t))
-    }
-}
-
-@MainActor
-final class MenuCardPresentation: ObservableObject {
-    @Published var progress: CGFloat = 0
-    @Published var leafX: CGFloat = 180
-    @Published var isInteractive = false
-}
-
-/// The animatable mask and material are the very SAME path throughout the
-/// animation. No NSVisualEffectView proxy, rectangular window shadow or
-/// second surface is ever drawn across the menu-bar icon.
-private struct AnimatedFloatingCardShape: Shape {
-    var progress: CGFloat
-    var leafX: CGFloat
-
-    var animatableData: AnimatablePair<CGFloat, CGFloat> {
-        get { AnimatablePair(progress, leafX) }
-        set { progress = newValue.first; leafX = newValue.second }
-    }
-
-    func path(in bounds: CGRect) -> Path {
-        let t = min(max(progress, 0), 1)
-        let shell = MenuCardMotion.surfaceRect(in: bounds, leafX: leafX, progress: t)
-        let arrowHeight = MenuCardMotion.pointerHeight * t
-        let body = CGRect(x: shell.minX, y: shell.minY + arrowHeight,
-                          width: shell.width, height: max(1, shell.height - arrowHeight))
-        let radius = min(7 + 13 * t, min(body.width, body.height) / 2)
-        var path = Path(roundedRect: body, cornerRadius: radius)
-        if t > 0.001 {
-            let arrowCenter = min(max(leafX, body.minX + radius + 11),
-                                  body.maxX - radius - 11)
-            var pointer = Path()
-            pointer.move(to: CGPoint(x: arrowCenter - 10 * t, y: body.minY))
-            pointer.addLine(to: CGPoint(x: arrowCenter, y: shell.minY))
-            pointer.addLine(to: CGPoint(x: arrowCenter + 10 * t, y: body.minY))
-            pointer.closeSubpath()
-            path.addPath(pointer)
-        }
+/// One permanent rounded popover surface; no morph, proxy or entrance
+/// animation. The small pointer is part of the static shape.
+private struct FloatingCardShape: Shape {
+    func path(in rect: CGRect) -> Path {
+        let arrowHeight: CGFloat = 8
+        let arrowHalfWidth: CGFloat = 10
+        let body = CGRect(x: rect.minX, y: rect.minY + arrowHeight,
+                          width: rect.width, height: max(0, rect.height - arrowHeight))
+        var path = Path(roundedRect: body, cornerRadius: 20)
+        var pointer = Path()
+        pointer.move(to: CGPoint(x: rect.midX - arrowHalfWidth, y: body.minY))
+        pointer.addLine(to: CGPoint(x: rect.midX, y: rect.minY))
+        pointer.addLine(to: CGPoint(x: rect.midX + arrowHalfWidth, y: body.minY))
+        pointer.closeSubpath()
+        path.addPath(pointer)
         return path
-    }
-}
-
-/// Full-sized controls are never scaled or laid out in the compact shell.
-/// Only their opacity and clipping change while the single shape expands.
-struct MenuCardMorphRoot: View {
-    @ObservedObject var manager: ChargeManager
-    @ObservedObject var presentation: MenuCardPresentation
-
-    var body: some View {
-        let shape = AnimatedFloatingCardShape(progress: presentation.progress,
-                                              leafX: presentation.leafX)
-        ContentView(manager: manager)
-            .opacity(MenuCardMotion.contentOpacity(presentation.progress))
-            .allowsHitTesting(presentation.isInteractive)
-            .clipShape(shape)
-            .background {
-                shape.fill(.regularMaterial)
-                    .overlay {
-                        shape.fill(Color(nsColor: .windowBackgroundColor).opacity(0.28))
-                    }
-                    .clipShape(shape)
-                    .compositingGroup()
-                    .shadow(color: .black.opacity(0.24), radius: 7, x: 0, y: 3)
-                    .opacity(MenuCardMotion.shellOpacity(presentation.progress))
-            }
     }
 }
 
 @MainActor
 private final class MauLeafMenuController: NSObject {
     private let manager = ChargeManager()
-    private let presentation = MenuCardPresentation()
     private let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
     private let panel: NSPanel
     private var refreshSubscription: AnyCancellable?
@@ -191,9 +100,6 @@ private final class MauLeafMenuController: NSObject {
     private var measuredContentHeight: CGFloat = 0
     private var lastTargetFrame: NSRect?
     private var allowAnimatedResizes = false
-    private enum MorphState { case hidden, opening, visible, closing }
-    private var morphState: MorphState = .hidden
-    private var morphGeneration: UInt64 = 0
     private let resizeDuration: TimeInterval = 0.24
 
     override init() {
@@ -208,8 +114,8 @@ private final class MauLeafMenuController: NSObject {
         panel.title = "MauLeaf"
         panel.isOpaque = false
         panel.backgroundColor = .clear
-        // A system window shadow follows rectangular bounds; render shadow
-        // from the animating rounded SwiftUI shape instead.
+        // The SwiftUI card draws its own rounded shadow, not the panel's
+        // rectangular window shadow.
         panel.hasShadow = false
         panel.isMovableByWindowBackground = false
         panel.isReleasedWhenClosed = false
@@ -221,7 +127,7 @@ private final class MauLeafMenuController: NSObject {
         // no ScrollView, wheel scrolling or trackpad rubber-band movement.
         // Layout itself determines the height; Settings/limit expansion and
         // inline errors still trigger the measured NSPanel frame resize.
-        let root = MenuCardMorphRoot(manager: manager, presentation: presentation)
+        let root = ContentView(manager: manager)
             .fixedSize(horizontal: false, vertical: true)
             .background {
                 GeometryReader { proxy in
@@ -279,15 +185,7 @@ private final class MauLeafMenuController: NSObject {
     }
 
     func prepareForTermination() async -> Bool {
-        // Quit confirmation must never be covered by an in-flight decorative
-        // morph. Keep the full interactive panel before showing any NSAlert.
-        // Quit and authorization prompts must always see the full, stable
-        // interactive card, irrespective of an interrupted transition.
-        morphGeneration &+= 1
-        morphState = .visible
-        presentation.progress = 1
-        presentation.isInteractive = true
-        panel.ignoresMouseEvents = false
+        // Quit confirmation always uses the same complete panel.
         positionPanel()
         panel.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
@@ -337,113 +235,27 @@ private final class MauLeafMenuController: NSObject {
     }
 
     @objc private func togglePanel() {
-        if morphState == .hidden || morphState == .closing {
-            showPanelFromMenuBar()
-            startOutsideClickMonitoring()
-            manager.refresh()
-            manager.setPanelVisible(true)
-            return
-        }
-        if panel.attachedSheet != nil || manager.isBusy {
-            NSApp.activate(ignoringOtherApps: true)
-            panel.makeKeyAndOrderFront(nil)
-            return
-        }
-        dismissPanelIfAllowed()
-    }
-
-    private func menuButtonScreenRect() -> NSRect? {
-        guard let button = statusItem.button, let window = button.window else { return nil }
-        return window.convertToScreen(button.convert(button.bounds, to: nil))
-    }
-
-    /// Retarget the *same* SwiftUI AnimatableShape in either direction.
-    /// Generation checks prevent a stale completion from hiding the panel
-    /// after a rapid reverse click.
-    private func showPanelFromMenuBar() {
-        morphGeneration &+= 1
-        let generation = morphGeneration
-        morphState = .opening
-        presentation.isInteractive = false
-        allowAnimatedResizes = measuredContentHeight > 0
-        if !panel.isVisible {
-            lastTargetFrame = nil
-            positionPanel()
-        }
-        if let menuRect = menuButtonScreenRect() {
-            presentation.leafX = menuRect.midX - panel.frame.minX
-        }
-        let wasHidden = !panel.isVisible
-        if wasHidden {
-            presentation.progress = 0
-            panel.makeKeyAndOrderFront(nil)
-            // Commit an actual compact first frame before scheduling the
-            // spring target. Otherwise SwiftUI can coalesce 0 and 1 into an
-            // instant full card on the same event-loop iteration.
-            panel.displayIfNeeded()
-        }
-        panel.ignoresMouseEvents = true
-        if NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
-            presentation.progress = 1
-            finishOpening(generation: generation)
-        } else if wasHidden {
-            DispatchQueue.main.async { [weak self] in
-                self?.beginSpringOpening(generation: generation)
+        if panel.isVisible {
+            // A confirmation or privileged operation must never lose
+            // the panel simply because the status icon was clicked.
+            if panel.attachedSheet != nil || manager.isBusy {
+                NSApp.activate(ignoringOtherApps: true)
+                panel.makeKeyAndOrderFront(nil)
+                return
             }
-        } else {
-            beginSpringOpening(generation: generation)
+            dismissPanelIfAllowed()
+            return
         }
-        NSApp.activate(ignoringOtherApps: true)
-    }
-
-    private func beginSpringOpening(generation: UInt64) {
-        guard morphGeneration == generation, morphState == .opening else { return }
-        withAnimation(.spring(response: MenuCardMotion.openDuration,
-                              dampingFraction: 0.9, blendDuration: 0)) {
-            presentation.progress = 1
-        }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.44) { [weak self] in
-            self?.finishOpening(generation: generation)
-        }
-    }
-
-    private func finishOpening(generation: UInt64) {
-        guard morphGeneration == generation, morphState == .opening else { return }
-        morphState = .visible
-        presentation.isInteractive = true
-        panel.ignoresMouseEvents = false
-        positionPanel(animatedHeight: allowAnimatedResizes)
-        allowAnimatedResizes = true
-    }
-
-    private func closePanelTowardsLeaf() {
-        morphGeneration &+= 1
-        let generation = morphGeneration
-        morphState = .closing
-        presentation.isInteractive = false
+        // Open immediately. No SwiftUI morph state, fade, delayed callback,
+        // second NSPanel or transient compact shell.
         allowAnimatedResizes = false
-        panel.ignoresMouseEvents = true
-
-        if NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
-            presentation.progress = 0
-            finishPanelDismissal(generation: generation)
-        } else {
-            withAnimation(.timingCurve(0.34, 0.0, 0.35, 1.0,
-                                      duration: MenuCardMotion.closeDuration)) {
-                presentation.progress = 0
-            }
-            DispatchQueue.main.asyncAfter(deadline: .now() + MenuCardMotion.closeDuration + 0.035) { [weak self] in
-                self?.finishPanelDismissal(generation: generation)
-            }
-        }
-    }
-
-    private func finishPanelDismissal(generation: UInt64) {
-        guard morphGeneration == generation, morphState == .closing else { return }
-        panel.orderOut(nil)
-        panel.ignoresMouseEvents = false
-        morphState = .hidden
-        presentation.isInteractive = false
+        lastTargetFrame = nil
+        positionPanel()
+        panel.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+        startOutsideClickMonitoring()
+        manager.refresh()
+        manager.setPanelVisible(true)
     }
 
     private func startOutsideClickMonitoring() {
@@ -468,10 +280,12 @@ private final class MauLeafMenuController: NSObject {
     }
 
     private func dismissPanelIfAllowed() {
-        guard morphState != .hidden, morphState != .closing,
-              panel.attachedSheet == nil, !manager.isBusy else { return }
+        guard panel.isVisible, panel.attachedSheet == nil,
+              !manager.isBusy else { return }
+        // Closing is immediate and restores normal pointer interaction.
+        panel.orderOut(nil)
+        allowAnimatedResizes = false
         manager.setPanelVisible(false)
-        closePanelTowardsLeaf()
         if let monitor = globalMouseMonitor {
             NSEvent.removeMonitor(monitor)
             globalMouseMonitor = nil
@@ -484,15 +298,13 @@ private final class MauLeafMenuController: NSObject {
 
     private func updateContentHeight(_ height: CGFloat) {
         guard height.isFinite, height > 100 else { return }
-        // Sub-point layout noise must not restart the animation.
+        // Ignore sub-point geometry noise to avoid resize/layout loops.
         guard abs(height - measuredContentHeight) >= 1 else { return }
         measuredContentHeight = height
         if panel.isVisible {
-            // A full-size layout update must not deform either direction
-            // of the icon-to-card morph while its proxy is moving.
-            if morphState == .opening || morphState == .closing { return }
+            // The first visible size correction is immediate; only an
+            // explicit in-card disclosure animates the subsequent height.
             positionPanel(animatedHeight: allowAnimatedResizes)
-            // The initial visible fallback-size correction is immediate.
             allowAnimatedResizes = true
         }
     }
@@ -735,8 +547,17 @@ struct ContentView: View {
         .padding(.top, 22)
         .padding(.bottom, 15)
         .frame(maxWidth: .infinity, alignment: .leading)
-        // The only material/shadow surface now lives in MenuCardMorphRoot,
-        // allowing the card to grow without a second background underneath.
+        .background {
+            FloatingCardShape()
+                .fill(.regularMaterial)
+                .overlay {
+                    FloatingCardShape()
+                        .fill(Color(nsColor: .windowBackgroundColor).opacity(0.28))
+                }
+                .clipShape(FloatingCardShape())
+                .shadow(color: .black.opacity(0.20), radius: 7, x: 0, y: 3)
+        }
+        .clipShape(FloatingCardShape())
         .padding(.horizontal, 6)
         .padding(.bottom, 6)
         .alert(manager.text("启用原生固件控制？"), isPresented: $manager.showNativeWriteConfirmation) {

@@ -190,3 +190,11 @@
 "正在修复原生控制服务，需要管理员授权…" = "Repairing the native helper requires administrator authorization…";
 "原生控制服务已修复。" = "Native helper repaired.";
 "无法修复原生控制服务：%@" = "Could not repair the native helper: %@";
+
+// Inline card operation states.
+"正在启用…" = "Enabling…";
+"正在设置…" = "Applying…";
+"正在恢复…" = "Restoring…";
+"正在开启…" = "Starting…";
+"正在取消…" = "Canceling…";
+"正在修复…" = "Repairing…";

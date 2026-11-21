@@ -105,6 +105,10 @@ struct LocalizationTests {
         }
         check(translations["取消本次充满"] == "Cancel one-time full charge",
               "direct card cancellation hint follows selected language")
+        check(translations["显示当前电量"] == "Show battery level"
+              && translations["在顶部卡片中显示当前电量百分比"] == "Show the battery percentage in the overview card"
+              && chinese["显示当前电量"] == "显示当前电量",
+              "optional battery setting is fully localized")
         check(translations["退出 MauLeaf"] == "Quit MauLeaf"
               && translations["供电状态"] == "Power"
               && translations["限制充电"] == "Charge limit"

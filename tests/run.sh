@@ -98,6 +98,21 @@ grep -Fq 'styleMask: [.borderless]' "$ROOT/Sources/MauLeaf.swift"
 grep -Fq 'panel.isOpaque = false' "$ROOT/Sources/MauLeaf.swift"
 grep -Fq 'panel.backgroundColor = .clear' "$ROOT/Sources/MauLeaf.swift"
 grep -Fq 'panel.hasShadow = true' "$ROOT/Sources/MauLeaf.swift"
+# A SwiftUI disclosure transition alone cannot animate the AppKit window
+# height; both layers must share the same 240ms timing and preserve the
+# top edge when Settings or Charge limit expands.
+grep -Fq 'private let resizeDuration: TimeInterval = 0.24' "$ROOT/Sources/MauLeaf.swift"
+grep -Fq 'context.duration = resizeDuration' "$ROOT/Sources/MauLeaf.swift"
+grep -Fq 'panel.animator().setFrame(targetFrame, display: true)' "$ROOT/Sources/MauLeaf.swift"
+grep -Fq 'y: anchorTop - height' "$ROOT/Sources/MauLeaf.swift"
+grep -Fq 'accessibilityDisplayShouldReduceMotion' "$ROOT/Sources/MauLeaf.swift"
+grep -Fq 'reduceMotion ? nil : .easeInOut(duration: 0.24)' "$ROOT/Sources/MauLeaf.swift"
+[[ "$(grep -Fc 'withAnimation(expansionAnimation)' "$ROOT/Sources/MauLeaf.swift")" -eq 2 ]]
+[[ "$(grep -Fc '.transition(expansionTransition)' "$ROOT/Sources/MauLeaf.swift")" -eq 2 ]]
+if grep -Fq 'panel.setContentSize(NSSize(width: panelWidth' "$ROOT/Sources/MauLeaf.swift"; then
+    echo "Direct size changes bypass the floating card disclosure animation" >&2
+    exit 1
+fi
 if grep -Fq 'titlebarAppearsTransparent' "$ROOT/Sources/MauLeaf.swift"; then
     echo "The extra native titlebar/frame must not return" >&2
     exit 1

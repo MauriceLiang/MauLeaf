@@ -395,7 +395,7 @@ struct ContentView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             batteryCard
-                .padding(.bottom, 12)
+                .padding(.bottom, 8)
 
             // Errors and quit operations participate in layout instead of
             // covering the Settings and Quit controls at the bottom.
@@ -487,7 +487,7 @@ struct ContentView: View {
     /// optional battery percentage adds a small header without reserving
     /// empty space when disabled.
     private var batteryCard: some View {
-        VStack(alignment: .leading, spacing: 9) {
+        VStack(alignment: .leading, spacing: 3) {
             if manager.showBatteryLevel {
                 VStack(alignment: .leading, spacing: 3) {
                     Text(manager.text("当前电量"))
@@ -546,7 +546,8 @@ struct ContentView: View {
                 action: { manager.toggleFullChargeFromCard() }
             )
         }
-        .padding(17)
+        .padding(.horizontal, 17)
+        .padding(.vertical, 13)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Color.primary.opacity(0.045), in: RoundedRectangle(cornerRadius: 16))
         .animation(.easeInOut(duration: 0.2), value: manager.showBatteryLevel)
@@ -601,7 +602,7 @@ struct ContentView: View {
                     .accessibilityLabel("\(manager.text(title))：\(manager.text(detail ?? status))")
             }
         }
-        .frame(minHeight: 35)
+        .frame(minHeight: 32)
     }
 
     private func statusPill(_ status: AppText, highlighted: Bool, interactive: Bool, loading: Bool) -> some View {
@@ -743,31 +744,58 @@ struct ContentView: View {
             && (!manager.hasOriginalStateSnapshot || manager.isAdapterConnected)
     }
 
+    /// Both preferences use the same compact segmented control so the
+    /// selected value is visible without an extra click. These only update
+    /// local UserDefaults; no privileged firmware action is involved.
     private var settingsControls: some View {
-        VStack(alignment: .leading, spacing: 11) {
-            Toggle(isOn: $manager.showBatteryLevel) {
-                Text(manager.text("显示当前电量"))
-                    .font(.caption)
-            }
-            .toggleStyle(.switch)
-            .controlSize(.small)
-            .help(manager.text("在顶部卡片中显示当前电量百分比"))
-
-            HStack {
-                Text(manager.text("界面语言"))
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                Spacer()
-                Button(manager.language.switchTitle) {
-                    manager.language = manager.language.other
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                settingsLabel("显示当前电量")
+                Spacer(minLength: 8)
+                Picker("", selection: $manager.showBatteryLevel) {
+                    Text(manager.language == .english ? "Hide" : "关闭").tag(false)
+                    Text(manager.language == .english ? "Show" : "开启").tag(true)
                 }
-                .buttonStyle(.bordered)
+                .pickerStyle(.segmented)
+                .labelsHidden()
                 .controlSize(.small)
+                .frame(width: 142)
+                .accessibilityLabel(manager.text("显示当前电量"))
+                .help(manager.text("在顶部卡片中显示当前电量百分比"))
+            }
+            .frame(minHeight: 30)
+
+            HStack(spacing: 8) {
+                settingsLabel("界面语言")
+                Spacer(minLength: 8)
+                Picker("", selection: $manager.language) {
+                    Text("中文").tag(AppLanguage.simplifiedChinese)
+                    Text("EN").tag(AppLanguage.english)
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .controlSize(.small)
+                .frame(width: 142)
+                .accessibilityLabel(manager.text("界面语言"))
                 .help(manager.text("切换界面语言"))
             }
+            .frame(minHeight: 30)
         }
-        .padding(.vertical, 5)
+        .padding(.vertical, 2)
     }
+
+    private func settingsLabel(_ title: AppText) -> some View {
+        Text(manager.text(title))
+            .font(.caption)
+            .foregroundStyle(.primary)
+            .lineLimit(1)
+            .fixedSize(horizontal: true, vertical: false)
+    }
+
+    #if MAULEAF_LAYOUT_TESTING
+    var batteryCardForTesting: some View { batteryCard }
+    var settingsControlsForTesting: some View { settingsControls }
+    #endif
 }
 
 /// Error and exceptional-operation feedback is an inline row below the battery

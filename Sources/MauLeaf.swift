@@ -365,21 +365,35 @@ private final class MauLeafMenuController: NSObject {
         if let menuRect = menuButtonScreenRect() {
             presentation.leafX = menuRect.midX - panel.frame.minX
         }
-        if !panel.isVisible {
+        let wasHidden = !panel.isVisible
+        if wasHidden {
             presentation.progress = 0
             panel.makeKeyAndOrderFront(nil)
+            // Commit an actual compact first frame before scheduling the
+            // spring target. Otherwise SwiftUI can coalesce 0 and 1 into an
+            // instant full card on the same event-loop iteration.
+            panel.displayIfNeeded()
         }
         panel.ignoresMouseEvents = true
         if NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
             presentation.progress = 1
             finishOpening(generation: generation)
         } else {
-            withAnimation(.spring(response: MenuCardMotion.openDuration,
-                                  dampingFraction: 0.9, blendDuration: 0)) {
-                presentation.progress = 1
+            let startAnimation = { [weak self] in
+                guard let self, self.morphGeneration == generation,
+                      self.morphState == .opening else { return }
+                withAnimation(.spring(response: MenuCardMotion.openDuration,
+                                      dampingFraction: 0.9, blendDuration: 0)) {
+                    self.presentation.progress = 1
+                }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.44) { [weak self] in
+                    self?.finishOpening(generation: generation)
+                }
             }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.44) { [weak self] in
-                self?.finishOpening(generation: generation)
+            if wasHidden {
+                DispatchQueue.main.async(execute: startAnimation)
+            } else {
+                startAnimation()
             }
         }
         NSApp.activate(ignoringOtherApps: true)

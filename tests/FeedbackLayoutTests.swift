@@ -60,7 +60,7 @@ struct FeedbackLayoutTests {
                 fatalError("Compact mode must be the default.")
             }
             manager.showBatteryLevel = true
-            RunLoop.main.run(until: Date().addingTimeInterval(0.28))
+            try await Task.sleep(nanoseconds: 280_000_000)
             let expanded = measure()
             guard expanded.0 > normal.0 + 40 && expanded.1 == 0
                   && UserDefaults.standard.bool(forKey: "showBatteryLevel") else {
@@ -68,7 +68,7 @@ struct FeedbackLayoutTests {
                 exit(1)
             }
             manager.showBatteryLevel = false
-            RunLoop.main.run(until: Date().addingTimeInterval(0.28))
+            try await Task.sleep(nanoseconds: 280_000_000)
             let compactAgain = measure()
             guard abs(compactAgain.0 - normal.0) < 1.5
                   && !UserDefaults.standard.bool(forKey: "showBatteryLevel") else {

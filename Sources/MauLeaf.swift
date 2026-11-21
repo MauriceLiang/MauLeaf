@@ -217,20 +217,20 @@ private final class MauLeafMenuController: NSObject {
         panel.level = .floating
         panel.collectionBehavior = [.moveToActiveSpace, .fullScreenAuxiliary]
 
-        // Scroll only if the visible screen is too short for the current content.
-        // The measured height includes all SwiftUI padding, install prompts and
-        // error messages. Do not size the NSPanel from a fixed estimate.
-        let root = ScrollView {
-            MenuCardMorphRoot(manager: manager, presentation: presentation)
-                .background {
-                    GeometryReader { proxy in
-                        Color.clear.preference(
-                            key: PanelContentHeightPreferenceKey.self,
-                            value: proxy.size.height
-                        )
-                    }
+        // A native menu-bar control panel must not behave like a webpage:
+        // no ScrollView, wheel scrolling or trackpad rubber-band movement.
+        // Layout itself determines the height; Settings/limit expansion and
+        // inline errors still trigger the measured NSPanel frame resize.
+        let root = MenuCardMorphRoot(manager: manager, presentation: presentation)
+            .fixedSize(horizontal: false, vertical: true)
+            .background {
+                GeometryReader { proxy in
+                    Color.clear.preference(
+                        key: PanelContentHeightPreferenceKey.self,
+                        value: proxy.size.height
+                    )
                 }
-        }
+            }
         .onPreferenceChange(PanelContentHeightPreferenceKey.self) { [weak self] height in
             // Layout callbacks must not synchronously resize the AppKit window
             // while SwiftUI is still calculating its layout.

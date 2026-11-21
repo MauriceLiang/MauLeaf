@@ -98,28 +98,27 @@ grep -Fq 'styleMask: [.borderless]' "$ROOT/Sources/MauLeaf.swift"
 grep -Fq 'panel.isOpaque = false' "$ROOT/Sources/MauLeaf.swift"
 grep -Fq 'panel.backgroundColor = .clear' "$ROOT/Sources/MauLeaf.swift"
 grep -Fq 'panel.hasShadow = true' "$ROOT/Sources/MauLeaf.swift"
-# Opening and closing must share a true leaf-centered 24pt endpoint
-# and move a transient rounded material surface in BOTH directions.
-# Never resize the interactive SwiftUI controls to icon dimensions.
-grep -Fq 'enum MenuPanelMorph {' "$ROOT/Sources/MauLeaf.swift"
-grep -Fq 'static let iconSide: CGFloat = 24' "$ROOT/Sources/MauLeaf.swift"
-grep -Fq 'private func makeMorphWindow(frame: NSRect) -> NSPanel' "$ROOT/Sources/MauLeaf.swift"
-grep -Fq 'proxy.ignoresMouseEvents = true' "$ROOT/Sources/MauLeaf.swift"
-grep -Fq 'proxy.level = .statusBar' "$ROOT/Sources/MauLeaf.swift"
-grep -Fq 'panel.makeKeyAndOrderFront(nil)' "$ROOT/Sources/MauLeaf.swift"
-grep -Fq 'proxy.animator().setFrame(panel.frame, display: true)' "$ROOT/Sources/MauLeaf.swift"
-grep -Fq 'private func reverseClosingToOpen()' "$ROOT/Sources/MauLeaf.swift"
-grep -Fq 'private func animateProxyToLeaf(' "$ROOT/Sources/MauLeaf.swift"
-grep -Fq 'if morphState == .opening, let proxy = morphWindow' "$ROOT/Sources/MauLeaf.swift"
-grep -Fq 'proxy.animator().setFrame(MenuPanelMorph.iconFrame(for: menuRect), display: true)' "$ROOT/Sources/MauLeaf.swift"
-grep -Fq 'panel.animator().alphaValue = 0' "$ROOT/Sources/MauLeaf.swift"
-grep -Fq 'self.panel.animator().alphaValue = 1' "$ROOT/Sources/MauLeaf.swift"
-grep -Fq 'private func closePanelTowardsLeaf()' "$ROOT/Sources/MauLeaf.swift"
-grep -Fq 'guard morphGeneration == generation else { return }' "$ROOT/Sources/MauLeaf.swift"
-grep -Fq 'if morphState == .opening || morphState == .closing { return }' "$ROOT/Sources/MauLeaf.swift"
+# Preview 10 uses one fixed transparent NSPanel and one SwiftUI
+# animatable material shape. No temporary proxy panel may be spawned.
+grep -Fq 'private final class MenuCardPresentation: ObservableObject' "$ROOT/Sources/MauLeaf.swift"
+grep -Fq 'private struct AnimatedFloatingCardShape: Shape' "$ROOT/Sources/MauLeaf.swift"
+grep -Fq 'private struct MenuCardMorphRoot: View' "$ROOT/Sources/MauLeaf.swift"
+grep -Fq 'MenuCardMorphRoot(manager: manager, presentation: presentation)' "$ROOT/Sources/MauLeaf.swift"
+grep -Fq 'var animatableData: AnimatablePair<CGFloat, CGFloat>' "$ROOT/Sources/MauLeaf.swift"
+grep -Fq 'static let compactWidth: CGFloat = 52' "$ROOT/Sources/MauLeaf.swift"
+grep -Fq 'static let compactHeight: CGFloat = 14' "$ROOT/Sources/MauLeaf.swift"
+grep -Fq 'static let closeDuration: TimeInterval = 0.26' "$ROOT/Sources/MauLeaf.swift"
+grep -Fq 'dampingFraction: 0.9' "$ROOT/Sources/MauLeaf.swift"
+grep -Fq 'MenuCardMotion.contentOpacity(presentation.progress)' "$ROOT/Sources/MauLeaf.swift"
+grep -Fq '.clipShape(shape)' "$ROOT/Sources/MauLeaf.swift"
+grep -Fq 'panel.hasShadow = false' "$ROOT/Sources/MauLeaf.swift"
+grep -Fq 'panel.ignoresMouseEvents = true' "$ROOT/Sources/MauLeaf.swift"
+grep -Fq 'morphGeneration &+= 1' "$ROOT/Sources/MauLeaf.swift"
 grep -Fq 'accessibilityDisplayShouldReduceMotion' "$ROOT/Sources/MauLeaf.swift"
-if grep -Eq 'MenuPanelEntrance|entranceInProgress|panel.setFrame\(MenuPanel' "$ROOT/Sources/MauLeaf.swift"; then
-    echo "The old shallow one-way popup or scaling of real controls must not return" >&2
+[[ "$(grep -Fc 'NSPanel(' "$ROOT/Sources/MauLeaf.swift")" -eq 1 ]]
+[[ "$(grep -Fc '.fill(.regularMaterial)' "$ROOT/Sources/MauLeaf.swift")" -eq 1 ]]
+if grep -Eq 'morphWindow|makeMorphWindow|MenuPanelMorph|MenuPanelEntrance|NSVisualEffectView\(frame:|FloatingCardShape\(' "$ROOT/Sources/MauLeaf.swift"; then
+    echo "The Preview 9 proxy or a second static surface must not return" >&2
     exit 1
 fi
 # A SwiftUI disclosure transition alone cannot animate the AppKit window

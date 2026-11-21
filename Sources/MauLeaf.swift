@@ -111,7 +111,7 @@ enum MenuCardMotion {
 }
 
 @MainActor
-private final class MenuCardPresentation: ObservableObject {
+final class MenuCardPresentation: ObservableObject {
     @Published var progress: CGFloat = 0
     @Published var leafX: CGFloat = 180
     @Published var isInteractive = false
@@ -153,7 +153,7 @@ private struct AnimatedFloatingCardShape: Shape {
 
 /// Full-sized controls are never scaled or laid out in the compact shell.
 /// Only their opacity and clipping change while the single shape expands.
-private struct MenuCardMorphRoot: View {
+struct MenuCardMorphRoot: View {
     @ObservedObject var manager: ChargeManager
     @ObservedObject var presentation: MenuCardPresentation
 

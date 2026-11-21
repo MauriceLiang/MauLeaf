@@ -130,7 +130,7 @@ fi
 grep -Fq 'let root = MenuCardMorphRoot(manager: manager, presentation: presentation)' "$ROOT/Sources/MauLeaf.swift"
 grep -Fq '.fixedSize(horizontal: false, vertical: true)' "$ROOT/Sources/MauLeaf.swift"
 grep -Fq '.onPreferenceChange(PanelContentHeightPreferenceKey.self)' "$ROOT/Sources/MauLeaf.swift"
-if grep -Eq 'ScrollView[[:space:]]*\\{|NSScrollView[[:space:]]*\\(' "$ROOT/Sources/MauLeaf.swift"; then
+if grep -Eq 'ScrollView[[:space:]]*\{|NSScrollView[[:space:]]*\(' "$ROOT/Sources/MauLeaf.swift"; then
     echo "Menu bar popup must not contain a scrollable view" >&2
     exit 1
 fi

@@ -238,11 +238,13 @@ private final class MauLeafMenuController: NSObject {
 
     @objc private func togglePanel() {
         if morphState == .closing {
-            // A quick second click reverses the intent without waiting for a
-            // stale close completion to hide the newly opened card.
-            cancelMorph()
-            panel.orderOut(nil)
-            morphState = .hidden
+            // Retarget the same in-flight proxy instead of snapping back to
+            // a tiny icon or a full card on a rapid second click.
+            reverseClosingToOpen()
+            startOutsideClickMonitoring()
+            manager.refresh()
+            manager.setPanelVisible(true)
+            return
         } else if panel.isVisible {
             // Do not dismiss the panel during an authorization or quit prompt.
             if panel.attachedSheet != nil || manager.isBusy {
@@ -301,12 +303,35 @@ private final class MauLeafMenuController: NSObject {
         panel.ignoresMouseEvents = false
     }
 
+    private func reverseClosingToOpen() {
+        guard let proxy = morphWindow,
+              !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion else {
+            cancelMorph()
+            panel.orderOut(nil)
+            morphState = .hidden
+            showPanelFromMenuBar()
+            return
+        }
+        morphGeneration &+= 1
+        let generation = morphGeneration
+        morphState = .opening
+        allowAnimatedResizes = measuredContentHeight > 0
+        lastTargetFrame = nil
+        positionPanel()
+        panel.alphaValue = 0
+        panel.ignoresMouseEvents = true
+        panel.makeKeyAndOrderFront(nil)
+        proxy.alphaValue = 1
+        proxy.orderFrontRegardless()
+        animateProxyToCard(proxy, generation: generation)
+        NSApp.activate(ignoringOtherApps: true)
+    }
+
     private func showPanelFromMenuBar() {
         cancelMorph()
         allowAnimatedResizes = measuredContentHeight > 0
         lastTargetFrame = nil
         positionPanel()
-        let fullFrame = panel.frame
         morphState = .opening
 
         guard !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion,
@@ -327,11 +352,17 @@ private final class MauLeafMenuController: NSObject {
         panel.makeKeyAndOrderFront(nil)
         proxy.orderFrontRegardless()
 
-        // Grow the material from the real leaf's center to the card bounds.
+        animateProxyToCard(proxy, generation: generation)
+        NSApp.activate(ignoringOtherApps: true)
+    }
+
+    private func animateProxyToCard(_ proxy: NSPanel, generation: UInt64) {
+        // The real panel remains at its final size; only the temporary
+        // material proxy morphs. Never stretch editable controls or text.
         NSAnimationContext.runAnimationGroup { context in
             context.duration = MenuPanelMorph.surfaceDuration
             context.timingFunction = CAMediaTimingFunction(name: .easeOut)
-            proxy.animator().setFrame(fullFrame, display: true)
+            proxy.animator().setFrame(panel.frame, display: true)
         } completionHandler: { [weak self] in
             guard let self, self.morphGeneration == generation,
                   self.morphState == .opening else { return }
@@ -348,16 +379,42 @@ private final class MauLeafMenuController: NSObject {
                 self.panel.alphaValue = 1
                 self.panel.ignoresMouseEvents = false
                 self.morphState = .visible
-                // Apply measurements received while the proxy was moving.
                 self.positionPanel(animatedHeight: self.allowAnimatedResizes)
                 self.allowAnimatedResizes = true
                 self.panel.invalidateShadow()
             }
         }
-        NSApp.activate(ignoringOtherApps: true)
+    }
+
+    private func animateProxyToLeaf(_ proxy: NSPanel, menuRect: NSRect, generation: UInt64) {
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = MenuPanelMorph.surfaceDuration
+            context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+            proxy.animator().setFrame(MenuPanelMorph.iconFrame(for: menuRect), display: true)
+        } completionHandler: { [weak self] in
+            guard let self, self.morphGeneration == generation,
+                  self.morphState == .closing else { return }
+            self.finishPanelDismissal(generation: generation)
+        }
     }
 
     private func closePanelTowardsLeaf() {
+        // If the card is still growing, send that same proxy directly back
+        // toward the leaf instead of flashing the full panel in between.
+        if morphState == .opening, let proxy = morphWindow,
+           !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion,
+           let menuRect = menuButtonScreenRect() {
+            morphGeneration &+= 1
+            let generation = morphGeneration
+            morphState = .closing
+            allowAnimatedResizes = false
+            panel.alphaValue = 0
+            panel.orderOut(nil)
+            proxy.alphaValue = 1
+            animateProxyToLeaf(proxy, menuRect: menuRect, generation: generation)
+            return
+        }
+
         cancelMorph()
         allowAnimatedResizes = false
         morphState = .closing
@@ -384,15 +441,7 @@ private final class MauLeafMenuController: NSObject {
             guard let self, self.morphGeneration == generation,
                   self.morphState == .closing else { return }
             self.panel.orderOut(nil)
-            NSAnimationContext.runAnimationGroup { context in
-                context.duration = MenuPanelMorph.surfaceDuration
-                context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
-                proxy.animator().setFrame(MenuPanelMorph.iconFrame(for: menuRect), display: true)
-            } completionHandler: { [weak self] in
-                guard let self, self.morphGeneration == generation,
-                      self.morphState == .closing else { return }
-                self.finishPanelDismissal(generation: generation)
-            }
+            self.animateProxyToLeaf(proxy, menuRect: menuRect, generation: generation)
         }
     }
 

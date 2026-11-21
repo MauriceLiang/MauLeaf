@@ -95,6 +95,13 @@ enum MenuCardMotion {
                       height: compact.height + (full.height - compact.height) * t)
     }
 
+    /// Fade out the *shell itself* before it reaches the smallest capsule.
+    /// This avoids an opaque chip or black rectangle touching the status icon.
+    static func shellOpacity(_ progress: CGFloat) -> Double {
+        let t = min(max((progress - 0.04) / 0.25, 0), 1)
+        return Double(t * t * (3 - 2 * t))
+    }
+
     /// Text becomes visible during—not after—the shell's expansion.
     /// It vanishes early during closing, before the card is very small.
     static func contentOpacity(_ progress: CGFloat) -> Double {
@@ -165,6 +172,7 @@ private struct MenuCardMorphRoot: View {
                     .clipShape(shape)
                     .compositingGroup()
                     .shadow(color: .black.opacity(0.24), radius: 7, x: 0, y: 3)
+                    .opacity(MenuCardMotion.shellOpacity(presentation.progress))
             }
     }
 }

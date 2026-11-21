@@ -64,7 +64,7 @@ struct FeedbackLayoutTests {
             let settingsHost = NSHostingView(rootView: ContentView(manager: manager)
                 .settingsControlsForTesting.frame(width: 298)
                 .environment(\.colorScheme, .dark))
-            RunLoop.main.run(until: Date().addingTimeInterval(0.03))
+            try await Task.sleep(nanoseconds: 30_000_000)
             cardHost.layoutSubtreeIfNeeded()
             settingsHost.layoutSubtreeIfNeeded()
             let compactCardHeight = cardHost.fittingSize.height

@@ -56,6 +56,26 @@ struct FeedbackLayoutTests {
                 return (host.fittingSize.height, feedback.fittingSize.height)
             }
             let normal = measure()
+            // Exercise both disclosure layouts in each language. They must
+            // grow the same single-card popover, not overlay or replace it.
+            func measuredDisclosureHeight(limit: Bool, settings: Bool) -> CGFloat {
+                let view = ContentView(manager: manager,
+                                       initiallyExpandedLimit: limit,
+                                       initiallyExpandedSettings: settings)
+                let expandedHost = NSHostingView(rootView: view.frame(width: 360)
+                    .environment(\.colorScheme, .dark))
+                expandedHost.layoutSubtreeIfNeeded()
+                return expandedHost.fittingSize.height
+            }
+            let limitOpenHeight = measuredDisclosureHeight(limit: true, settings: false)
+            let settingsOpenHeight = measuredDisclosureHeight(limit: false, settings: true)
+            guard limitOpenHeight > normal.0 + 35,
+                  settingsOpenHeight > normal.0 + 35,
+                  limitOpenHeight < normal.0 + 220,
+                  settingsOpenHeight < normal.0 + 220 else {
+                fputs("FAIL: disclosure must grow the existing card: normal=\(normal.0), limit=\(limitOpenHeight), settings=\(settingsOpenHeight)\n", stderr)
+                exit(1)
+            }
             guard (275...335).contains(normal.0) else {
                 fputs("FAIL: single-card compact popover height unexpected: \(normal.0)\n", stderr)
                 exit(1)
@@ -141,7 +161,7 @@ struct FeedbackLayoutTests {
                 fputs("FAIL: inline feedback layout: normal=\(normal), busy=\(busy), success=\(success), failure=\(failure); progress=\(limitProgress)\n", stderr)
                 exit(1)
             }
-            print("FeedbackLayoutTests: PASS (\(language.rawValue); single card panel=\(normal.0)pt, status group=\(compactCardHeight)pt, settings=\(compactSettingsHeight)pt, optional battery and inline feedback)")
+            print("FeedbackLayoutTests: PASS (\(language.rawValue); single card=\(normal.0)pt, expanded limit=\(limitOpenHeight)pt, expanded settings=\(settingsOpenHeight)pt, status group=\(compactCardHeight)pt, optional battery and inline feedback)")
         }
         _ = await manager.prepareForTermination()
         UserDefaults.standard.removeObject(forKey: "nativeFirmwareWriteConfirmed")

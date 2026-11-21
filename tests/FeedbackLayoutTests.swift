@@ -58,16 +58,21 @@ struct FeedbackLayoutTests {
             let normal = measure()
             // Measure each piece separately: the closed battery card must
             // actually reclaim space, not merely shrink its outer popover.
-            let cardHost = NSHostingView(rootView: ContentView(manager: manager)
-                .batteryCardForTesting.frame(width: 328)
-                .environment(\.colorScheme, .dark))
+            // Each isolated card hosts a fresh view because the observed
+            // ContentView wrapper is not mounted when extracting this private
+            // subview. Reusing that detached host would retain stale state.
+            func measuredCardHeight() -> CGFloat {
+                let cardHost = NSHostingView(rootView: ContentView(manager: manager)
+                    .batteryCardForTesting.frame(width: 328)
+                    .environment(\.colorScheme, .dark))
+                cardHost.layoutSubtreeIfNeeded()
+                return cardHost.fittingSize.height
+            }
             let settingsHost = NSHostingView(rootView: ContentView(manager: manager)
                 .settingsControlsForTesting.frame(width: 298)
                 .environment(\.colorScheme, .dark))
-            try await Task.sleep(nanoseconds: 30_000_000)
-            cardHost.layoutSubtreeIfNeeded()
             settingsHost.layoutSubtreeIfNeeded()
-            let compactCardHeight = cardHost.fittingSize.height
+            let compactCardHeight = measuredCardHeight()
             let compactSettingsHeight = settingsHost.fittingSize.height
             guard (118...151).contains(compactCardHeight),
                   (59...95).contains(compactSettingsHeight) else {
@@ -80,19 +85,18 @@ struct FeedbackLayoutTests {
             manager.showBatteryLevel = true
             try await Task.sleep(nanoseconds: 280_000_000)
             let expanded = measure()
-            cardHost.layoutSubtreeIfNeeded()
-            let expandedCardHeight = cardHost.fittingSize.height
+            let expandedCardHeight = measuredCardHeight()
             guard expandedCardHeight > compactCardHeight + 40,
                   expanded.0 > normal.0 + 40 && expanded.1 == 0
                   && UserDefaults.standard.bool(forKey: "showBatteryLevel") else {
-                fputs("FAIL: optional battery display should expand the panel without an overlay: compact=\(normal), expanded=\(expanded)\n", stderr)
+                fputs("FAIL: optional battery display should expand the panel without an overlay: compact=\(normal), expanded=\(expanded), isolated cards=\(compactCardHeight)/\(expandedCardHeight)\n", stderr)
                 exit(1)
             }
             manager.showBatteryLevel = false
             try await Task.sleep(nanoseconds: 280_000_000)
             let compactAgain = measure()
-            cardHost.layoutSubtreeIfNeeded()
-            guard abs(cardHost.fittingSize.height - compactCardHeight) < 1.5,
+            let restoredCardHeight = measuredCardHeight()
+            guard abs(restoredCardHeight - compactCardHeight) < 1.5,
                   abs(compactAgain.0 - normal.0) < 1.5
                   && !UserDefaults.standard.bool(forKey: "showBatteryLevel") else {
                 fputs("FAIL: disabling battery level should reclaim header space: normal=\(normal), compactAgain=\(compactAgain)\n", stderr)

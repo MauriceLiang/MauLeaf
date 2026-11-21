@@ -7,6 +7,7 @@ private enum ChargeManagerTests {
         let backend = FixtureNativeFirmwareBackend()
         UserDefaults.standard.set(false, forKey: "nativeFirmwareWriteConfirmed")
         UserDefaults.standard.set(80, forKey: "chargeLimit")
+        UserDefaults.standard.removeObject(forKey: "showBatteryLevel")
         let manager = ChargeManager(backend: backend, autoInstallNativeHelper: false)
         manager.start()
         try await wait { manager.backendReady && manager.currentState != nil }
@@ -14,6 +15,16 @@ private enum ChargeManagerTests {
         manager.batteryPercent = 80
 
         try check(manager.menuBarLeafStyle == .green, "menu-bar leaf is fixed to green")
+        try check(!manager.showBatteryLevel, "new and upgraded installs default to a compact card without battery digits")
+        manager.showBatteryLevel = true
+        try check(UserDefaults.standard.bool(forKey: "showBatteryLevel"),
+                  "enabling the battery percentage saves its preference")
+        let restoredPreference = ChargeManager(backend: FixtureNativeFirmwareBackend(), autoInstallNativeHelper: false)
+        try check(restoredPreference.showBatteryLevel,
+                  "battery percentage preference survives manager recreation")
+        manager.showBatteryLevel = false
+        try check(!UserDefaults.standard.bool(forKey: "showBatteryLevel"),
+                  "disabling the battery percentage restores compact mode")
         try check(manager.limit == 80 && manager.modeText.source == "限制充电未启用"
                   && manager.popoverLimitStatus.source == "未启用"
                   && manager.popoverFullChargeStatus.source == "未开启"
@@ -21,11 +32,13 @@ private enum ChargeManagerTests {
                   && manager.limitCardActionHint.source == "启用限制充电",
                   "initial card can enable limit but cannot start one-time full charge")
         manager.batteryStateText = "正在充电"
+        try check(manager.isActivelyCharging, "power status highlights only actual charging")
         try check(manager.popoverPowerStatus.source == "充电中"
                   && manager.popoverPowerStatus.localized(in: .english) == "Charging"
                   && manager.popoverPowerDetail.source == "已接电源，充电中",
                   "power row is compact while the full charging detail remains available")
         manager.batteryStateText = "已接电源，未充电"
+        try check(!manager.isActivelyCharging, "plugged in but not charging stays neutral")
         try check(manager.popoverPowerStatus.source == "已接电源"
                   && manager.popoverPowerStatus.localized(in: .english) == "Plugged in"
                   && manager.popoverPowerDetail.localized(in: .english) == "Connected to power, not charging",
@@ -34,6 +47,7 @@ private enum ChargeManagerTests {
         try check(manager.popoverPowerStatus.localized(in: .english) == "Fully charged",
                   "fully charged state has a short distinct label")
         manager.batteryStateText = "电池供电"
+        try check(!manager.isActivelyCharging, "battery power stays neutral")
         try check(manager.popoverPowerStatus.localized(in: .english) == "On battery",
                   "battery power stays a separate state")
         manager.batteryStateText = "正在充电"

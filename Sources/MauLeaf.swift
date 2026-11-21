@@ -547,6 +547,7 @@ struct ContentView: View {
         .padding(.top, 22)
         .padding(.bottom, 15)
         .frame(maxWidth: .infinity, alignment: .leading)
+        .clipShape(FloatingCardShape())
         .background {
             FloatingCardShape()
                 .fill(.regularMaterial)
@@ -557,7 +558,6 @@ struct ContentView: View {
                 .clipShape(FloatingCardShape())
                 .shadow(color: .black.opacity(0.20), radius: 7, x: 0, y: 3)
         }
-        .clipShape(FloatingCardShape())
         .padding(.horizontal, 6)
         .padding(.bottom, 6)
         .alert(manager.text("启用原生固件控制？"), isPresented: $manager.showNativeWriteConfirmation) {

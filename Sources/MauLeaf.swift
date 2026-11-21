@@ -59,6 +59,14 @@ private struct PanelContentHeightPreferenceKey: PreferenceKey {
     }
 }
 
+/// A key-capable borderless panel preserves keyboard focus, SwiftUI
+/// controls and safety confirmations while avoiding the extra macOS window
+/// chrome around the single floating card.
+private final class MauLeafCardPanel: NSPanel {
+    override var canBecomeKey: Bool { true }
+    override var canBecomeMain: Bool { true }
+}
+
 @MainActor
 private final class MauLeafMenuController: NSObject {
     private let manager = ChargeManager()
@@ -73,20 +81,18 @@ private final class MauLeafMenuController: NSObject {
     private var lastPanelHeight: CGFloat = 0
 
     override init() {
-        panel = NSPanel(
+        panel = MauLeafCardPanel(
             contentRect: NSRect(x: 0, y: 0, width: 360, height: 480),
-            styleMask: [.titled, .fullSizeContentView],
+            styleMask: [.borderless],
             backing: .buffered,
             defer: false
         )
         super.init()
 
         panel.title = "MauLeaf"
-        panel.titleVisibility = .hidden
-        panel.titlebarAppearsTransparent = true
-        panel.standardWindowButton(.closeButton)?.isHidden = true
-        panel.standardWindowButton(.miniaturizeButton)?.isHidden = true
-        panel.standardWindowButton(.zoomButton)?.isHidden = true
+        panel.isOpaque = false
+        panel.backgroundColor = .clear
+        panel.hasShadow = true
         panel.isMovableByWindowBackground = false
         panel.isReleasedWhenClosed = false
         panel.hidesOnDeactivate = false
@@ -114,9 +120,12 @@ private final class MauLeafMenuController: NSObject {
                 self?.updateContentHeight(height)
             }
         }
+        .background(Color.clear)
         .ignoresSafeArea(.container, edges: .top)
         .frame(width: panelWidth)
         panel.contentView = NSHostingView(rootView: root)
+        panel.contentView?.wantsLayer = true
+        panel.contentView?.layer?.backgroundColor = NSColor.clear.cgColor
 
         if let button = statusItem.button {
             button.target = self
@@ -281,6 +290,7 @@ private final class MauLeafMenuController: NSObject {
 
         if abs(height - lastPanelHeight) >= 1 {
             panel.setContentSize(NSSize(width: panelWidth, height: height))
+            panel.invalidateShadow()
             lastPanelHeight = height
         }
         panel.setFrameOrigin(NSPoint(x: x, y: anchorTop - height))
@@ -385,6 +395,25 @@ struct BatteryStatusRing: View {
     }
 }
 
+/// The only visible popup surface: one rounded material card with a
+/// small upward pointer. The transparent NSPanel draws no second frame.
+private struct FloatingCardShape: Shape {
+    func path(in rect: CGRect) -> Path {
+        let arrowHeight: CGFloat = 8
+        let arrowHalfWidth: CGFloat = 10
+        let body = CGRect(x: rect.minX, y: rect.minY + arrowHeight,
+                          width: rect.width, height: max(0, rect.height - arrowHeight))
+        var path = Path(roundedRect: body, cornerRadius: 20)
+        var pointer = Path()
+        pointer.move(to: CGPoint(x: rect.midX - arrowHalfWidth, y: body.minY))
+        pointer.addLine(to: CGPoint(x: rect.midX, y: rect.minY))
+        pointer.addLine(to: CGPoint(x: rect.midX + arrowHalfWidth, y: body.minY))
+        pointer.closeSubpath()
+        path.addPath(pointer)
+        return path
+    }
+}
+
 /// Native menu-bar-only popover. No detached main window or navigation.
 struct ContentView: View {
     @ObservedObject var manager: ChargeManager
@@ -394,12 +423,13 @@ struct ContentView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
+            // All six primary rows belong to the same visual surface.
+            // Only the internal divider distinguishes charging from settings.
             batteryCard
-                .padding(.bottom, 8)
 
-            // Errors and quit operations participate in layout instead of
-            // covering the Settings and Quit controls at the bottom.
+            // Errors expand the same card; they never cover menu actions.
             OperationFeedbackView(manager: manager)
+            groupDivider
 
             menuRow(
                 icon: "slider.horizontal.3",
@@ -444,7 +474,7 @@ struct ContentView: View {
             Button {
                 NSApp.terminate(nil)
             } label: {
-                HStack(spacing: 11) {
+                HStack(spacing: 10) {
                     Image(systemName: "power")
                         .font(.system(size: 16, weight: .medium))
                         .frame(width: 20)
@@ -453,15 +483,30 @@ struct ContentView: View {
                     Spacer()
                 }
                 .contentShape(Rectangle())
-                .padding(.vertical, 13)
+                .padding(.vertical, 11)
             }
             .buttonStyle(.plain)
             .disabled(manager.isPreparingToQuit)
             .help(manager.text("正常退出会先关闭限制充电并验证恢复。若无法安全恢复，将取消退出。"))
         }
-        .padding(.horizontal, 16)
-        .padding(.top, 17)
-        .padding(.bottom, 9)
+        .padding(.horizontal, 17)
+        .padding(.top, 22)
+        .padding(.bottom, 15)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background {
+            FloatingCardShape()
+                .fill(.regularMaterial)
+                .overlay {
+                    FloatingCardShape()
+                        .fill(Color(nsColor: .windowBackgroundColor).opacity(0.28))
+                }
+                .clipShape(FloatingCardShape())
+        }
+        .clipShape(FloatingCardShape())
+        // Transparent breathing room is for the card/window shadow, not
+        // another framed container or a nested background.
+        .padding(.horizontal, 6)
+        .padding(.bottom, 6)
         .alert(manager.text("启用原生固件控制？"), isPresented: $manager.showNativeWriteConfirmation) {
             Button(manager.text("确认并继续"), role: .destructive) {
                 manager.confirmNativeWrite()
@@ -546,10 +591,7 @@ struct ContentView: View {
                 action: { manager.toggleFullChargeFromCard() }
             )
         }
-        .padding(.horizontal, 17)
-        .padding(.vertical, 13)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.primary.opacity(0.045), in: RoundedRectangle(cornerRadius: 16))
         .animation(.easeInOut(duration: 0.2), value: manager.showBatteryLevel)
     }
 
@@ -651,6 +693,14 @@ struct ContentView: View {
             .padding(.leading, 30)
     }
 
+    /// One slightly stronger rule separates status from configuration
+    /// without a second card, heading or colored strip.
+    private var groupDivider: some View {
+        Divider()
+            .opacity(0.8)
+            .padding(.vertical, 8)
+    }
+
     private func menuRow(
         icon: String,
         title: AppText,
@@ -659,7 +709,7 @@ struct ContentView: View {
         action: @escaping () -> Void
     ) -> some View {
         Button(action: action) {
-            HStack(spacing: 11) {
+            HStack(spacing: 10) {
                 Image(systemName: icon)
                     .font(.system(size: 16, weight: .regular))
                     .frame(width: 20)
@@ -682,7 +732,7 @@ struct ContentView: View {
                     .accessibilityHidden(true)
             }
             .contentShape(Rectangle())
-            .padding(.vertical, 12)
+            .padding(.vertical, 11)
         }
         .buttonStyle(.plain)
         .accessibilityAddTraits(.isButton)

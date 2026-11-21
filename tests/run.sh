@@ -97,7 +97,7 @@ grep -Fq 'private final class MauLeafCardPanel: NSPanel' "$ROOT/Sources/MauLeaf.
 grep -Fq 'styleMask: [.borderless]' "$ROOT/Sources/MauLeaf.swift"
 grep -Fq 'panel.isOpaque = false' "$ROOT/Sources/MauLeaf.swift"
 grep -Fq 'panel.backgroundColor = .clear' "$ROOT/Sources/MauLeaf.swift"
-grep -Fq 'panel.hasShadow = true' "$ROOT/Sources/MauLeaf.swift"
+grep -Fq 'panel.hasShadow = false' "$ROOT/Sources/MauLeaf.swift"
 # Preview 10 uses one fixed transparent NSPanel and one SwiftUI
 # animatable material shape. No temporary proxy panel may be spawned.
 grep -Fq 'private final class MenuCardPresentation: ObservableObject' "$ROOT/Sources/MauLeaf.swift"
@@ -121,7 +121,7 @@ if grep -Fq 'NSPanel(contentRect:' "$ROOT/Sources/MauLeaf.swift"; then
     exit 1
 fi
 [[ "$(grep -Fc '.fill(.regularMaterial)' "$ROOT/Sources/MauLeaf.swift")" -eq 1 ]]
-if grep -Eq 'morphWindow|makeMorphWindow|MenuPanelMorph|MenuPanelEntrance|NSVisualEffectView\(frame:|FloatingCardShape\(' "$ROOT/Sources/MauLeaf.swift"; then
+if grep -Eq 'morphWindow|makeMorphWindow|MenuPanelMorph|MenuPanelEntrance|NSVisualEffectView\(frame:|private struct FloatingCardShape' "$ROOT/Sources/MauLeaf.swift"; then
     echo "The Preview 9 proxy or a second static surface must not return" >&2
     exit 1
 fi

@@ -115,7 +115,11 @@ grep -Fq 'panel.hasShadow = false' "$ROOT/Sources/MauLeaf.swift"
 grep -Fq 'panel.ignoresMouseEvents = true' "$ROOT/Sources/MauLeaf.swift"
 grep -Fq 'morphGeneration &+= 1' "$ROOT/Sources/MauLeaf.swift"
 grep -Fq 'accessibilityDisplayShouldReduceMotion' "$ROOT/Sources/MauLeaf.swift"
-[[ "$(grep -Fc 'NSPanel(' "$ROOT/Sources/MauLeaf.swift")" -eq 1 ]]
+[[ "$(grep -Fc 'panel = MauLeafCardPanel(' "$ROOT/Sources/MauLeaf.swift")" -eq 1 ]]
+if grep -Fq 'NSPanel(contentRect:' "$ROOT/Sources/MauLeaf.swift"; then
+    echo "No second NSPanel or animation proxy is permitted" >&2
+    exit 1
+fi
 [[ "$(grep -Fc '.fill(.regularMaterial)' "$ROOT/Sources/MauLeaf.swift")" -eq 1 ]]
 if grep -Eq 'morphWindow|makeMorphWindow|MenuPanelMorph|MenuPanelEntrance|NSVisualEffectView\(frame:|FloatingCardShape\(' "$ROOT/Sources/MauLeaf.swift"; then
     echo "The Preview 9 proxy or a second static surface must not return" >&2

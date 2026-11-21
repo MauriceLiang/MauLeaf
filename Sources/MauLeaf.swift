@@ -598,6 +598,9 @@ struct ContentView: View {
                     .foregroundStyle(highlighted ? Color.green : Color.secondary)
                     .lineLimit(1)
                     .fixedSize(horizontal: true, vertical: false)
+                    // Align the trailing edge of this read-only text with the
+                    // text inside the actionable status pills, not their border.
+                    .padding(.trailing, 12)
                     .help(manager.text(detail ?? status))
                     .accessibilityLabel("\(manager.text(title))：\(manager.text(detail ?? status))")
             }

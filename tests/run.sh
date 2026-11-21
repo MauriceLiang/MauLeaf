@@ -127,6 +127,11 @@ grep -Fq 'Picker("", selection: $manager.language)' <<< "$POPOVER_SOURCE"
 [[ "$(grep -Fc '.frame(width: 142)' <<< "$POPOVER_SOURCE")" -eq 2 ]]
 grep -Fq 'if manager.showBatteryLevel' <<< "$POPOVER_SOURCE"
 grep -Fq 'highlighted: manager.isActivelyCharging' <<< "$POPOVER_SOURCE"
+# Read-only power status aligns with the inner text of the two capsule
+# buttons (which have 12pt horizontal inset), not their outer borders.
+POWER_READONLY_SOURCE="$(sed -n '/\/\/ Power is a read-only measurement/,/\.accessibilityLabel(/p' "$ROOT/Sources/MauLeaf.swift")"
+grep -Fq '.padding(.trailing, 12)' <<< "$POWER_READONLY_SOURCE"
+grep -Fq '.padding(.horizontal, 12)' <<< "$POPOVER_SOURCE"
 grep -Fq 'spacing: 3) {' <<< "$POPOVER_SOURCE"
 if grep -Eq 'componentSetupSection|installBackend|uninstallBackend' "$ROOT/Sources/MauLeaf.swift"; then
     echo "The legacy component installer UI must not return" >&2

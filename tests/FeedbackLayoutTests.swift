@@ -55,6 +55,14 @@ struct FeedbackLayoutTests {
                 return (host.fittingSize.height, feedback.fittingSize.height)
             }
             let normal = measure()
+            for supplyState in ["正在充电", "已接电源，未充电", "已接电源，已充满", "电池供电", "电池状态不可用"] {
+                manager.batteryStateText = supplyState
+                let variant = measure()
+                guard abs(variant.0 - normal.0) < 1.5 && variant.1 == 0 else {
+                    fputs("FAIL: supply status unexpectedly wrapped in \(language.rawValue): \(supplyState), normal=\(normal), variant=\(variant)\n", stderr)
+                    exit(1)
+                }
+            }
             manager.statusMessage = "正在写入原生固件充电上限 85%…"
             manager.setFeedbackOperationForTesting(.adjustingLimit)
             manager.isBusy = true
@@ -80,7 +88,7 @@ struct FeedbackLayoutTests {
                 fputs("FAIL: inline feedback layout: normal=\(normal), busy=\(busy), success=\(success), failure=\(failure); progress=\(limitProgress)\n", stderr)
                 exit(1)
             }
-            print("FeedbackLayoutTests: PASS (\(language.rawValue); in-card progress, inline errors, no overlay)")
+            print("FeedbackLayoutTests: PASS (\(language.rawValue); single-line compact status, in-card progress, inline errors)")
         }
         _ = await manager.prepareForTermination()
         UserDefaults.standard.removeObject(forKey: "nativeFirmwareWriteConfirmed")

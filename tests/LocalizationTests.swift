@@ -91,12 +91,12 @@ struct LocalizationTests {
         }
 
 
-        let activeLimit: AppText = "已启用（\(85)%）"
-        check(activeLimit.source == "已启用（85%）"
-              && activeLimit.localized(in: .english) == "Enabled (85%)",
+        let activeLimit: AppText = "已启用 · \(85)%"
+        check(activeLimit.source == "已启用 · 85%"
+              && activeLimit.localized(in: .english) == "On · 85%",
               "active compact status badge localizes numeric charge limit")
-        let pausedLimit: AppText = "已暂停（\(85)%）"
-        check(pausedLimit.localized(in: .english) == "Paused (85%)",
+        let pausedLimit: AppText = "已暂停 · \(85)%"
+        check(pausedLimit.localized(in: .english) == "Paused · 85%",
               "one-time charge temporarily pauses rather than disables configured limit")
         for key in ["供电状态", "限制充电", "本次充满", "取消本次充满", "设置", "退出 MauLeaf",
                     "界面语言", "正在恢复", "恢复任务仍在等待；请先恢复原始配置。"] {
@@ -106,8 +106,22 @@ struct LocalizationTests {
         check(translations["取消本次充满"] == "Cancel one-time full charge",
               "direct card cancellation hint follows selected language")
         check(translations["退出 MauLeaf"] == "Quit MauLeaf"
-              && translations["供电状态"] == "Power supply",
-              "popover quit and power status reflect English preference")
+              && translations["供电状态"] == "Power"
+              && translations["限制充电"] == "Charge limit"
+              && translations["本次充满"] == "Full charge",
+              "English card titles are shortened without reducing the panel font")
+        for (key, expected) in [
+            ("充电中", "Charging"),
+            ("已接电源", "Plugged in"),
+            ("已充满", "Fully charged"),
+            ("电池供电", "On battery"),
+            ("读取中…", "Loading…"),
+            ("未启用", "Off"),
+            ("进行中", "Active")
+        ] {
+            check(translations[key] == expected && chinese[key] == key,
+                  "compact status remains bilingual: \(key)")
+        }
 
         print("LocalizationTests: PASS (\(checks) checks; real bundled string tables)")
     }

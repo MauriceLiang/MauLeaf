@@ -98,6 +98,16 @@ grep -Fq 'styleMask: [.borderless]' "$ROOT/Sources/MauLeaf.swift"
 grep -Fq 'panel.isOpaque = false' "$ROOT/Sources/MauLeaf.swift"
 grep -Fq 'panel.backgroundColor = .clear' "$ROOT/Sources/MauLeaf.swift"
 grep -Fq 'panel.hasShadow = true' "$ROOT/Sources/MauLeaf.swift"
+# The menu-bar click requires its own gentle popup entrance. Preserve a
+# 220ms top-pinned reveal + fade, while reduced motion stays immediate.
+grep -Fq 'private func showPanelFromMenuBar()' "$ROOT/Sources/MauLeaf.swift"
+grep -Fq 'static let duration: TimeInterval = 0.22' "$ROOT/Sources/MauLeaf.swift"
+grep -Fq 'MenuPanelEntrance.initialFrame(for: finalFrame)' "$ROOT/Sources/MauLeaf.swift"
+grep -Fq 'panel.animator().alphaValue = 1' "$ROOT/Sources/MauLeaf.swift"
+grep -Fq 'panel.animator().setFrame(finalFrame, display: true)' "$ROOT/Sources/MauLeaf.swift"
+grep -Fq 'if NSWorkspace.shared.accessibilityDisplayShouldReduceMotion' "$ROOT/Sources/MauLeaf.swift"
+grep -Fq 'if entranceInProgress { return }' "$ROOT/Sources/MauLeaf.swift"
+grep -Fq 'entranceGeneration &+= 1' "$ROOT/Sources/MauLeaf.swift"
 # A SwiftUI disclosure transition alone cannot animate the AppKit window
 # height; both layers must share the same 240ms timing and preserve the
 # top edge when Settings or Charge limit expands.

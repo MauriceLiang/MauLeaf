@@ -7,6 +7,20 @@ struct FeedbackLayoutTests {
     static func main() async throws {
         _ = NSApplication.shared
         NSApp.setActivationPolicy(.prohibited)
+        // Opening the popup must reveal downward from the same menu-bar
+        // pointer, independent of language or disclosure state.
+        for height in [292.0, 374.0, 510.0] {
+            let target = NSRect(x: 280, y: 540, width: 360, height: height)
+            let initial = MenuPanelEntrance.initialFrame(for: target)
+            guard abs(initial.maxY - target.maxY) < 0.01,
+                  abs(initial.width - target.width) < 0.01,
+                  abs(initial.minX - target.minX) < 0.01,
+                  initial.height < target.height,
+                  initial.height >= target.height - 14,
+                  initial.height <= target.height - 8 else {
+                fatalError("Menu-bar entrance must grow downward from a fixed top anchor")
+            }
+        }
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent("mauleaf-layout-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: directory) }

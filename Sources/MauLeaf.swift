@@ -116,11 +116,6 @@ private final class MauLeafMenuController: NSObject {
         }
         .ignoresSafeArea(.container, edges: .top)
         .frame(width: panelWidth)
-        .overlay(alignment: .bottom) {
-            OperationFeedbackView(manager: manager)
-                .padding(.horizontal, 16)
-                .padding(.bottom, 44)
-        }
         panel.contentView = NSHostingView(rootView: root)
 
         if let button = statusItem.button {
@@ -402,6 +397,10 @@ struct ContentView: View {
             batteryCard
                 .padding(.bottom, 12)
 
+            // Errors and quit operations participate in layout instead of
+            // covering the Settings and Quit controls at the bottom.
+            OperationFeedbackView(manager: manager)
+
             menuRow(
                 icon: "slider.horizontal.3",
                 title: "充电上限",
@@ -512,6 +511,7 @@ struct ContentView: View {
                     && manager.hasOriginalStateSnapshot
                     && !manager.fullOncePending
                     && !manager.restorePending,
+                loading: manager.isBusy && manager.activeOperation?.affectsLimit == true,
                 actionEnabled: manager.canToggleLimitFromCard,
                 actionHint: manager.limitCardActionHint,
                 action: { manager.toggleLimitFromCard() }
@@ -522,6 +522,7 @@ struct ContentView: View {
                 title: "本次充满",
                 status: manager.popoverFullChargeStatus,
                 highlighted: manager.fullOncePending && !manager.fullOnceCancelRequested,
+                loading: manager.isBusy && manager.activeOperation?.affectsFullCharge == true,
                 actionEnabled: manager.canToggleFullChargeFromCard,
                 actionHint: manager.fullChargeCardActionHint,
                 action: { manager.toggleFullChargeFromCard() }
@@ -538,6 +539,7 @@ struct ContentView: View {
         title: AppText,
         status: AppText,
         highlighted: Bool = false,
+        loading: Bool = false,
         actionEnabled: Bool = false,
         actionHint: AppText = "",
         action: (() -> Void)? = nil
@@ -557,7 +559,7 @@ struct ContentView: View {
 
             if let action {
                 Button(action: action) {
-                    statusPill(status, highlighted: highlighted, interactive: true)
+                    statusPill(status, highlighted: highlighted, interactive: true, loading: loading)
                 }
                 .buttonStyle(.plain)
                 .disabled(!actionEnabled)
@@ -565,33 +567,41 @@ struct ContentView: View {
                 .accessibilityLabel("\(manager.text(title))：\(manager.text(status))")
                 .accessibilityHint(manager.text(actionHint))
             } else {
-                statusPill(status, highlighted: highlighted, interactive: false)
+                statusPill(status, highlighted: highlighted, interactive: false, loading: false)
             }
         }
         .frame(minHeight: 33)
     }
 
-    private func statusPill(_ status: AppText, highlighted: Bool, interactive: Bool) -> some View {
-        Text(manager.text(status))
-            .font(.subheadline.weight(.medium))
-            .foregroundStyle(highlighted ? Color.green : Color.primary)
-            .multilineTextAlignment(.trailing)
-            .lineLimit(2)
-            .fixedSize(horizontal: false, vertical: true)
-            .padding(.horizontal, 10)
-            .padding(.vertical, 5)
-            .background(
-                highlighted
-                    ? Color.green.opacity(0.15)
-                    : Color.primary.opacity(interactive ? 0.09 : 0.055),
-                in: Capsule()
-            )
-            .overlay {
-                if interactive {
-                    Capsule().strokeBorder(Color.primary.opacity(0.14), lineWidth: 1)
-                }
+    private func statusPill(_ status: AppText, highlighted: Bool, interactive: Bool, loading: Bool) -> some View {
+        HStack(spacing: 6) {
+            if loading {
+                ProgressView()
+                    .controlSize(.mini)
+                    .accessibilityHidden(true)
             }
-            .contentShape(Capsule())
+            Text(manager.text(status))
+                .font(.subheadline.weight(.medium))
+                .foregroundStyle(highlighted && !loading ? Color.green : Color.primary)
+                .multilineTextAlignment(.trailing)
+                .lineLimit(2)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 5)
+        .background(
+            highlighted && !loading
+                ? Color.green.opacity(0.15)
+                : Color.primary.opacity(interactive ? 0.09 : 0.055),
+            in: Capsule()
+        )
+        .overlay {
+            if interactive {
+                Capsule().strokeBorder(Color.primary.opacity(0.14), lineWidth: 1)
+            }
+        }
+        .contentShape(Capsule())
+        .animation(.easeInOut(duration: 0.2), value: loading)
     }
 
     private var statusDivider: some View {
@@ -719,11 +729,10 @@ struct ContentView: View {
     }
 }
 
-/// This view overlays the scroll viewport so notifications never contribute
-/// to the content-height preference or move the controls being operated.
+/// Error and exceptional-operation feedback is an inline row below the battery
+/// card. Ordinary charging operations instead update their own status pills.
 struct OperationFeedbackView: View {
     @ObservedObject var manager: ChargeManager
-    @State private var successMessage: AppText?
     @State private var dismissedError: AppText?
     @State private var showDetails = false
     @State private var errorDetails: AppText = ""
@@ -732,23 +741,24 @@ struct OperationFeedbackView: View {
         !manager.isBusy && manager.isError && dismissedError != manager.statusMessage
     }
 
+    private var genericBusy: Bool {
+        manager.isBusy && manager.activeOperation == nil
+    }
+
     var body: some View {
         Group {
-            if manager.isBusy || errorVisible || (!manager.isError && successMessage != nil) {
+            if errorVisible || genericBusy {
                 VStack(alignment: .leading, spacing: 7) {
                     HStack(alignment: .top, spacing: 8) {
-                        if manager.isBusy {
+                        if genericBusy {
                             ProgressView().controlSize(.small)
                         } else {
-                            Image(systemName: errorVisible ? "exclamationmark.triangle.fill" : "checkmark.circle.fill")
-                                .foregroundStyle(errorVisible ? Color.orange : Color.green)
+                            Image(systemName: "exclamationmark.triangle.fill")
+                                .foregroundStyle(Color.orange)
                         }
-                        Text(manager.text(manager.isBusy || errorVisible ? manager.statusMessage : successMessage ?? ""))
+                        Text(manager.text(manager.statusMessage))
                             .font(.caption)
-                            // Never truncate a successful operation. Long
-                            // errors are summarized in up to three lines;
-                            // View details reveals their complete diagnostics.
-                            .lineLimit(errorVisible ? 3 : nil)
+                            .lineLimit(errorVisible ? 3 : 2)
                             .fixedSize(horizontal: false, vertical: true)
                             .layoutPriority(1)
                             .frame(maxWidth: .infinity, alignment: .leading)
@@ -776,30 +786,54 @@ struct OperationFeedbackView: View {
                 }
                 .padding(11)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
-                .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color.primary.opacity(0.08)))
-                .shadow(color: .black.opacity(0.14), radius: 7, y: 3)
-                .transition(.opacity)
+                .background(Color.primary.opacity(0.045), in: RoundedRectangle(cornerRadius: 10))
+                .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(Color.primary.opacity(0.08)))
+                .padding(.bottom, 12)
+                .transition(.opacity.combined(with: .move(edge: .top)))
             }
         }
-        .allowsHitTesting(errorVisible)
-        .animation(.easeInOut(duration: 0.15), value: manager.isBusy)
-        .animation(.easeInOut(duration: 0.15), value: errorVisible)
-        .animation(.easeInOut(duration: 0.15), value: successMessage)
-        .onReceive(manager.$isBusy.removeDuplicates().dropFirst().receive(on: RunLoop.main)) { busy in
-            successMessage = nil
+        .animation(.easeInOut(duration: 0.22), value: errorVisible)
+        .animation(.easeInOut(duration: 0.22), value: genericBusy)
+        .onReceive(manager.$isBusy.removeDuplicates().receive(on: RunLoop.main)) { busy in
             if busy { dismissedError = nil }
-            else if !manager.isError { successMessage = manager.statusMessage }
         }
-        .task(id: successMessage) {
-            guard successMessage != nil else { return }
-            do { try await Task.sleep(nanoseconds: 2_000_000_000) }
-            catch { return }
-            successMessage = nil
+        .onReceive(manager.$statusMessage.removeDuplicates().receive(on: RunLoop.main)) { message in
+            if dismissedError != message { dismissedError = nil }
         }
         .alert(manager.text("操作未完成"), isPresented: $showDetails) {
             Button(manager.text("关闭"), role: .cancel) { }
         } message: { Text(manager.text(errorDetails)) }
+    }
+}
+
+/// Explicit operation ownership prevents a stale background status message from
+/// being mistaken for progress on an unrelated card.
+enum ChargeOperation: Equatable {
+    case enablingLimit
+    case adjustingLimit
+    case restoringLimit
+    case startingFullCharge
+    case cancelingFullCharge
+    case repairingHelper
+
+    var affectsLimit: Bool {
+        switch self {
+        case .enablingLimit, .adjustingLimit, .restoringLimit, .repairingHelper: return true
+        case .startingFullCharge, .cancelingFullCharge: return false
+        }
+    }
+
+    var affectsFullCharge: Bool { !affectsLimit }
+
+    var status: AppText {
+        switch self {
+        case .enablingLimit: return "正在启用…"
+        case .adjustingLimit: return "正在设置…"
+        case .restoringLimit: return "正在恢复…"
+        case .startingFullCharge: return "正在开启…"
+        case .cancelingFullCharge: return "正在取消…"
+        case .repairingHelper: return "正在修复…"
+        }
     }
 }
 
@@ -823,6 +857,7 @@ final class ChargeManager: ObservableObject {
     @Published var backendReady = false
     @Published private(set) var restoreReady = false
     @Published var isBusy = false
+    @Published private(set) var activeOperation: ChargeOperation?
     @Published private(set) var isPreparingToQuit = false
     @Published private(set) var didVerifyFirmwareOnQuit = false
     @Published var isError = false
@@ -913,6 +948,9 @@ final class ChargeManager: ObservableObject {
     }
 
     var popoverLimitStatus: AppText {
+        if isBusy, let activeOperation, activeOperation.affectsLimit {
+            return activeOperation.status
+        }
         if helperStateUnknown { return "状态未知" }
         if helperNeedsUpgrade {
             // For a known inactive old helper, the first click still means
@@ -936,6 +974,9 @@ final class ChargeManager: ObservableObject {
     }
 
     var popoverFullChargeStatus: AppText {
+        if isBusy, let activeOperation, activeOperation.affectsFullCharge {
+            return activeOperation.status
+        }
         if fullOnceCancelRequested { return "正在恢复" }
         return fullOncePending ? "进行中" : "未开启"
     }
@@ -1281,6 +1322,8 @@ final class ChargeManager: ObservableObject {
     /// No charging-limit write occurs in this path.
     private func repairNativeHelperAfterUserAction() async {
         guard canRepairNativeHelper else { return }
+        activeOperation = .repairingHelper
+        defer { activeOperation = nil }
         isBusy = true
         isError = false
         statusMessage = "正在修复原生控制服务，需要管理员授权…"
@@ -1328,6 +1371,8 @@ final class ChargeManager: ObservableObject {
     /// The only privileged install/upgrade trigger is explicit opt-in.
     private func enableLimitAfterConsent() async {
         guard canEnableLimit else { return }
+        activeOperation = .enablingLimit
+        defer { activeOperation = nil }
         if helperNeedsInstallation || helperNeedsUpgrade {
             isBusy = true
             isError = false
@@ -1390,10 +1435,11 @@ final class ChargeManager: ObservableObject {
         guard !isBusy, !isPreparingToQuit else { return }
         let hadOriginalSnapshot = hasOriginalStateSnapshot
         let hadLegacyLimit = isLegacyActive
+        activeOperation = .restoringLimit
         isBusy = true
         isError = false
         statusMessage = "正在恢复启用前的原始固件配置…"
-        defer { isBusy = false }
+        defer { isBusy = false; activeOperation = nil }
         do {
             let response = try await backend.restoreOriginalState()
             currentState = response.state
@@ -1474,10 +1520,11 @@ final class ChargeManager: ObservableObject {
         guard !isBusy, !isPreparingToQuit else { return }
         lastAction = .full
         Task {
+            activeOperation = .cancelingFullCharge
             isBusy = true
             isError = false
             statusMessage = "正在取消本次充满并恢复原生充电上限…"
-            defer { isBusy = false }
+            defer { isBusy = false; activeOperation = nil }
             do {
                 let response = try await backend.cancelOneTimeCharge()
                 currentState = response.state
@@ -1502,11 +1549,12 @@ final class ChargeManager: ObservableObject {
 
     private func applyLimit(_ value: Int) async {
         guard backendReady, isAdapterConnected, !isBusy, !isPreparingToQuit else { return }
+        activeOperation = activeOperation == .enablingLimit ? .enablingLimit : .adjustingLimit
         isBusy = true
         isError = false
         statusMessage = "正在写入原生固件充电上限 \(value)%…"
         autoApplyFeedback = "正在应用 \(value)%…"
-        defer { isBusy = false }
+        defer { isBusy = false; activeOperation = nil }
         do {
             let response = try await backend.applyLimit(
                 upper: value,
@@ -1533,10 +1581,11 @@ final class ChargeManager: ObservableObject {
     private func applyOneTimeFullCharge() async {
         guard backendReady, isAdapterConnected, !isBusy, !isPreparingToQuit,
               (batteryPercent ?? 0) < 100 else { return }
+        activeOperation = .startingFullCharge
         isBusy = true
         isError = false
         statusMessage = "正在启动原生本次充满任务…"
-        defer { isBusy = false }
+        defer { isBusy = false; activeOperation = nil }
         do {
             let response = try await backend.beginOneTimeCharge(
                 upper: limit,

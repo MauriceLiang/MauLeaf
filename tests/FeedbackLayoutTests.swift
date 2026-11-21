@@ -39,7 +39,10 @@ struct FeedbackLayoutTests {
                 lastHeight = frame.height
             }
         }
-        guard MenuCardMotion.contentOpacity(0.2) == 0,
+        guard MenuCardMotion.shellOpacity(0.0) == 0,
+              MenuCardMotion.shellOpacity(1.0) == 1,
+              MenuCardMotion.shellOpacity(0.15) < 0.5,
+              MenuCardMotion.contentOpacity(0.2) == 0,
               MenuCardMotion.contentOpacity(1.0) == 1,
               MenuCardMotion.contentOpacity(0.5) < 0.05,
               MenuCardMotion.contentOpacity(0.85) > 0.85 else {

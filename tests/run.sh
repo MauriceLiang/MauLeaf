@@ -100,9 +100,9 @@ grep -Fq 'panel.backgroundColor = .clear' "$ROOT/Sources/MauLeaf.swift"
 grep -Fq 'panel.hasShadow = false' "$ROOT/Sources/MauLeaf.swift"
 # Preview 10 uses one fixed transparent NSPanel and one SwiftUI
 # animatable material shape. No temporary proxy panel may be spawned.
-grep -Fq 'private final class MenuCardPresentation: ObservableObject' "$ROOT/Sources/MauLeaf.swift"
+grep -Fq 'final class MenuCardPresentation: ObservableObject' "$ROOT/Sources/MauLeaf.swift"
 grep -Fq 'private struct AnimatedFloatingCardShape: Shape' "$ROOT/Sources/MauLeaf.swift"
-grep -Fq 'private struct MenuCardMorphRoot: View' "$ROOT/Sources/MauLeaf.swift"
+grep -Fq 'struct MenuCardMorphRoot: View' "$ROOT/Sources/MauLeaf.swift"
 grep -Fq 'MenuCardMorphRoot(manager: manager, presentation: presentation)' "$ROOT/Sources/MauLeaf.swift"
 grep -Fq 'var animatableData: AnimatablePair<CGFloat, CGFloat>' "$ROOT/Sources/MauLeaf.swift"
 grep -Fq 'static let compactWidth: CGFloat = 52' "$ROOT/Sources/MauLeaf.swift"
@@ -123,6 +123,15 @@ fi
 [[ "$(grep -Fc '.fill(.regularMaterial)' "$ROOT/Sources/MauLeaf.swift")" -eq 1 ]]
 if grep -Eq 'morphWindow|makeMorphWindow|MenuPanelMorph|MenuPanelEntrance|NSVisualEffectView\(frame:|private struct FloatingCardShape' "$ROOT/Sources/MauLeaf.swift"; then
     echo "The Preview 9 proxy or a second static surface must not return" >&2
+    exit 1
+fi
+# The menu control is a non-scrollable native card: a trackpad or mouse wheel
+# must never move the entire popup or reveal rubber-band overscroll.
+grep -Fq 'let root = MenuCardMorphRoot(manager: manager, presentation: presentation)' "$ROOT/Sources/MauLeaf.swift"
+grep -Fq '.fixedSize(horizontal: false, vertical: true)' "$ROOT/Sources/MauLeaf.swift"
+grep -Fq '.onPreferenceChange(PanelContentHeightPreferenceKey.self)' "$ROOT/Sources/MauLeaf.swift"
+if grep -Eq 'ScrollView[[:space:]]*\\{|NSScrollView[[:space:]]*\\(' "$ROOT/Sources/MauLeaf.swift"; then
+    echo "Menu bar popup must not contain a scrollable view" >&2
     exit 1
 fi
 # A SwiftUI disclosure transition alone cannot animate the AppKit window

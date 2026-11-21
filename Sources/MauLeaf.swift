@@ -500,7 +500,8 @@ struct ContentView: View {
             statusRow(
                 icon: "powerplug",
                 title: "供电状态",
-                status: manager.popoverPowerStatus
+                status: manager.popoverPowerStatus,
+                detail: manager.popoverPowerDetail
             )
             statusDivider
             statusRow(
@@ -538,6 +539,7 @@ struct ContentView: View {
         icon: String,
         title: AppText,
         status: AppText,
+        detail: AppText? = nil,
         highlighted: Bool = false,
         loading: Bool = false,
         actionEnabled: Bool = false,
@@ -554,6 +556,8 @@ struct ContentView: View {
             Text(manager.text(title))
                 .font(.subheadline)
                 .foregroundStyle(.primary)
+                .lineLimit(1)
+                .fixedSize(horizontal: true, vertical: false)
 
             Spacer(minLength: 5)
 
@@ -567,10 +571,19 @@ struct ContentView: View {
                 .accessibilityLabel("\(manager.text(title))：\(manager.text(status))")
                 .accessibilityHint(manager.text(actionHint))
             } else {
-                statusPill(status, highlighted: highlighted, interactive: false, loading: false)
+                // Power is a read-only measurement, not another clickable
+                // pill. Keep the complete charging detail in the tooltip
+                // and in VoiceOver while the visible value stays compact.
+                Text(manager.text(status))
+                    .font(.subheadline.weight(.medium))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .fixedSize(horizontal: true, vertical: false)
+                    .help(manager.text(detail ?? status))
+                    .accessibilityLabel("\(manager.text(title))：\(manager.text(detail ?? status))")
             }
         }
-        .frame(minHeight: 33)
+        .frame(minHeight: 35)
     }
 
     private func statusPill(_ status: AppText, highlighted: Bool, interactive: Bool, loading: Bool) -> some View {
@@ -584,11 +597,11 @@ struct ContentView: View {
                 .font(.subheadline.weight(.medium))
                 .foregroundStyle(highlighted && !loading ? Color.green : Color.primary)
                 .multilineTextAlignment(.trailing)
-                .lineLimit(2)
-                .fixedSize(horizontal: false, vertical: true)
+                .lineLimit(1)
+                .fixedSize(horizontal: true, vertical: false)
         }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 5)
+        .frame(height: 29)
+        .padding(.horizontal, 12)
         .background(
             highlighted && !loading
                 ? Color.green.opacity(0.15)
@@ -949,6 +962,18 @@ final class ChargeManager: ObservableObject {
     /// Status labels for the compact popover, derived from the actual
     /// firmware and one-time task (not merely the saved slider preference).
     var popoverPowerStatus: AppText {
+        switch batteryStateText {
+        case "正在充电": return "充电中"
+        case "已接电源，未充电": return "已接电源"
+        case "已接电源，已充满": return "已充满"
+        case "电池供电": return "电池供电"
+        case "正在读取电池状态…": return "读取中…"
+        default: return "状态未知"
+        }
+    }
+
+    /// Preserve the full power / charging distinction on hover and for VoiceOver.
+    var popoverPowerDetail: AppText {
         if batteryStateText == "正在充电" { return "已接电源，充电中" }
         return AppText(key: batteryStateText)
     }
@@ -970,10 +995,10 @@ final class ChargeManager: ObservableObject {
         if restorePending { return "等待恢复" }
         if isLegacyActive { return "旧版限充" }
         if fullOncePending && hasOriginalStateSnapshot {
-            return "已暂停（\(limit)%）"
+            return "已暂停 · \(limit)%"
         }
         if currentState?.active == true && hasOriginalStateSnapshot {
-            return "已启用（\(currentState?.upper ?? limit)%）"
+            return "已启用 · \(currentState?.upper ?? limit)%"
         }
         if hasOriginalStateSnapshot { return "待恢复" }
         return "未启用"
@@ -1102,7 +1127,9 @@ final class ChargeManager: ObservableObject {
     }
 
     var fullChargeCardActionHint: AppText {
-        fullOncePending ? "取消本次充满" : "本次充满"
+        fullOncePending
+            ? "取消本次充满"
+            : "仅本次允许充至 100%；完成后由原生后台服务恢复当前充电上限。"
     }
 
     func toggleFullChargeFromCard() {

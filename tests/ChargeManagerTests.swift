@@ -21,11 +21,22 @@ private enum ChargeManagerTests {
                   && manager.limitCardActionHint.source == "启用限制充电",
                   "initial card can enable limit but cannot start one-time full charge")
         manager.batteryStateText = "正在充电"
-        try check(manager.popoverPowerStatus.source == "已接电源，充电中",
-                  "power status in compact popover explicitly identifies AC while charging")
+        try check(manager.popoverPowerStatus.source == "充电中"
+                  && manager.popoverPowerStatus.localized(in: .english) == "Charging"
+                  && manager.popoverPowerDetail.source == "已接电源，充电中",
+                  "power row is compact while the full charging detail remains available")
         manager.batteryStateText = "已接电源，未充电"
-        try check(manager.popoverPowerStatus.localized(in: .english) == "Connected to power, not charging",
-                  "power state badge follows the selected interface language")
+        try check(manager.popoverPowerStatus.source == "已接电源"
+                  && manager.popoverPowerStatus.localized(in: .english) == "Plugged in"
+                  && manager.popoverPowerDetail.localized(in: .english) == "Connected to power, not charging",
+                  "plugged-in status stays on one line without losing no-charge detail")
+        manager.batteryStateText = "已接电源，已充满"
+        try check(manager.popoverPowerStatus.localized(in: .english) == "Fully charged",
+                  "fully charged state has a short distinct label")
+        manager.batteryStateText = "电池供电"
+        try check(manager.popoverPowerStatus.localized(in: .english) == "On battery",
+                  "battery power stays a separate state")
+        manager.batteryStateText = "正在充电"
 
         manager.requestLimit(85, immediate: true)
         try check(manager.limit == 85 && backend.applyCount == 0 && !manager.showNativeWriteConfirmation,
@@ -39,8 +50,8 @@ private enum ChargeManagerTests {
         try check(backend.state.active && backend.state.upper == 85 && backend.state.lower == 83,
                   "confirmed activation writes the requested native upper and resume thresholds")
         try check(manager.hasOriginalStateSnapshot
-                  && manager.popoverLimitStatus.source == "已启用（85%）"
-                  && manager.popoverLimitStatus.localized(in: .english) == "Enabled (85%)"
+                  && manager.popoverLimitStatus.source == "已启用 · 85%"
+                  && manager.popoverLimitStatus.localized(in: .english) == "On · 85%"
                   && manager.canToggleLimitFromCard && manager.canToggleFullChargeFromCard
                   && manager.limitCardActionHint.source == "关闭限制充电",
                   "active card offers direct disable and one-time full actions")
@@ -51,11 +62,15 @@ private enum ChargeManagerTests {
                   "limit success is concise and localized; raw helper audit text is never user-facing")
 
         manager.batteryPercent = 90
+        try check(manager.fullChargeCardActionHint.localized(in: .english).contains("100%"),
+                  "short Full charge title retains one-time behavior explanation on hover")
         manager.toggleFullChargeFromCard()
         try await wait { backend.beginCount == 1 && !manager.isBusy }
         try check(manager.fullOncePending && !backend.state.active && manager.hasOriginalStateSnapshot
                   && manager.popoverFullChargeStatus.source == "进行中"
-                  && manager.popoverLimitStatus.source == "已暂停（85%）"
+                  && manager.popoverFullChargeStatus.localized(in: .english) == "Active"
+                  && manager.popoverLimitStatus.source == "已暂停 · 85%"
+                  && manager.popoverLimitStatus.localized(in: .english) == "Paused · 85%"
                   && manager.canToggleFullChargeFromCard
                   && manager.fullChargeCardActionHint.source == "取消本次充满",
                   "one-time card switches into actionable cancel state")
@@ -66,7 +81,7 @@ private enum ChargeManagerTests {
         try await wait { backend.cancelCount == 1 && !manager.isBusy }
         try check(!manager.fullOncePending && backend.state.active && backend.state.upper == 85
                   && manager.popoverFullChargeStatus.source == "未开启"
-                  && manager.popoverLimitStatus.source == "已启用（85%）",
+                  && manager.popoverLimitStatus.source == "已启用 · 85%",
                   "cancelled one-time full charge returns to normal charging-limit display")
         try check(manager.statusMessage.source == "已取消本次充满，原充电上限已恢复。"
                   && manager.statusMessage.localized(in: .english) == "One-time full charge canceled. Previous limit restored.",

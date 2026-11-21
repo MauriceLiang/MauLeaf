@@ -7,9 +7,9 @@
 "当前电量" = "Battery level";
 "充电上限" = "Charging limit";
 "连接电源后自动写入原生固件；本次充满期间暂不可修改上限。" = "Connect AC power to write the native firmware limit. The limit cannot be changed during a one-time full charge.";
-"本次充满" = "One-time full charge";
+"本次充满" = "Full charge";
 "取消本次充满" = "Cancel one-time full charge";
-"进行中" = "In progress";
+"进行中" = "Active";
 "取消本次充满并恢复上限" = "Cancel this charge and restore the limit";
 "仅本次允许充至 100%；完成后由原生后台服务恢复当前充电上限。" = "Allow charging to 100% once; the native background service restores the current limit afterward.";
 "充满至 100%" = "Charge to 100%";
@@ -51,7 +51,7 @@
 "正在充电" = "Charging";
 "已接电源，已充满" = "Connected to power, fully charged";
 "已接电源，未充电" = "Connected to power, not charging";
-"电池供电" = "On battery power";
+"电池供电" = "On battery";
 "电池状态不可用" = "Battery status unavailable";
 "电量未知" = "Battery level unknown";
 "电量 %@%%" = "Battery %@%%";
@@ -155,7 +155,7 @@
 "本次充满已开启，固件限充暂时关闭。" = "One-time full charge started. Firmware charging limit temporarily disabled.";
 
 // Compact menu-bar popover.
-"供电状态" = "Power supply";
+"供电状态" = "Power";
 "设置" = "Settings";
 "退出 MauLeaf" = "Quit MauLeaf";
 "界面语言" = "Interface language";
@@ -165,12 +165,12 @@
 "已暂停（%@%%）" = "Paused (%@%%)";
 "已启用（%@%%）" = "Enabled (%@%%)";
 "待恢复" = "Needs restore";
-"未启用" = "Disabled";
+"未启用" = "Off";
 "正在恢复" = "Restoring";
 "未开启" = "Off";
 "恢复任务仍在等待；请先恢复原始配置。" = "Recovery is pending. Restore the original firmware configuration first.";
 
-"限制充电" = "Charging limit";
+"限制充电" = "Charge limit";
 "状态未知" = "Unknown state";
 "需要更新" = "Update required";
 "原生控制服务需要更新" = "Native control service needs an update";
@@ -198,3 +198,11 @@
 "正在开启…" = "Starting…";
 "正在取消…" = "Canceling…";
 "正在修复…" = "Repairing…";
+
+// Compact single-line battery-card statuses; longer detail remains in tooltips.
+"充电中" = "Charging";
+"已接电源" = "Plugged in";
+"已充满" = "Fully charged";
+"读取中…" = "Loading…";
+"已暂停 · %@%%" = "Paused · %@%%";
+"已启用 · %@%%" = "On · %@%%";

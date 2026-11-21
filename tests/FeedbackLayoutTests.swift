@@ -7,24 +7,17 @@ struct FeedbackLayoutTests {
     static func main() async throws {
         _ = NSApplication.shared
         NSApp.setActivationPolicy(.prohibited)
-        // The compact endpoint is the real status leaf. Opening and
-        // closing must use exactly the same geometric endpoints rather than
-        // a small asymmetric 8-14pt height change.
-        for menuX in [35.0, 580.0, 1390.0] {
-            let leaf = NSRect(x: menuX, y: 877, width: 28, height: 24)
-            let iconFrame = MenuPanelMorph.iconFrame(for: leaf)
-            for height in [292.0, 374.0, 510.0] {
-                let cardFrame = NSRect(x: max(6, menuX - 160), y: 570 - height,
-                                       width: 360, height: height)
-                guard abs(iconFrame.midX - leaf.midX) < 0.01,
-                      abs(iconFrame.midY - leaf.midY) < 0.01,
-                      iconFrame.width == MenuPanelMorph.iconSide,
-                      iconFrame.height == MenuPanelMorph.iconSide,
-                      iconFrame.width < cardFrame.width / 10,
-                      iconFrame.height < cardFrame.height / 8,
-                      MenuPanelMorph.surfaceDuration > MenuPanelMorph.contentDuration else {
-                    fatalError("Leaf-to-card and card-to-leaf endpoints must be symmetric and icon-sized")
-                }
+        // Static geometry: the native menu popup has one full-sized
+        // rounded surface and pointer; there is no compact morph endpoint.
+        for height in [292.0, 374.0, 510.0] {
+            let rect = CGRect(x: 0, y: 0, width: 360, height: height)
+            let path = FloatingCardShape().path(in: rect)
+            let outline = path.boundingRect
+            guard abs(outline.minX - rect.minX) < 0.01,
+                  abs(outline.minY - rect.minY) < 0.01,
+                  abs(outline.width - rect.width) < 0.01,
+                  abs(outline.height - rect.height) < 0.01 else {
+                fatalError("The static popup shape must cover the full card")
             }
         }
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent("mauleaf-layout-\(UUID().uuidString)")
@@ -76,6 +69,23 @@ struct FeedbackLayoutTests {
                 return (host.fittingSize.height, feedback.fittingSize.height)
             }
             let normal = measure()
+            // Exercise the same NON-SCROLLING root that the real panel
+            // hosts, including intrinsic height and static card background.
+            let panelHost = NSHostingView(rootView:
+                ContentView(manager: manager)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(width: 360)
+                    .environment(\.colorScheme, .dark))
+            panelHost.layoutSubtreeIfNeeded()
+            func containsScrollView(_ view: NSView) -> Bool {
+                if view is NSScrollView { return true }
+                return view.subviews.contains(where: containsScrollView)
+            }
+            guard !containsScrollView(panelHost),
+                  abs(panelHost.fittingSize.height - normal.0) < 5 else {
+                fputs("FAIL: popup must size intrinsically without an NSScrollView: panel=\(panelHost.fittingSize.height), content=\(normal.0)\n", stderr)
+                exit(1)
+            }
             // Exercise both disclosure layouts in each language. They must
             // grow the same single-card popover, not overlay or replace it.
             func measuredDisclosureHeight(limit: Bool, settings: Bool) -> CGFloat {
@@ -131,6 +141,12 @@ struct FeedbackLayoutTests {
             manager.showBatteryLevel = true
             try await Task.sleep(nanoseconds: 280_000_000)
             let expanded = measure()
+            panelHost.layoutSubtreeIfNeeded()
+            guard panelHost.fittingSize.height > normal.0 + 40,
+                  !containsScrollView(panelHost) else {
+                fputs("FAIL: non-scrolling popup did not grow with optional battery header\n", stderr)
+                exit(1)
+            }
             let expandedCardHeight = measuredCardHeight()
             guard expandedCardHeight > compactCardHeight + 40,
                   expanded.0 > normal.0 + 40 && expanded.1 == 0

@@ -495,7 +495,7 @@ struct ContentView: View {
                         .foregroundStyle(.secondary)
 
                     HStack(alignment: .firstTextBaseline, spacing: 2) {
-                        Text(manager.batteryPercent.map(String.init) ?? "--")
+                        Text(manager.batteryPercent.map { String($0) } ?? "--")
                             .font(.system(size: 42, weight: .semibold, design: .rounded))
                             .monospacedDigit()
                             .foregroundStyle(manager.batteryNumberColor)

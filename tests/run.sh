@@ -115,19 +115,19 @@ for required in 'manager.popoverPowerStatus' 'manager.popoverLimitStatus' \
     fi
 done
 
-# One dedicated settings switch is allowed; the original extra charging
-# switches/actions must never be restored.
-if grep -Eq 'oneTimeToggleRow|private var limitAction' <<< "$POPOVER_SOURCE"; then
-    echo "Removed lower full-charge toggle and expanded enable action must not return" >&2
+# Both compact preferences must share the native segmented style. Never
+# restore the redundant limit/full-charge switches or the mixed settings UI.
+if grep -Eq 'oneTimeToggleRow|private var limitAction|Toggle\(isOn:' <<< "$POPOVER_SOURCE"; then
+    echo "The compact popover must not contain old switches or lower charge actions" >&2
     exit 1
 fi
-grep -Fq 'Toggle(isOn: $manager.showBatteryLevel)' <<< "$POPOVER_SOURCE"
+grep -Fq 'Picker("", selection: $manager.showBatteryLevel)' <<< "$POPOVER_SOURCE"
+grep -Fq 'Picker("", selection: $manager.language)' <<< "$POPOVER_SOURCE"
+[[ "$(grep -Fc '.pickerStyle(.segmented)' <<< "$POPOVER_SOURCE")" -eq 2 ]]
+[[ "$(grep -Fc '.frame(width: 142)' <<< "$POPOVER_SOURCE")" -eq 2 ]]
 grep -Fq 'if manager.showBatteryLevel' <<< "$POPOVER_SOURCE"
 grep -Fq 'highlighted: manager.isActivelyCharging' <<< "$POPOVER_SOURCE"
-if [[ "$(grep -Fc 'Toggle(isOn:' <<< "$POPOVER_SOURCE")" -ne 1 ]]; then
-    echo "Only the optional battery display may add a toggle" >&2
-    exit 1
-fi
+grep -Fq 'spacing: 3) {' <<< "$POPOVER_SOURCE"
 if grep -Eq 'componentSetupSection|installBackend|uninstallBackend' "$ROOT/Sources/MauLeaf.swift"; then
     echo "The legacy component installer UI must not return" >&2
     exit 1

@@ -15,6 +15,14 @@ private enum ChargeManagerTests {
         manager.batteryPercent = 80
 
         try check(manager.menuBarLeafStyle == .green, "menu-bar leaf is fixed to green")
+        let originalLanguage = manager.language
+        manager.language = .english
+        try check(UserDefaults.standard.string(forKey: AppLanguage.preferenceKey) == "en",
+                  "segmented language preference writes the expected persisted value")
+        let languageReload = ChargeManager(backend: FixtureNativeFirmwareBackend(), autoInstallNativeHelper: false)
+        try check(languageReload.language == .english,
+                  "language preference survives app model recreation")
+        manager.language = originalLanguage
         try check(!manager.showBatteryLevel, "new and upgraded installs default to a compact card without battery digits")
         manager.showBatteryLevel = true
         try check(UserDefaults.standard.bool(forKey: "showBatteryLevel"),

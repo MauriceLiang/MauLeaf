@@ -2,6 +2,7 @@ import SwiftUI
 import AppKit
 import Combine
 import Foundation
+import QuartzCore
 
 /// AppKit owns the menu-bar button and a persistent panel. The old MenuBarExtra
 /// transient window could disappear during confirmation and authorization,
@@ -78,7 +79,9 @@ private final class MauLeafMenuController: NSObject {
     private var localMouseMonitor: Any?
     private let panelWidth: CGFloat = 360
     private var measuredContentHeight: CGFloat = 0
-    private var lastPanelHeight: CGFloat = 0
+    private var lastTargetFrame: NSRect?
+    private var allowAnimatedResizes = false
+    private let resizeDuration: TimeInterval = 0.24
 
     override init() {
         panel = MauLeafCardPanel(
@@ -220,6 +223,8 @@ private final class MauLeafMenuController: NSObject {
             dismissPanelIfAllowed()
             return
         }
+        // Initial opening uses the measured size without an entrance snap.
+        allowAnimatedResizes = measuredContentHeight > 0
         positionPanel()
         panel.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
@@ -252,6 +257,7 @@ private final class MauLeafMenuController: NSObject {
     private func dismissPanelIfAllowed() {
         guard panel.isVisible, panel.attachedSheet == nil, !manager.isBusy else { return }
         panel.orderOut(nil)
+        allowAnimatedResizes = false
         manager.setPanelVisible(false)
         if let monitor = globalMouseMonitor {
             NSEvent.removeMonitor(monitor)
@@ -265,35 +271,55 @@ private final class MauLeafMenuController: NSObject {
 
     private func updateContentHeight(_ height: CGFloat) {
         guard height.isFinite, height > 100 else { return }
-        // Ignore sub-point changes; these can otherwise create a preference/
-        // window-layout feedback loop while the scrollbar appears or disappears.
+        // Sub-point layout noise must not restart the animation.
         guard abs(height - measuredContentHeight) >= 1 else { return }
         measuredContentHeight = height
         if panel.isVisible {
-            positionPanel()
+            positionPanel(animatedHeight: allowAnimatedResizes)
+            // The initial visible fallback-size correction is immediate.
+            allowAnimatedResizes = true
         }
     }
 
-    private func positionPanel() {
+    private func positionPanel(animatedHeight: Bool = false) {
         guard let button = statusItem.button, let window = button.window else { return }
         let screen = window.screen ?? NSScreen.main
         let visible = screen?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1440, height: 900)
         let menuRect = window.convertToScreen(button.convert(button.bounds, to: nil))
 
-        // Anchor the TOP edge just below the menu bar even when the panel grows
-        // after an installation prompt appears or collapses after installation.
+        // The TOP edge remains anchored beneath the menu bar. Animate the
+        // height and y-origin as one transaction instead of snapping both.
         let anchorTop = min(menuRect.minY - 5, visible.maxY - 2)
         let maxHeight = max(120, anchorTop - visible.minY - 6)
         let wantedHeight = measuredContentHeight > 0 ? ceil(measuredContentHeight + 2) : 480
         let height = min(max(wantedHeight, 160), maxHeight)
         let x = min(max(menuRect.midX - panelWidth / 2, visible.minX + 6), visible.maxX - panelWidth - 6)
+        let targetFrame = NSRect(x: x, y: anchorTop - height, width: panelWidth, height: height)
 
-        if abs(height - lastPanelHeight) >= 1 {
-            panel.setContentSize(NSSize(width: panelWidth, height: height))
-            panel.invalidateShadow()
-            lastPanelHeight = height
+        // Compare target frames, not a partially animated presentation frame.
+        if let last = lastTargetFrame,
+           abs(targetFrame.minX - last.minX) < 1,
+           abs(targetFrame.minY - last.minY) < 1,
+           abs(targetFrame.height - last.height) < 1 {
+            return
         }
-        panel.setFrameOrigin(NSPoint(x: x, y: anchorTop - height))
+        let oldTarget = lastTargetFrame
+        lastTargetFrame = targetFrame
+        let heightChanged = oldTarget.map { abs($0.height - height) >= 1 } ?? false
+        let shouldAnimate = panel.isVisible && animatedHeight && heightChanged
+            && !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+        if shouldAnimate {
+            NSAnimationContext.runAnimationGroup { context in
+                context.duration = resizeDuration
+                context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+                panel.animator().setFrame(targetFrame, display: true)
+            } completionHandler: { [weak self] in
+                self?.panel.invalidateShadow()
+            }
+        } else {
+            panel.setFrame(targetFrame, display: true)
+            panel.invalidateShadow()
+        }
     }
 }
 
@@ -417,8 +443,15 @@ private struct FloatingCardShape: Shape {
 /// Native menu-bar-only popover. No detached main window or navigation.
 struct ContentView: View {
     @ObservedObject var manager: ChargeManager
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var limitExpanded = false
     @State private var settingsExpanded = false
+    private var expansionAnimation: Animation? {
+        reduceMotion ? nil : .easeInOut(duration: 0.24)
+    }
+    private var expansionTransition: AnyTransition {
+        reduceMotion ? .opacity : .opacity.combined(with: .offset(y: -6))
+    }
     private let presets = [70, 75, 80, 85, 90, 95]
 
     var body: some View {
@@ -437,7 +470,7 @@ struct ContentView: View {
                 value: "\(manager.limit)%",
                 expanded: limitExpanded
             ) {
-                withAnimation(.easeInOut(duration: 0.18)) {
+                withAnimation(expansionAnimation) {
                     limitExpanded.toggle()
                     if limitExpanded { settingsExpanded = false }
                 }
@@ -448,7 +481,7 @@ struct ContentView: View {
                     .padding(.leading, 30)
                     .padding(.trailing, 2)
                     .padding(.bottom, 12)
-                    .transition(.opacity.combined(with: .move(edge: .top)))
+                    .transition(expansionTransition)
             }
             rowDivider
 
@@ -457,7 +490,7 @@ struct ContentView: View {
                 title: "设置",
                 expanded: settingsExpanded
             ) {
-                withAnimation(.easeInOut(duration: 0.18)) {
+                withAnimation(expansionAnimation) {
                     settingsExpanded.toggle()
                     if settingsExpanded { limitExpanded = false }
                 }
@@ -467,7 +500,7 @@ struct ContentView: View {
                 settingsControls
                     .padding(.leading, 30)
                     .padding(.bottom, 10)
-                    .transition(.opacity.combined(with: .move(edge: .top)))
+                    .transition(expansionTransition)
             }
             rowDivider
 

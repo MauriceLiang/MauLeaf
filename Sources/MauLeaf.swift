@@ -70,7 +70,7 @@ private final class MauLeafCardPanel: NSPanel {
 
 /// One permanent rounded popover surface; no morph, proxy or entrance
 /// animation. The small pointer is part of the static shape.
-private struct FloatingCardShape: Shape {
+struct FloatingCardShape: Shape {
     func path(in rect: CGRect) -> Path {
         let arrowHeight: CGFloat = 8
         let arrowHalfWidth: CGFloat = 10

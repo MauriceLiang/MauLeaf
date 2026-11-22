@@ -26,6 +26,7 @@ final class FixtureNativeFirmwareBackend: NativeFirmwareBackend {
     var failNextRead = false
     var helperAvailable = true
     var reportedHelperVersion: Int?
+    var reportedHelperBuildVersion: String?
     var readCount = 0
     var falselyReportRestoreSuccess = false
     var acConnected = true
@@ -41,10 +42,11 @@ final class FixtureNativeFirmwareBackend: NativeFirmwareBackend {
             failNextRead = false
             throw FixtureBackendError.injected
         }
-        if let reportedHelperVersion {
+        if reportedHelperVersion != nil || reportedHelperBuildVersion != nil {
             let data = try JSONEncoder().encode(state)
             var body = try JSONSerialization.jsonObject(with: data) as! [String: Any]
-            body["helperVersion"] = reportedHelperVersion
+            if let reportedHelperVersion { body["helperVersion"] = reportedHelperVersion }
+            if let reportedHelperBuildVersion { body["helperBuildVersion"] = reportedHelperBuildVersion }
             return try JSONDecoder().decode(
                 FirmwareLimitHelperStateResponse.self,
                 from: JSONSerialization.data(withJSONObject: body)

@@ -8,14 +8,19 @@ struct MauLeafBatterySnapshot: Equatable {
     /// Signed battery current (mA), when exposed by AppleSmartBattery.
     /// Negative can indicate discharge; it does not prove wall-power routing.
     let amperageMilliAmps: Int?
+    /// Unrounded battery state of charge from raw AppleSmartBattery capacity.
+    /// Optional: an unknown value must not authorize an automatic SMC write.
+    let precisePercent: Double?
 
     init(percent: Int?, isCharging: Bool, isFullyCharged: Bool,
-         isACConnected: Bool?, amperageMilliAmps: Int? = nil) {
+         isACConnected: Bool?, amperageMilliAmps: Int? = nil,
+         precisePercent: Double? = nil) {
         self.percent = percent
         self.isCharging = isCharging
         self.isFullyCharged = isFullyCharged
         self.isACConnected = isACConnected
         self.amperageMilliAmps = amperageMilliAmps
+        self.precisePercent = precisePercent
     }
 }
 
@@ -60,6 +65,18 @@ enum MauLeafBatteryStatusReader {
         } else {
             percent = nil
         }
+        // Rounded UI percentage is not precise enough for hardware bounds.
+        // The raw capacity pair is captured separately and never synthesized
+        // from the displayed integer percentage.
+        let rawCurrent = integer(battery["AppleRawCurrentCapacity"])
+        let rawMaximum = integer(battery["AppleRawMaxCapacity"])
+        let precise: Double?
+        if let rawCurrent, let rawMaximum, rawMaximum > 0, rawCurrent >= 0 {
+            let value = 100.0 * Double(rawCurrent) / Double(rawMaximum)
+            precise = value.isFinite && (0...101).contains(value) ? value : nil
+        } else {
+            precise = nil
+        }
         let charging = boolean(battery["IsCharging"]) ?? false
         let fullyCharged = boolean(battery["FullyCharged"]) ?? (percent == 100)
         let external = boolean(battery["ExternalConnected"])
@@ -68,7 +85,8 @@ enum MauLeafBatteryStatusReader {
             isCharging: charging,
             isFullyCharged: fullyCharged,
             isACConnected: external,
-            amperageMilliAmps: integer(battery["Amperage"])
+            amperageMilliAmps: integer(battery["Amperage"]),
+            precisePercent: precise
         )
     }
 

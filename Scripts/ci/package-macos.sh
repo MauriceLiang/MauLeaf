@@ -49,7 +49,7 @@ write_plist
 
 FLAGS=(-parse-as-library -O -target arm64-apple-macos13.0)
 xcrun swiftc "${FLAGS[@]}" -framework SwiftUI -framework AppKit -framework Combine -framework Foundation -framework IOKit \
-  Sources/MauLeaf.swift Sources/AppLocalization.swift Sources/BatteryStatusReader.swift Sources/FastBatteryReader.swift Sources/PowerSourceObserver.swift Sources/AboveLimitPowerPolicy.swift Sources/FirmwareLimitCore.swift \
+  Sources/MauLeaf.swift Sources/AppLocalization.swift Sources/BatteryStatusReader.swift Sources/FastBatteryReader.swift Sources/PowerSourceObserver.swift Sources/AboveLimitPowerPolicy.swift Sources/DynamicHoldPolicy.swift Sources/FirmwareLimitCore.swift \
   Sources/FirmwareLimitReconciliation.swift Sources/SystemFirmwareReader.swift Sources/FirmwareLimitRuntime.swift \
   Sources/FirmwareLimitHelperProtocol.swift Sources/FirmwareLimitHelperClient.swift \
   -o "$APP/Contents/MacOS/MauLeaf"

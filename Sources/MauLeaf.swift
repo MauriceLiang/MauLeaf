@@ -888,9 +888,12 @@ struct ContentView: View {
             .frame(minHeight: 30)
 
             HStack(spacing: 8) {
-                settingsLabel("超限优先适配器")
+                settingsLabel("动态保电")
                 Spacer(minLength: 8)
-                Picker("", selection: $manager.preferAdapterAboveLimit) {
+                Picker("", selection: Binding(
+                    get: { manager.dynamicHoldEnabled },
+                    set: { manager.setDynamicHoldEnabled($0) }
+                )) {
                     Text(manager.language == .english ? "Hide" : "关闭").tag(false)
                     Text(manager.language == .english ? "Show" : "开启").tag(true)
                 }
@@ -898,16 +901,26 @@ struct ContentView: View {
                 .labelsHidden()
                 .controlSize(.small)
                 .frame(width: 142)
-                .accessibilityLabel(manager.text("超限优先适配器"))
-                .help(manager.text("预览检测开关；不会修改供电路径"))
+                .disabled(manager.isDynamicHoldSwitchLocked)
+                .accessibilityLabel(manager.text("动态保电"))
+                .help(manager.text(manager.isDynamicHoldSwitchLocked
+                    ? "本次充满期间不可修改动态保电"
+                    : "高于目标时尝试保持当前电量；实验功能，供电效果尚待验证"))
             }
             .frame(minHeight: 30)
-            Text(manager.text("Preview 1 仅观察电量与电池电流，不会改变适配器供电或写入额外固件。"))
+            Text(manager.text("电量高于目标时，尝试临时提高固件上限以减少主动放电；仅支持已验证设备。"))
                 .font(.caption2)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
-            if manager.preferAdapterAboveLimit {
-                Text(manager.text(manager.aboveLimitPowerStatus))
+            if manager.fullOncePending {
+                Text(manager.text(manager.dynamicHoldEnabled
+                    ? "本次充满期间动态保电已暂停，完成后自动恢复。"
+                    : "本次充满期间不可修改动态保电设置。"))
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else if manager.dynamicHoldEnabled {
+                Text(manager.text(manager.dynamicHoldStatus))
                     .font(.caption2)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -1054,18 +1067,39 @@ final class ChargeManager: ObservableObject {
     @Published var showBatteryLevel: Bool {
         didSet { UserDefaults.standard.set(showBatteryLevel, forKey: "showBatteryLevel") }
     }
-    /// Opt-in read-only monitoring only. Preview 1 cannot force wall power or
-    /// prevent the firmware from discharging above its configured upper limit.
-    @Published var preferAdapterAboveLimit: Bool {
+    /// Experimental, explicit opt-in. Independent from the deprecated
+    /// Preview 1 observation preference: existing installations are OFF.
+    @Published private(set) var dynamicHoldEnabled: Bool {
         didSet {
-            UserDefaults.standard.set(preferAdapterAboveLimit, forKey: "preferAdapterAboveLimit")
+            guard dynamicHoldEnabled != oldValue else { return }
+            UserDefaults.standard.set(dynamicHoldEnabled, forKey: "dynamicHoldEnabled")
+            dynamicSessionUpper = nil
+            dynamicNeedsNewCapture = dynamicHoldEnabled
             recomputeAboveLimitPowerFinding()
+            if started { scheduleDynamicHoldReconciliation() }
         }
+    }
+
+    /// The only policy mutation entrypoint. A persistent one-time full-charge
+    /// job owns the SMC until the Helper confirms final restoration.
+    /// Never write the @Published property back from its didSet observer:
+    /// doing so can re-enter Combine's property wrapper and crash.
+    func setDynamicHoldEnabled(_ enabled: Bool) {
+        guard !isDynamicHoldSwitchLocked, dynamicHoldEnabled != enabled else { return }
+        dynamicHoldEnabled = enabled
     }
     @Published private(set) var aboveLimitPowerFinding: AboveLimitPowerFinding = .disabled
     @Published private(set) var menuBarLeafStyle: MenuBarLeafStyle = .green
     @Published private(set) var fullOncePending = false
     @Published private(set) var fullOnceCancelRequested = false
+
+    /// Full-charge creation/cancellation and the persistent Helper job own
+    /// charge control. Dynamic Hold cannot be changed until that job ends.
+    var isDynamicHoldSwitchLocked: Bool {
+        fullOncePending || activeOperation == .startingFullCharge
+            || activeOperation == .cancelingFullCharge || isPreparingToQuit
+    }
+
     @Published var modeText: AppText = "正在检查原生固件控制…"
     @Published var statusMessage: AppText = "正在连接 MauLeaf 原生固件服务…"
     @Published var autoApplyFeedback: AppText = "调整后自动应用"
@@ -1100,6 +1134,14 @@ final class ChargeManager: ObservableObject {
     private var limitDebounce: Task<Void, Never>?
     private var latestBatteryObservation: MauLeafBatterySnapshot?
     private var consecutiveDischargeReadings = 0
+    private var dynamicSessionUpper: Int?
+    private var dynamicNeedsNewCapture = false
+    private var dynamicACStableSince: Date?
+    private var dynamicLastAC: Bool?
+    private var dynamicReconcileTask: Task<Void, Never>?
+    private var dynamicRetryAfter: Date?
+    private let dynamicSettleInterval: TimeInterval
+    private var lastDynamicAppliedUpper: Int?
     @Published private(set) var currentState: FirmwareLimitHelperStateResponse?
     private var pendingAction: PendingAction?
     private var lastAction: PendingAction?
@@ -1132,11 +1174,13 @@ final class ChargeManager: ObservableObject {
         },
         hardwarePreflightForTesting: (() -> String?)? = nil,
         batteryReader: @escaping () -> MauLeafBatterySnapshot = { MauLeafFastBatteryReader.read() },
-        observePowerSourceChanges: Bool? = nil
+        observePowerSourceChanges: Bool? = nil,
+        dynamicSettleInterval: TimeInterval = 8.0
     ) {
         self.backend = backend
         self.autoInstallNativeHelper = autoInstallNativeHelper
         self.batteryReader = batteryReader
+        self.dynamicSettleInterval = max(0, dynamicSettleInterval)
         // Fixture managers default to no OS observer; the real app enables
         // native events with the existing 20s background polling fallback.
         self.observePowerSourceChanges = observePowerSourceChanges ?? autoInstallNativeHelper
@@ -1156,7 +1200,7 @@ final class ChargeManager: ObservableObject {
         let saved = UserDefaults.standard.integer(forKey: "chargeLimit")
         limit = (50...95).contains(saved) ? saved : 80
         showBatteryLevel = UserDefaults.standard.bool(forKey: "showBatteryLevel")
-        preferAdapterAboveLimit = UserDefaults.standard.bool(forKey: "preferAdapterAboveLimit")
+        dynamicHoldEnabled = UserDefaults.standard.bool(forKey: "dynamicHoldEnabled")
     }
 
     func text(_ message: AppText) -> String { message.localized(in: language) }
@@ -1176,7 +1220,7 @@ final class ChargeManager: ObservableObject {
         case .unknownCurrent: return "电池电流不可用，无法判断是否放电"
         case .chargingAboveLimit: return "高于上限且检测到充电，请检查限充状态"
         case .observingDischarge: return "检测到放电，正在连续确认"
-        case .batteryDischarging: return "连续检测到放电；当前预览版无法切换供电路径"
+        case .batteryDischarging: return "仍检测到持续放电；固件保持效果尚未验证"
         case .noSignificantDischarge: return "未检测到明显放电；无法确认适配器实际供电"
         }
     }
@@ -1186,12 +1230,12 @@ final class ChargeManager: ObservableObject {
     private func recomputeAboveLimitPowerFinding(countNewSample: Bool = false) {
         let observation = latestBatteryObservation
         let finding = AboveLimitPowerPolicy.classify(
-            enabled: preferAdapterAboveLimit,
+            enabled: dynamicHoldEnabled,
             firmwareActive: currentState?.active == true,
             hasOriginalSnapshot: hasOriginalStateSnapshot,
             oneTimeCharge: fullOncePending,
             batteryPercent: observation?.percent,
-            upperLimit: currentState?.upper ?? limit,
+            upperLimit: limit,
             externalConnected: observation?.isACConnected,
             isCharging: observation?.isCharging == true,
             amperageMilliAmps: observation?.amperageMilliAmps
@@ -1209,6 +1253,90 @@ final class ChargeManager: ObservableObject {
     func recordPowerObservation(_ snapshot: MauLeafBatterySnapshot) {
         latestBatteryObservation = snapshot
         recomputeAboveLimitPowerFinding(countNewSample: true)
+    }
+
+    var dynamicHoldStatus: AppText {
+        if !dynamicHoldEnabled { return "尚未开启动态保电" }
+        if fullOncePending { return "本次充满期间暂停动态保电" }
+        guard let state = currentState, state.active, hasOriginalStateSnapshot else {
+            return "开启限充后，才会按当前电量计算保持上限"
+        }
+        if !isAdapterConnected { return "电池供电；停止自动固件调整" }
+        if state.upper > limit {
+            return "目标 \(limit)% · 临时上限 \(state.upper)%（供电效果待验证）"
+        }
+        return "目标 \(limit)% · 当前使用原始上限"
+    }
+
+    private func computedDynamicPlan(userTarget: Int) -> DynamicHoldPolicy.Plan? {
+        if !dynamicHoldEnabled {
+            return .target(upper: userTarget, lower: max(5, userTarget - 2))
+        }
+        return DynamicHoldPolicy.plan(
+            userTarget: userTarget,
+            rawPercent: latestBatteryObservation?.precisePercent,
+            holdingUpper: dynamicSessionUpper
+        )
+    }
+
+    /// Schedule a single bounded reconciliation after a stable AC observation.
+    /// The macOS ExternalConnected field was measured to lag actual unplugging
+    /// by several seconds on this firmware. Never write on unplug, and never
+    /// trust one early "AC" sample as proof that a charger is still connected.
+    private func scheduleDynamicHoldReconciliation() {
+        dynamicReconcileTask?.cancel()
+        dynamicReconcileTask = nil
+        guard started, !isPreparingToQuit, !fullOncePending,
+              let state = currentState, state.active && state.hasOriginalStateSnapshot,
+              state.writeSupported, isAdapterConnected,
+              dynamicLastAC == true else { return }
+
+        let stableSince = dynamicACStableSince ?? Date()
+        let waitSeconds = max(0, dynamicSettleInterval - Date().timeIntervalSince(stableSince))
+        dynamicReconcileTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: UInt64(waitSeconds * 1_000_000_000))
+            guard !Task.isCancelled, let self,
+                  self.started, !self.isPreparingToQuit, !self.isBusy, !self.fullOncePending,
+                  self.dynamicLastAC == true else { return }
+            // Two fresh reads after the stability interval. Any uncertainty
+            // blocks automatic writes, even if the existing status still
+            // reports AC due to delayed system state propagation.
+            let a = self.batteryReader()
+            try? await Task.sleep(nanoseconds: 250_000_000)
+            guard !Task.isCancelled else { return }
+            let b = self.batteryReader()
+            guard a.isACConnected == true, b.isACConnected == true,
+                  a.precisePercent != nil, b.precisePercent != nil else { return }
+            self.readSystemBattery(allowDynamicScheduling: false)
+            guard let current = self.currentState, current.active, current.hasOriginalStateSnapshot,
+                  current.writeSupported, !self.isBusy, self.isAdapterConnected,
+                  self.dynamicLastAC == true else { return }
+            if let retryAfter = self.dynamicRetryAfter, retryAfter > Date() { return }
+            guard let plan = self.computedDynamicPlan(userTarget: self.limit) else { return }
+            guard current.upper != plan.upper || current.lower != plan.lower else { return }
+            await self.applyLimit(self.limit)
+        }
+    }
+
+    private func observeDynamicPowerConnection(_ external: Bool?) {
+        guard external != dynamicLastAC else { return }
+        dynamicLastAC = external
+        switch external {
+        case .some(false):
+            dynamicACStableSince = nil
+            dynamicSessionUpper = nil
+            dynamicNeedsNewCapture = true
+            dynamicReconcileTask?.cancel()
+            dynamicReconcileTask = nil
+        case .some(true):
+            dynamicACStableSince = Date()
+            dynamicSessionUpper = nil
+            scheduleDynamicHoldReconciliation()
+        case .none:
+            dynamicACStableSince = nil
+            dynamicReconcileTask?.cancel()
+            dynamicReconcileTask = nil
+        }
     }
 
     /// Keep battery digits neutral while charging; only an unplugged low
@@ -1279,7 +1407,7 @@ final class ChargeManager: ObservableObject {
             return "已暂停 · \(limit)%"
         }
         if currentState?.active == true && hasOriginalStateSnapshot {
-            return "已启用 · \(currentState?.upper ?? limit)%"
+            return "已启用 · \(dynamicHoldEnabled ? limit : (currentState?.upper ?? limit))%"
         }
         if hasOriginalStateSnapshot { return "待恢复" }
         return "未启用"
@@ -1552,16 +1680,38 @@ final class ChargeManager: ObservableObject {
         helperNeedsUpgrade = false
         helperTooNew = false
         helperStateUnknown = false
+        let fullChargeJustEnded = fullOncePending && !oneTime.pending
         fullOncePending = oneTime.pending
         fullOnceCancelRequested = oneTime.cancelRequested
+        if fullChargeJustEnded {
+            // The Helper has already restored the last effective interval.
+            // Re-enter the dynamic policy only after that verified transition.
+            dynamicSessionUpper = nil
+            dynamicNeedsNewCapture = true
+            dynamicACStableSince = Date()
+        }
         backendReady = state.writeSupported
         restoreReady = state.restoreSupported
         recomputeAboveLimitPowerFinding()
 
-        if oneTime.pending, let restoreUpper = oneTime.restoreUpper {
-            limit = restoreUpper
-        } else if state.active, (50...95).contains(state.upper) {
-            limit = state.upper
+        // The UI always stores the user's desired ceiling, never the
+        // temporary firmware ceiling used by Dynamic Hold.
+        if !dynamicHoldEnabled {
+            if oneTime.pending, let restoreUpper = oneTime.restoreUpper,
+               (50...95).contains(restoreUpper) {
+                limit = restoreUpper
+            } else if state.active, (50...95).contains(state.upper) {
+                limit = state.upper
+            }
+        } else if state.active && state.hasOriginalStateSnapshot
+                    && state.upper > limit && dynamicLastAC != .some(false)
+                    && dynamicSessionUpper == nil && !dynamicNeedsNewCapture {
+            // Recovered after a restart: adopt the existing hold until a
+            // *confirmed* unplug/replug, avoiding repeated SMC rewrites.
+            dynamicSessionUpper = state.upper
+        }
+        if started && state.active && state.hasOriginalStateSnapshot && !oneTime.pending {
+            scheduleDynamicHoldReconciliation()
         }
 
         if state.restorePending {
@@ -1643,6 +1793,9 @@ final class ChargeManager: ObservableObject {
     func requestLimit(_ value: Int, immediate: Bool = false) {
         guard !isPreparingToQuit, (50...95).contains(value) else { return }
         limit = value
+        dynamicSessionUpper = nil
+        dynamicNeedsNewCapture = dynamicHoldEnabled
+        dynamicRetryAfter = nil
         limitDebounce?.cancel()
 
         guard currentState?.active == true, hasOriginalStateSnapshot else {
@@ -1939,6 +2092,14 @@ final class ChargeManager: ObservableObject {
                     ? "已请求取消本次充满，等待恢复充电上限。"
                     : "已取消本次充满，原充电上限已恢复。"
                 isError = false
+                if !response.oneTimePending {
+                    dynamicSessionUpper = nil
+                    dynamicNeedsNewCapture = true
+                    // Do not race the Helper or try another SMC write while
+                    // the cancellation operation still has the busy lock.
+                    dynamicACStableSince = Date()
+                    scheduleDynamicHoldReconciliation()
+                }
             } catch {
                 statusMessage = "取消本次充满失败：\(AppText(error: error))"
                 isError = true
@@ -1947,31 +2108,55 @@ final class ChargeManager: ObservableObject {
     }
 
     private func applyLimit(_ value: Int) async {
-        guard backendReady, isAdapterConnected, !isBusy, !isPreparingToQuit else { return }
+        guard backendReady, isAdapterConnected, !isBusy, !isPreparingToQuit,
+              !fullOncePending else { return }
+        // Only Dynamic Hold requires a fresh, precise hardware SoC.
+        // Ordinary charge limiting retains its original validated flow,
+        // including test machines without AppleSmartBattery.
+        if dynamicHoldEnabled {
+            readSystemBattery(allowDynamicScheduling: false)
+            guard isAdapterConnected else { return }
+        }
+        guard let plan = computedDynamicPlan(userTarget: value) else {
+            statusMessage = "无法读取精确电池电量；动态保电未执行固件写入。"
+            isError = true
+            return
+        }
         activeOperation = activeOperation == .enablingLimit ? .enablingLimit : .adjustingLimit
         isBusy = true
         isError = false
-        statusMessage = "正在写入原生固件充电上限 \(value)%…"
-        autoApplyFeedback = "正在应用 \(value)%…"
+        statusMessage = "正在写入原生固件充电上限 \(plan.upper)%…"
+        autoApplyFeedback = "正在应用 \(plan.upper)%…"
         defer { isBusy = false; activeOperation = nil }
         do {
             let response = try await backend.applyLimit(
-                upper: value,
-                lower: max(5, value - 2),
+                upper: plan.upper,
+                lower: plan.lower,
                 confirmed: true
             )
+            guard response.state.active && response.state.upper == plan.upper
+                    && response.state.lower == plan.lower else {
+                throw NativeControlError.unsafeStateAfterInstall
+            }
             currentState = response.state
             backendReady = response.state.writeSupported
             restoreReady = response.state.restoreSupported
             fullOncePending = response.oneTimePending
             fullOnceCancelRequested = false
+            dynamicSessionUpper = plan.isTemporary ? plan.upper : nil
+            dynamicNeedsNewCapture = false
+            dynamicRetryAfter = nil
+            lastDynamicAppliedUpper = plan.isTemporary ? plan.upper : nil
             recomputeAboveLimitPowerFinding()
-            modeText = "限制充电已启用 · 上限 \(value)%"
-            autoApplyFeedback = "已写入并读回 \(value)%"
+            modeText = "限制充电已启用 · 目标 \(value)%"
+            autoApplyFeedback = "已写入并读回 \(plan.upper)%"
             NSLog("MauLeaf firmware limit apply: %@", response.message)
-            statusMessage = "充电上限已设为 \(response.state.upper)%，固件写入已验证。"
+            statusMessage = plan.isTemporary
+                ? "动态保电已应用：目标 \(value)%，临时上限 \(plan.upper)%；实际供电仍需验证。"
+                : "充电上限已设为 \(response.state.upper)%，固件写入已验证。"
             isError = false
         } catch {
+            dynamicRetryAfter = Date().addingTimeInterval(60)
             autoApplyFeedback = "原生固件写入失败：\(AppText(error: error))"
             statusMessage = autoApplyFeedback
             isError = true
@@ -1988,7 +2173,7 @@ final class ChargeManager: ObservableObject {
         defer { isBusy = false; activeOperation = nil }
         do {
             let response = try await backend.beginOneTimeCharge(
-                upper: limit,
+                upper: currentState?.upper ?? limit,
                 lower: currentState?.lower ?? max(5, limit - 2),
                 confirmed: true
             )
@@ -1997,6 +2182,10 @@ final class ChargeManager: ObservableObject {
             restoreReady = response.state.restoreSupported
             fullOncePending = response.oneTimePending
             fullOnceCancelRequested = false
+            dynamicSessionUpper = nil
+            dynamicNeedsNewCapture = true
+            dynamicReconcileTask?.cancel()
+            dynamicReconcileTask = nil
             recomputeAboveLimitPowerFinding()
             modeText = "本次充满进行中 · 原上限 \(limit)%"
             NSLog("MauLeaf one-time full charge: %@", response.message)
@@ -2033,6 +2222,8 @@ final class ChargeManager: ObservableObject {
         didVerifyFirmwareOnQuit = false
         limitDebounce?.cancel()
         limitDebounce = nil
+        dynamicReconcileTask?.cancel()
+        dynamicReconcileTask = nil
         pendingAction = nil
         lastAction = nil
         showNativeWriteConfirmation = false
@@ -2064,7 +2255,7 @@ final class ChargeManager: ObservableObject {
             // and CLI contract. Allow safe restoration without forcing a
             // reinstall just to quit; never trust arbitrary older/newer ones.
             guard FirmwareLimitHelperProtocolVersion.isCompatible(state.helperVersion, build: state.helperBuildVersion)
-                    || state.helperVersion == 4 else {
+                    || state.helperVersion == 4 || state.helperVersion == 5 else {
                 return cancelTermination("控制服务不支持当前恢复协议，请先完成安全升级；恢复数据将保留。")
             }
             let oneTime = try await backend.oneTimeChargeStatus()
@@ -2152,6 +2343,8 @@ final class ChargeManager: ObservableObject {
             refreshTimer = nil
             powerRecheckTask?.cancel()
             powerRecheckTask = nil
+            dynamicReconcileTask?.cancel()
+            dynamicReconcileTask = nil
             powerSourceObserver?.stop()
             powerSourceObserver = nil
             return true
@@ -2195,11 +2388,20 @@ final class ChargeManager: ObservableObject {
         return false
     }
 
-    private func readSystemBattery() {
+    private func readSystemBattery(allowDynamicScheduling: Bool = true) {
         let snapshot = batteryReader()
         recordPowerObservation(snapshot)
         batteryPercent = snapshot.percent
         isAdapterConnected = snapshot.isACConnected == true
+        if allowDynamicScheduling {
+            observeDynamicPowerConnection(snapshot.isACConnected)
+            // With the same charger session, only a genuine policy divergence
+            // (e.g. falling below original target) needs another SMC write.
+            // Scheduling is debounced; a matching SMC interval is a no-op.
+            if snapshot.isACConnected == true, currentState?.active == true {
+                scheduleDynamicHoldReconciliation()
+            }
+        }
 
         switch snapshot.isACConnected {
         case .some(true):

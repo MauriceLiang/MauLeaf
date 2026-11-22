@@ -8,7 +8,7 @@ private enum ChargeManagerTests {
         UserDefaults.standard.set(false, forKey: "nativeFirmwareWriteConfirmed")
         UserDefaults.standard.set(80, forKey: "chargeLimit")
         UserDefaults.standard.removeObject(forKey: "showBatteryLevel")
-        UserDefaults.standard.removeObject(forKey: "preferAdapterAboveLimit")
+        UserDefaults.standard.removeObject(forKey: "dynamicHoldEnabled")
         let manager = ChargeManager(backend: backend, autoInstallNativeHelper: false)
         manager.start()
         try await wait { manager.backendReady && manager.currentState != nil }
@@ -61,14 +61,8 @@ private enum ChargeManagerTests {
                   "battery power stays a separate state")
         manager.batteryStateText = "正在充电"
 
-        try check(!manager.preferAdapterAboveLimit && manager.aboveLimitPowerFinding == .disabled,
-                  "above-limit monitoring is off by default")
-        manager.preferAdapterAboveLimit = true
-        try check(UserDefaults.standard.bool(forKey: "preferAdapterAboveLimit"),
-                  "setting persists without SMC writes")
-        let observedReload = ChargeManager(backend: FixtureNativeFirmwareBackend(), autoInstallNativeHelper: false)
-        try check(observedReload.preferAdapterAboveLimit,
-                  "setting survives manager recreation")
+        try check(!manager.dynamicHoldEnabled && manager.aboveLimitPowerFinding == .disabled,
+                  "dynamic hold defaults off regardless of prior read-only preference")
         manager.requestLimit(85, immediate: true)
         try check(manager.limit == 85 && backend.applyCount == 0 && !manager.showNativeWriteConfirmation,
                   "changing the limit before activation only saves the local preference")
@@ -98,12 +92,12 @@ private enum ChargeManagerTests {
         manager.recordPowerObservation(aboveLimit)
         manager.recordPowerObservation(aboveLimit)
         manager.recordPowerObservation(aboveLimit)
-        try check(manager.aboveLimitPowerFinding == .batteryDischarging && backend.applyCount == 1,
-                  "three consecutive discharge samples do not trigger firmware writes")
+        try check(manager.aboveLimitPowerFinding == .disabled && backend.applyCount == 1,
+                  "battery samples do not trigger firmware writes while dynamic hold is disabled")
         manager.recordPowerObservation(MauLeafBatterySnapshot(percent: 90, isCharging: false,
             isFullyCharged: false, isACConnected: true, amperageMilliAmps: -5))
-        try check(manager.aboveLimitPowerFinding == .noSignificantDischarge && backend.applyCount == 1,
-                  "near-zero current resets discharge detection")
+        try check(manager.aboveLimitPowerFinding == .disabled && backend.applyCount == 1,
+                  "idle monitoring has no writes when dynamic hold is disabled")
         try check(manager.fullChargeCardActionHint.localized(in: .english).contains("100%"),
                   "short Full charge title retains one-time behavior explanation on hover")
         manager.toggleFullChargeFromCard()
@@ -165,6 +159,8 @@ private enum ChargeManagerTests {
         try check(!backend.state.active && !backend.pending && backend.restoreCount == 1,
                   "quitting after manual disable leaves the original firmware state intact")
 
+        try await testDynamicHoldAboveTargetAndReconnect()
+        try await testDynamicHoldSuspendsDuringOneTimeFullCharge()
         try await testImmediatePowerEventRefresh()
         try await testFirstLaunchDefersAuthorization()
         try await testMissingHelperQuitsWithoutAuthorization()
@@ -193,8 +189,165 @@ private enum ChargeManagerTests {
         try await testUnknownFirmwareStateBlocksQuit()
 
         UserDefaults.standard.removeObject(forKey: "nativeFirmwareWriteConfirmed")
-        UserDefaults.standard.removeObject(forKey: "preferAdapterAboveLimit")
+        UserDefaults.standard.removeObject(forKey: "dynamicHoldEnabled")
         print("ChargeManagerTests: PASS (deferred first-use install, password-free Keep, safe read-only launch, recovery guards, existing restore and legacy coverage)")
+    }
+
+    @MainActor
+    private static func testDynamicHoldAboveTargetAndReconnect() async throws {
+        UserDefaults.standard.set(80, forKey: "chargeLimit")
+        UserDefaults.standard.set(false, forKey: "dynamicHoldEnabled")
+        UserDefaults.standard.set(true, forKey: "nativeFirmwareWriteConfirmed")
+        let backend = FixtureNativeFirmwareBackend()
+        var reading = MauLeafBatterySnapshot(
+            percent: 95, isCharging: false, isFullyCharged: false,
+            isACConnected: true, amperageMilliAmps: 0, precisePercent: 95.4
+        )
+        let manager = ChargeManager(
+            backend: backend, autoInstallNativeHelper: false,
+            batteryReader: { reading }, observePowerSourceChanges: false,
+            dynamicSettleInterval: 0.05
+        )
+        manager.start()
+        try await wait { manager.backendReady && manager.currentState != nil }
+        manager.setDynamicHoldEnabled(true)
+        try check(UserDefaults.standard.bool(forKey: "dynamicHoldEnabled")
+                  && manager.limit == 80 && backend.applyCount == 0,
+                  "dynamic hold is explicit opt-in and changes no firmware by toggling before enable")
+        manager.toggleLimitFromCard()
+        try await wait { backend.applyCount == 1 && !manager.isBusy }
+        try check(backend.state.upper == 96 && backend.state.lower == 78
+                  && manager.limit == 80
+                  && manager.popoverLimitStatus.source == "已启用 · 80%",
+                  "95.4 percent activates a 96 percent firmware hold without losing user target")
+        try check(manager.dynamicHoldStatus.source.contains("临时上限 96%"),
+                  "UI distinguishes the temporary firmware upper from original target")
+
+        // The old app may read back the effective firmware ceiling at any time.
+        manager.refresh()
+        try await Task.sleep(nanoseconds: 100_000_000)
+        try check(manager.limit == 80 && backend.applyCount == 1,
+                  "periodic refresh must not overwrite the saved target or rewrite a stable hold")
+
+        reading = MauLeafBatterySnapshot(
+            percent: 90, isCharging: false, isFullyCharged: false,
+            isACConnected: false, amperageMilliAmps: -500, precisePercent: 90.3
+        )
+        manager.refresh()
+        try await Task.sleep(nanoseconds: 80_000_000)
+        try check(backend.applyCount == 1, "physical unplug never triggers a firmware write")
+
+        reading = MauLeafBatterySnapshot(
+            percent: 88, isCharging: false, isFullyCharged: false,
+            isACConnected: true, amperageMilliAmps: 0, precisePercent: 88.2
+        )
+        manager.refresh()
+        try await wait { backend.applyCount >= 2 && !manager.isBusy }
+        try check(backend.state.upper == 89 && backend.state.lower == 78
+                  && manager.limit == 80,
+                  "stable replug recaptures 88.2 at 89, never recharges to old 96 hold")
+
+        reading = MauLeafBatterySnapshot(
+            percent: 76, isCharging: false, isFullyCharged: false,
+            isACConnected: false, amperageMilliAmps: -300, precisePercent: 76.0
+        )
+        manager.refresh()
+        reading = MauLeafBatterySnapshot(
+            percent: 75, isCharging: true, isFullyCharged: false,
+            isACConnected: true, amperageMilliAmps: 400, precisePercent: 75.0
+        )
+        manager.refresh()
+        try await wait { backend.applyCount >= 3 && !manager.isBusy }
+        try check(backend.state.upper == 80 && backend.state.lower == 78
+                  && manager.limit == 80,
+                  "replugged below target returns to user's original 80 percent setting")
+
+        manager.setDynamicHoldEnabled(false)
+        try check(!UserDefaults.standard.bool(forKey: "dynamicHoldEnabled"),
+                  "turning off dynamic hold persists without losing target")
+        let stopped = await manager.prepareForTermination()
+        try check(stopped && !backend.state.active && !manager.hasOriginalStateSnapshot,
+                  "dynamic hold exits through original exact firmware restoration")
+        UserDefaults.standard.set(false, forKey: "nativeFirmwareWriteConfirmed")
+        UserDefaults.standard.removeObject(forKey: "dynamicHoldEnabled")
+        UserDefaults.standard.set(80, forKey: "chargeLimit")
+    }
+
+    @MainActor
+    private static func testDynamicHoldSuspendsDuringOneTimeFullCharge() async throws {
+        UserDefaults.standard.set(80, forKey: "chargeLimit")
+        UserDefaults.standard.set(true, forKey: "dynamicHoldEnabled")
+        UserDefaults.standard.set(true, forKey: "nativeFirmwareWriteConfirmed")
+
+        let backend = FixtureNativeFirmwareBackend()
+        var battery = MauLeafBatterySnapshot(
+            percent: 95, isCharging: false, isFullyCharged: false,
+            isACConnected: true, amperageMilliAmps: 0, precisePercent: 95.4
+        )
+        let manager = ChargeManager(
+            backend: backend, autoInstallNativeHelper: false,
+            batteryReader: { battery }, observePowerSourceChanges: false,
+            dynamicSettleInterval: 0.05
+        )
+        manager.start()
+        try await wait { manager.backendReady && manager.currentState != nil }
+        try check(manager.dynamicHoldEnabled && !manager.isDynamicHoldSwitchLocked,
+                  "dynamic preference is available before one-time full charge")
+        manager.toggleLimitFromCard()
+        try await wait { backend.applyCount == 1 && !manager.isBusy }
+        try check(backend.state.upper == 96 && manager.limit == 80,
+                  "a temporary firmware ceiling is applied before full charge")
+
+        manager.beginOneTimeFullCharge()
+        try await wait { backend.beginCount == 1 && manager.fullOncePending && !manager.isBusy }
+        try check(manager.isDynamicHoldSwitchLocked,
+                  "one-time full charge disables the Dynamic Hold switch")
+        try check(manager.dynamicHoldStatus.source == "本次充满期间暂停动态保电",
+                  "the running one-time task explicitly suspends the dynamic policy")
+        let preference = UserDefaults.standard.bool(forKey: "dynamicHoldEnabled")
+        manager.setDynamicHoldEnabled(false)
+        try check(manager.dynamicHoldEnabled && preference
+                  && UserDefaults.standard.bool(forKey: "dynamicHoldEnabled"),
+                  "even a programmatic setting change cannot override a running full-charge task")
+        manager.refresh()
+        try await Task.sleep(nanoseconds: 400_000_000)
+        try check(backend.applyCount == 1,
+                  "periodic state refresh never re-applies firmware limits during one-time charge")
+
+        // Simulate the root Helper automatically restoring its saved interval
+        // after charging reaches 100 percent, without the user pressing Cancel.
+        battery = MauLeafBatterySnapshot(
+            percent: 100, isCharging: false, isFullyCharged: true,
+            isACConnected: true, amperageMilliAmps: 0, precisePercent: 100
+        )
+        _ = try await backend.cancelOneTimeCharge()
+        manager.refresh()
+        try await wait { !manager.fullOncePending && !manager.isDynamicHoldSwitchLocked }
+        try check(manager.dynamicHoldEnabled
+                  && UserDefaults.standard.bool(forKey: "dynamicHoldEnabled"),
+                  "full-charge completion restores the previous enabled preference and unlocks control")
+        try await wait {
+            backend.applyCount >= 2 && !manager.isBusy && backend.state.upper == 100
+        }
+        try check(manager.limit == 80 && backend.state.lower == 78,
+                  "after full charge, Dynamic Hold resumes at actual full SoC without losing user target")
+
+        manager.setDynamicHoldEnabled(false)
+        try check(!manager.dynamicHoldEnabled
+                  && !UserDefaults.standard.bool(forKey: "dynamicHoldEnabled"),
+                  "after completion the user can turn the policy off again")
+        try await wait {
+            backend.applyCount >= 3 && !manager.isBusy && backend.state.upper == 80
+        }
+        try check(backend.state.lower == 78,
+                  "disabling resumed Dynamic Hold restores the user's configured firmware interval")
+        let quit = await manager.prepareForTermination()
+        try check(quit && !backend.state.active,
+                  "full-charge completion followed by policy changes still safely restores the original SMC snapshot")
+
+        UserDefaults.standard.set(false, forKey: "nativeFirmwareWriteConfirmed")
+        UserDefaults.standard.removeObject(forKey: "dynamicHoldEnabled")
+        UserDefaults.standard.set(80, forKey: "chargeLimit")
     }
 
     @MainActor
@@ -368,7 +521,7 @@ private enum ChargeManagerTests {
         )
         manager.start()
         try await wait { manager.currentState != nil && manager.backendReady }
-        try check(FirmwareLimitHelperProtocolVersion.isCompatible(backend.state.helperVersion)
+        try check(FirmwareLimitHelperProtocolVersion.isCompatible(backend.state.helperVersion, build: backend.state.helperBuildVersion)
                   && installs == 0 && backend.applyCount == 0,
                   "UI-only application upgrade reuses a compatible helper without password or SMC writes")
 
@@ -378,8 +531,8 @@ private enum ChargeManagerTests {
         let oldVersionPayload = try JSONSerialization.data(withJSONObject: dictionary)
         let legacy = try JSONDecoder().decode(FirmwareLimitHelperStateResponse.self, from: oldVersionPayload)
         try check(legacy.helperBuildVersion == nil
-                  && FirmwareLimitHelperProtocolVersion.isCompatible(legacy.helperVersion),
-                  "an older helper with the compatible v5 protocol but no build-version field is reusable")
+                  && !FirmwareLimitHelperProtocolVersion.isCompatible(legacy.helperVersion),
+                  "a v6 Helper without a build-version field cannot authorize dynamic writes")
     }
 
     @MainActor
@@ -409,12 +562,13 @@ private enum ChargeManagerTests {
 
     @MainActor
     private static func testOutdatedBuildWithCompatibleProtocolUpgrades() async throws {
-        try check(FirmwareLimitHelperProtocolVersion.isCompatible(5, build: "1.0.0")
-                  && FirmwareLimitHelperProtocolVersion.isCompatible(5, build: "1.2.3")
-                  && FirmwareLimitHelperProtocolVersion.isCompatible(5, build: nil)
-                  && !FirmwareLimitHelperProtocolVersion.isCompatible(5, build: "0.9.9")
-                  && !FirmwareLimitHelperProtocolVersion.isCompatible(5, build: "invalid")
-                  && FirmwareLimitHelperProtocolVersion.canUpgradeFrom(5, build: "0.9.9"),
+        try check(FirmwareLimitHelperProtocolVersion.isCompatible(6, build: "1.1.0")
+                  && FirmwareLimitHelperProtocolVersion.isCompatible(6, build: "1.2.3")
+                  && !FirmwareLimitHelperProtocolVersion.isCompatible(6, build: nil)
+                  && !FirmwareLimitHelperProtocolVersion.isCompatible(5, build: "1.0.0")
+                  && !FirmwareLimitHelperProtocolVersion.isCompatible(6, build: "0.9.9")
+                  && !FirmwareLimitHelperProtocolVersion.isCompatible(6, build: "invalid")
+                  && FirmwareLimitHelperProtocolVersion.canUpgradeFrom(6, build: "0.9.9"),
                   "Helper build compatibility is independent of the visible app version")
         let backend = FixtureNativeFirmwareBackend()
         backend.reportedHelperBuildVersion = "0.9.9"
@@ -787,13 +941,16 @@ private enum ChargeManagerTests {
     }
 
     @MainActor
-    private static func wait(_ predicate: () -> Bool) async throws {
+    private static func wait(_ predicate: () -> Bool,
+                             file: StaticString = #fileID,
+                             line: UInt = #line) async throws {
         for _ in 0..<300 {
             if predicate() { return }
             try await Task.sleep(nanoseconds: 10_000_000)
         }
         throw NSError(domain: "ChargeManagerTests", code: 1,
-                      userInfo: [NSLocalizedDescriptionKey: "Timed out waiting for native manager operation"])
+                      userInfo: [NSLocalizedDescriptionKey:
+                          "Timed out waiting for native manager operation at \(file):\(line)"])
     }
 
     @MainActor

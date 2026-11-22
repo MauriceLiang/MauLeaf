@@ -189,7 +189,7 @@ struct FirmwareLimitRequest: Equatable {
     let lower: Int
 
     init(upper: Int, lower: Int) throws {
-        guard (50...95).contains(upper),
+        guard (50...100).contains(upper),
               (5...100).contains(lower),
               lower < upper else {
             throw FirmwareLimitCoreError.invalidRequestedBand(upper: upper, lower: lower)
@@ -198,8 +198,8 @@ struct FirmwareLimitRequest: Equatable {
         self.lower = lower
     }
 
-    /// MauLeaf's default resume threshold is two percentage points below
-    /// the selected upper limit.
+    /// MauLeaf's normal UI target is 50–95%; experimental hold requests
+    /// may reach 100% and keep the user's original lower threshold.
     static func standard(upper: Int) throws -> FirmwareLimitRequest {
         try FirmwareLimitRequest(upper: upper, lower: max(5, upper - 2))
     }

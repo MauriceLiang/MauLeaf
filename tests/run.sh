@@ -186,7 +186,8 @@ if grep -Eq 'oneTimeToggleRow|private var limitAction|Toggle\(isOn:' <<< "$POPOV
 fi
 grep -Fq 'Picker("", selection: $manager.showBatteryLevel)' <<< "$POPOVER_SOURCE"
 grep -Fq 'Picker("", selection: $manager.language)' <<< "$POPOVER_SOURCE"
-grep -Fq 'Picker("", selection: $manager.dynamicHoldEnabled)' <<< "$POPOVER_SOURCE"
+grep -Fq 'set: { manager.setDynamicHoldEnabled($0) }' <<< "$POPOVER_SOURCE"
+grep -Fq '.disabled(manager.isDynamicHoldSwitchLocked)' <<< "$POPOVER_SOURCE"
 [[ "$(grep -Fc '.pickerStyle(.segmented)' <<< "$POPOVER_SOURCE")" -eq 3 ]]
 [[ "$(grep -Fc '.frame(width: 142)' <<< "$POPOVER_SOURCE")" -eq 3 ]]
 grep -Fq 'if manager.showBatteryLevel' <<< "$POPOVER_SOURCE"

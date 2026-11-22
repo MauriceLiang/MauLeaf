@@ -11,6 +11,9 @@ swiftc "$ROOT/Sources/BatteryStatusReader.swift" "$ROOT/tests/BatteryStatusReade
 "$TMP/batterystatusreadertests"
 
 swiftc "$ROOT/Sources/AboveLimitPowerPolicy.swift" "$ROOT/tests/AboveLimitPowerPolicyTests.swift" -o "$TMP/abovelimitpowerpolicytests"
+
+swiftc "$ROOT/Sources/DynamicHoldPolicy.swift" "$ROOT/tests/DynamicHoldPolicyTests.swift" -o "$TMP/dynamicholdpolicytests"
+"$TMP/dynamicholdpolicytests"
 "$TMP/abovelimitpowerpolicytests"
 
 swiftc "$ROOT/Sources/FirmwareLimitCore.swift" "$ROOT/tests/FirmwareLimitCoreTests.swift" -o "$TMP/firmwarelimitcoretests"
@@ -40,7 +43,7 @@ if [[ "$(uname -s)" == Darwin ]]; then
     swiftc -parse-as-library -D MAULEAF_TESTING \
         -framework SwiftUI -framework AppKit -framework Combine -framework IOKit \
         "$ROOT/Sources/MauLeaf.swift" "$ROOT/Sources/AppLocalization.swift" \
-        "$ROOT/Sources/BatteryStatusReader.swift" "$ROOT/Sources/FastBatteryReader.swift" "$ROOT/Sources/PowerSourceObserver.swift" "$ROOT/Sources/AboveLimitPowerPolicy.swift" "$ROOT/Sources/FirmwareLimitCore.swift" \
+        "$ROOT/Sources/BatteryStatusReader.swift" "$ROOT/Sources/FastBatteryReader.swift" "$ROOT/Sources/PowerSourceObserver.swift" "$ROOT/Sources/AboveLimitPowerPolicy.swift" "$ROOT/Sources/DynamicHoldPolicy.swift" "$ROOT/Sources/FirmwareLimitCore.swift" \
         "$ROOT/Sources/FirmwareLimitReconciliation.swift" "$ROOT/Sources/SystemFirmwareReader.swift" "$ROOT/Sources/FirmwareLimitRuntime.swift" \
         "$ROOT/Sources/FirmwareLimitHelperProtocol.swift" \
         "$ROOT/Sources/FirmwareLimitHelperClient.swift" \
@@ -62,7 +65,7 @@ PLIST
     swiftc -parse-as-library -D MAULEAF_TESTING -D MAULEAF_LAYOUT_TESTING \
         -framework SwiftUI -framework AppKit -framework Combine -framework IOKit \
         "$ROOT/Sources/MauLeaf.swift" "$ROOT/Sources/AppLocalization.swift" \
-        "$ROOT/Sources/BatteryStatusReader.swift" "$ROOT/Sources/FastBatteryReader.swift" "$ROOT/Sources/PowerSourceObserver.swift" "$ROOT/Sources/AboveLimitPowerPolicy.swift" "$ROOT/Sources/FirmwareLimitCore.swift" \
+        "$ROOT/Sources/BatteryStatusReader.swift" "$ROOT/Sources/FastBatteryReader.swift" "$ROOT/Sources/PowerSourceObserver.swift" "$ROOT/Sources/AboveLimitPowerPolicy.swift" "$ROOT/Sources/DynamicHoldPolicy.swift" "$ROOT/Sources/FirmwareLimitCore.swift" \
         "$ROOT/Sources/FirmwareLimitReconciliation.swift" "$ROOT/Sources/SystemFirmwareReader.swift" "$ROOT/Sources/FirmwareLimitRuntime.swift" \
         "$ROOT/Sources/FirmwareLimitHelperProtocol.swift" \
         "$ROOT/Sources/FirmwareLimitHelperClient.swift" \
@@ -73,7 +76,7 @@ fi
 
 swiftc -frontend -parse \
     "$ROOT/Sources/MauLeaf.swift" "$ROOT/Sources/AppLocalization.swift" \
-    "$ROOT/Sources/BatteryStatusReader.swift" "$ROOT/Sources/FastBatteryReader.swift" "$ROOT/Sources/PowerSourceObserver.swift" "$ROOT/Sources/AboveLimitPowerPolicy.swift" "$ROOT/Sources/FirmwareLimitCore.swift" "$ROOT/Sources/FirmwareLimitReconciliation.swift" \
+    "$ROOT/Sources/BatteryStatusReader.swift" "$ROOT/Sources/FastBatteryReader.swift" "$ROOT/Sources/PowerSourceObserver.swift" "$ROOT/Sources/AboveLimitPowerPolicy.swift" "$ROOT/Sources/DynamicHoldPolicy.swift" "$ROOT/Sources/FirmwareLimitCore.swift" "$ROOT/Sources/FirmwareLimitReconciliation.swift" \
     "$ROOT/Sources/SystemFirmwareReader.swift" "$ROOT/Sources/FirmwareLimitRuntime.swift" "$ROOT/Sources/FirmwareLimitSMCTransport.swift" \
     "$ROOT/Sources/FirmwareLimitHelperProtocol.swift" "$ROOT/Sources/FirmwareLimitHelperClient.swift" \
     "$ROOT/Sources/FirmwareLimitHelperService.swift" "$ROOT/Sources/FirmwareLimitHelperMain.swift"
@@ -183,7 +186,7 @@ if grep -Eq 'oneTimeToggleRow|private var limitAction|Toggle\(isOn:' <<< "$POPOV
 fi
 grep -Fq 'Picker("", selection: $manager.showBatteryLevel)' <<< "$POPOVER_SOURCE"
 grep -Fq 'Picker("", selection: $manager.language)' <<< "$POPOVER_SOURCE"
-grep -Fq 'Picker("", selection: $manager.preferAdapterAboveLimit)' <<< "$POPOVER_SOURCE"
+grep -Fq 'Picker("", selection: $manager.dynamicHoldEnabled)' <<< "$POPOVER_SOURCE"
 [[ "$(grep -Fc '.pickerStyle(.segmented)' <<< "$POPOVER_SOURCE")" -eq 3 ]]
 [[ "$(grep -Fc '.frame(width: 142)' <<< "$POPOVER_SOURCE")" -eq 3 ]]
 grep -Fq 'if manager.showBatteryLevel' <<< "$POPOVER_SOURCE"

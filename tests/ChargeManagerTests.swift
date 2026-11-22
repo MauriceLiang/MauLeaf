@@ -171,6 +171,7 @@ private enum ChargeManagerTests {
         try await testUpgradeRequiresExplicitEnable()
         try await testStartupAutoUpgradeReusesCompatibleHelper()
         try await testStartupAutoUpgradeOutdatedHelperOnce()
+        try await testOutdatedBuildWithCompatibleProtocolUpgrades()
         try await testNewerHelperCannotBeDowngraded()
         try await testOutdatedActiveHelperCanBeRepairedWithoutFirmwareWrite()
         try await testInstallFailureDoesNotWriteFirmware()
@@ -359,6 +360,34 @@ private enum ChargeManagerTests {
         manager.refresh()
         try await Task.sleep(nanoseconds: 100_000_000)
         try check(installs == 1, "periodic refresh never re-installs a compatible helper")
+    }
+
+    @MainActor
+    private static func testOutdatedBuildWithCompatibleProtocolUpgrades() async throws {
+        try check(FirmwareLimitHelperProtocolVersion.isCompatible(5, build: "1.0.0")
+                  && FirmwareLimitHelperProtocolVersion.isCompatible(5, build: "1.2.3")
+                  && FirmwareLimitHelperProtocolVersion.isCompatible(5, build: nil)
+                  && !FirmwareLimitHelperProtocolVersion.isCompatible(5, build: "0.9.9")
+                  && !FirmwareLimitHelperProtocolVersion.isCompatible(5, build: "invalid")
+                  && FirmwareLimitHelperProtocolVersion.canUpgradeFrom(5, build: "0.9.9"),
+                  "Helper build compatibility is independent of the visible app version")
+        let backend = FixtureNativeFirmwareBackend()
+        backend.reportedHelperBuildVersion = "0.9.9"
+        var installs = 0
+        let manager = ChargeManager(
+            backend: backend,
+            autoInstallNativeHelper: false,
+            autoUpgradeInstalledHelperOnLaunch: true,
+            helperInstallerForTesting: {
+                installs += 1
+                backend.reportedHelperBuildVersion = nil
+            },
+            helperArtifactsPresent: { true }
+        )
+        manager.start()
+        try await wait { installs == 1 && manager.backendReady && !manager.isBusy }
+        try check(installs == 1 && backend.applyCount == 0 && !manager.helperNeedsUpgrade,
+                  "an outdated known Helper build upgrades once even if its protocol is compatible")
     }
 
     @MainActor

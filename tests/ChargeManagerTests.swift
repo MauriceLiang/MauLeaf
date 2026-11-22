@@ -8,7 +8,7 @@ private enum ChargeManagerTests {
         UserDefaults.standard.set(false, forKey: "nativeFirmwareWriteConfirmed")
         UserDefaults.standard.set(80, forKey: "chargeLimit")
         UserDefaults.standard.removeObject(forKey: "showBatteryLevel")
-        UserDefaults.standard.removeObject(forKey: "preferAdapterAboveLimit")
+        UserDefaults.standard.removeObject(forKey: "dynamicHoldEnabled")
         let manager = ChargeManager(backend: backend, autoInstallNativeHelper: false)
         manager.start()
         try await wait { manager.backendReady && manager.currentState != nil }
@@ -61,14 +61,8 @@ private enum ChargeManagerTests {
                   "battery power stays a separate state")
         manager.batteryStateText = "正在充电"
 
-        try check(!manager.preferAdapterAboveLimit && manager.aboveLimitPowerFinding == .disabled,
-                  "above-limit monitoring is off by default")
-        manager.preferAdapterAboveLimit = true
-        try check(UserDefaults.standard.bool(forKey: "preferAdapterAboveLimit"),
-                  "setting persists without SMC writes")
-        let observedReload = ChargeManager(backend: FixtureNativeFirmwareBackend(), autoInstallNativeHelper: false)
-        try check(observedReload.preferAdapterAboveLimit,
-                  "setting survives manager recreation")
+        try check(!manager.dynamicHoldEnabled && manager.aboveLimitPowerFinding == .disabled,
+                  "dynamic hold defaults off regardless of prior read-only preference")
         manager.requestLimit(85, immediate: true)
         try check(manager.limit == 85 && backend.applyCount == 0 && !manager.showNativeWriteConfirmation,
                   "changing the limit before activation only saves the local preference")
@@ -98,12 +92,12 @@ private enum ChargeManagerTests {
         manager.recordPowerObservation(aboveLimit)
         manager.recordPowerObservation(aboveLimit)
         manager.recordPowerObservation(aboveLimit)
-        try check(manager.aboveLimitPowerFinding == .batteryDischarging && backend.applyCount == 1,
-                  "three consecutive discharge samples do not trigger firmware writes")
+        try check(manager.aboveLimitPowerFinding == .disabled && backend.applyCount == 1,
+                  "battery samples do not trigger firmware writes while dynamic hold is disabled")
         manager.recordPowerObservation(MauLeafBatterySnapshot(percent: 90, isCharging: false,
             isFullyCharged: false, isACConnected: true, amperageMilliAmps: -5))
-        try check(manager.aboveLimitPowerFinding == .noSignificantDischarge && backend.applyCount == 1,
-                  "near-zero current resets discharge detection")
+        try check(manager.aboveLimitPowerFinding == .disabled && backend.applyCount == 1,
+                  "idle monitoring has no writes when dynamic hold is disabled")
         try check(manager.fullChargeCardActionHint.localized(in: .english).contains("100%"),
                   "short Full charge title retains one-time behavior explanation on hover")
         manager.toggleFullChargeFromCard()
@@ -165,6 +159,7 @@ private enum ChargeManagerTests {
         try check(!backend.state.active && !backend.pending && backend.restoreCount == 1,
                   "quitting after manual disable leaves the original firmware state intact")
 
+        try await testDynamicHoldAboveTargetAndReconnect()
         try await testImmediatePowerEventRefresh()
         try await testFirstLaunchDefersAuthorization()
         try await testMissingHelperQuitsWithoutAuthorization()
@@ -193,7 +188,7 @@ private enum ChargeManagerTests {
         try await testUnknownFirmwareStateBlocksQuit()
 
         UserDefaults.standard.removeObject(forKey: "nativeFirmwareWriteConfirmed")
-        UserDefaults.standard.removeObject(forKey: "preferAdapterAboveLimit")
+        UserDefaults.standard.removeObject(forKey: "dynamicHoldEnabled")
         print("ChargeManagerTests: PASS (deferred first-use install, password-free Keep, safe read-only launch, recovery guards, existing restore and legacy coverage)")
     }
 
@@ -378,8 +373,8 @@ private enum ChargeManagerTests {
         let oldVersionPayload = try JSONSerialization.data(withJSONObject: dictionary)
         let legacy = try JSONDecoder().decode(FirmwareLimitHelperStateResponse.self, from: oldVersionPayload)
         try check(legacy.helperBuildVersion == nil
-                  && FirmwareLimitHelperProtocolVersion.isCompatible(legacy.helperVersion),
-                  "an older helper with the compatible v5 protocol but no build-version field is reusable")
+                  && !FirmwareLimitHelperProtocolVersion.isCompatible(legacy.helperVersion),
+                  "a v6 Helper without a build-version field cannot authorize dynamic writes")
     }
 
     @MainActor
@@ -409,12 +404,13 @@ private enum ChargeManagerTests {
 
     @MainActor
     private static func testOutdatedBuildWithCompatibleProtocolUpgrades() async throws {
-        try check(FirmwareLimitHelperProtocolVersion.isCompatible(5, build: "1.0.0")
-                  && FirmwareLimitHelperProtocolVersion.isCompatible(5, build: "1.2.3")
-                  && FirmwareLimitHelperProtocolVersion.isCompatible(5, build: nil)
-                  && !FirmwareLimitHelperProtocolVersion.isCompatible(5, build: "0.9.9")
-                  && !FirmwareLimitHelperProtocolVersion.isCompatible(5, build: "invalid")
-                  && FirmwareLimitHelperProtocolVersion.canUpgradeFrom(5, build: "0.9.9"),
+        try check(FirmwareLimitHelperProtocolVersion.isCompatible(6, build: "1.1.0")
+                  && FirmwareLimitHelperProtocolVersion.isCompatible(6, build: "1.2.3")
+                  && !FirmwareLimitHelperProtocolVersion.isCompatible(6, build: nil)
+                  && !FirmwareLimitHelperProtocolVersion.isCompatible(5, build: "1.0.0")
+                  && !FirmwareLimitHelperProtocolVersion.isCompatible(6, build: "0.9.9")
+                  && !FirmwareLimitHelperProtocolVersion.isCompatible(6, build: "invalid")
+                  && FirmwareLimitHelperProtocolVersion.canUpgradeFrom(6, build: "0.9.9"),
                   "Helper build compatibility is independent of the visible app version")
         let backend = FixtureNativeFirmwareBackend()
         backend.reportedHelperBuildVersion = "0.9.9"

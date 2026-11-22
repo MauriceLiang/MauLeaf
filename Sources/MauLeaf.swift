@@ -1064,7 +1064,6 @@ final class ChargeManager: ObservableObject {
             if started { scheduleDynamicHoldReconciliation() }
         }
     }
-    @Published private(set) var dynamicHoldStatus: AppText = "尚未开启动态保电"
     @Published private(set) var aboveLimitPowerFinding: AboveLimitPowerFinding = .disabled
     @Published private(set) var menuBarLeafStyle: MenuBarLeafStyle = .green
     @Published private(set) var fullOncePending = false

@@ -210,7 +210,7 @@ private enum ChargeManagerTests {
         )
         manager.start()
         try await wait { manager.backendReady && manager.currentState != nil }
-        manager.dynamicHoldEnabled = true
+        manager.setDynamicHoldEnabled(true)
         try check(UserDefaults.standard.bool(forKey: "dynamicHoldEnabled")
                   && manager.limit == 80 && backend.applyCount == 0,
                   "dynamic hold is explicit opt-in and changes no firmware by toggling before enable")
@@ -262,7 +262,7 @@ private enum ChargeManagerTests {
                   && manager.limit == 80,
                   "replugged below target returns to user's original 80 percent setting")
 
-        manager.dynamicHoldEnabled = false
+        manager.setDynamicHoldEnabled(false)
         try check(!UserDefaults.standard.bool(forKey: "dynamicHoldEnabled"),
                   "turning off dynamic hold persists without losing target")
         let stopped = await manager.prepareForTermination()
@@ -305,7 +305,7 @@ private enum ChargeManagerTests {
         try check(manager.dynamicHoldStatus.source == "本次充满期间暂停动态保电",
                   "the running one-time task explicitly suspends the dynamic policy")
         let preference = UserDefaults.standard.bool(forKey: "dynamicHoldEnabled")
-        manager.dynamicHoldEnabled = false
+        manager.setDynamicHoldEnabled(false)
         try check(manager.dynamicHoldEnabled && preference
                   && UserDefaults.standard.bool(forKey: "dynamicHoldEnabled"),
                   "even a programmatic setting change cannot override a running full-charge task")
@@ -332,7 +332,7 @@ private enum ChargeManagerTests {
         try check(manager.limit == 80 && backend.state.lower == 78,
                   "after full charge, Dynamic Hold resumes at actual full SoC without losing user target")
 
-        manager.dynamicHoldEnabled = false
+        manager.setDynamicHoldEnabled(false)
         try check(!manager.dynamicHoldEnabled
                   && !UserDefaults.standard.bool(forKey: "dynamicHoldEnabled"),
                   "after completion the user can turn the policy off again")

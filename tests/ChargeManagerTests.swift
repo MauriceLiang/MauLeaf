@@ -950,7 +950,7 @@ private enum ChargeManagerTests {
         }
         throw NSError(domain: "ChargeManagerTests", code: 1,
                       userInfo: [NSLocalizedDescriptionKey:
-                          "Timed out waiting for native manager operation at \\(file):\\(line)"])
+                          "Timed out waiting for native manager operation at \(file):\(line)"])
     }
 
     @MainActor

@@ -1172,7 +1172,7 @@ final class ChargeManager: ObservableObject {
 
     /// The observation is separate from firmware application. Never silently
     /// reconfigure bf* registers or claim battery drain was prevented.
-    private func recomputeAboveLimitPowerFinding() {
+    private func recomputeAboveLimitPowerFinding(countNewSample: Bool = false) {
         let observation = latestBatteryObservation
         let finding = AboveLimitPowerPolicy.classify(
             enabled: preferAdapterAboveLimit,
@@ -1186,7 +1186,7 @@ final class ChargeManager: ObservableObject {
             amperageMilliAmps: observation?.amperageMilliAmps
         )
         if finding == .observingDischarge {
-            consecutiveDischargeReadings += 1
+            if countNewSample { consecutiveDischargeReadings += 1 }
             aboveLimitPowerFinding = consecutiveDischargeReadings >= AboveLimitPowerPolicy.dischargeSamplesRequired
                 ? .batteryDischarging : .observingDischarge
         } else {
@@ -1197,7 +1197,7 @@ final class ChargeManager: ObservableObject {
 
     func recordPowerObservation(_ snapshot: MauLeafBatterySnapshot) {
         latestBatteryObservation = snapshot
-        recomputeAboveLimitPowerFinding()
+        recomputeAboveLimitPowerFinding(countNewSample: true)
     }
 
     /// Keep battery digits neutral while charging; only an unplugged low
@@ -1902,6 +1902,7 @@ final class ChargeManager: ObservableObject {
             restoreReady = response.state.restoreSupported
             fullOncePending = response.oneTimePending
             fullOnceCancelRequested = false
+            recomputeAboveLimitPowerFinding()
             modeText = "本次充满进行中 · 原上限 \(limit)%"
             NSLog("MauLeaf one-time full charge: %@", response.message)
             statusMessage = "本次充满已开启，固件限充暂时关闭。"

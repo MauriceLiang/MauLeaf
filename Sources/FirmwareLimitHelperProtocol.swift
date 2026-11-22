@@ -18,18 +18,43 @@ enum FirmwareLimitHelperProtocolVersion {
     static let current = 5
     static let supported: ClosedRange<Int> = 5...5
 
-    static func isCompatible(_ installed: Int) -> Bool {
-        supported.contains(installed)
+    /// Increment this floor only when a Helper behavior fix is required by
+    /// the app. A cosmetic app version must NEVER change it.
+    static let minimumBuild = "1.0.0"
+    /// Legacy protocol-v5 Helpers did not advertise a build version. Their
+    /// API is known-compatible; no forced reinstall is needed.
+    static let acceptsUnversionedV5 = true
+
+    static func isCompatible(_ installed: Int, build: String? = nil) -> Bool {
+        guard supported.contains(installed) else { return false }
+        guard let build else { return acceptsUnversionedV5 }
+        guard let actual = versionParts(build), let minimum = versionParts(minimumBuild) else {
+            return false
+        }
+        return actual.lexicographicallyPrecedes(minimum) == false
     }
 
-    static func canUpgradeFrom(_ installed: Int) -> Bool {
-        installed < supported.lowerBound
+    static func canUpgradeFrom(_ installed: Int, build: String? = nil) -> Bool {
+        if installed < supported.lowerBound { return true }
+        if installed > supported.upperBound { return false }
+        guard let build else { return !acceptsUnversionedV5 }
+        guard let actual = versionParts(build), let minimum = versionParts(minimumBuild) else {
+            return false // Invalid metadata requires manual investigation.
+        }
+        return actual.lexicographicallyPrecedes(minimum)
+    }
+
+    private static func versionParts(_ value: String) -> [Int]? {
+        let items = value.split(separator: ".", omittingEmptySubsequences: false)
+        guard items.count == 3 else { return nil }
+        let values = items.compactMap { Int($0) }
+        guard values.count == 3, values.allSatisfy({ $0 >= 0 }) else { return nil }
+        return values
     }
 }
 
-/// Version of the actual privileged executable, NOT the parent app release.
-/// Change this only when the Helper implementation ships a meaningful update.
-/// Older v5 Helpers omit this field and remain compatible.
+/// Version of the privileged binary, distinct from MauLeaf's app version.
+/// A UI-only change does not change this constant.
 enum FirmwareLimitHelperBuildVersion {
     static let current = "1.0.0"
 }

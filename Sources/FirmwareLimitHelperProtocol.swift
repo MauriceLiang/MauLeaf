@@ -15,15 +15,15 @@ import Foundation
 /// Compatibility is intentionally independent of the visible app version.
 /// A UI-only release never requires reinstalling the privileged Helper.
 enum FirmwareLimitHelperProtocolVersion {
-    static let current = 5
-    static let supported: ClosedRange<Int> = 5...5
+    static let current = 6
+    static let supported: ClosedRange<Int> = 6...6
 
     /// Increment this floor only when a Helper behavior fix is required by
     /// the app. A cosmetic app version must NEVER change it.
-    static let minimumBuild = "1.0.0"
-    /// Legacy protocol-v5 Helpers did not advertise a build version. Their
-    /// API is known-compatible; no forced reinstall is needed.
-    static let acceptsUnversionedV5 = true
+    static let minimumBuild = "1.1.0"
+    /// The new v6 Helper accepts a 100% temporary firmware ceiling.
+    /// Unversioned older Helpers are not considered compatible.
+    static let acceptsUnversionedV5 = false
 
     static func isCompatible(_ installed: Int, build: String? = nil) -> Bool {
         guard supported.contains(installed) else { return false }
@@ -56,7 +56,7 @@ enum FirmwareLimitHelperProtocolVersion {
 /// Version of the privileged binary, distinct from MauLeaf's app version.
 /// A UI-only change does not change this constant.
 enum FirmwareLimitHelperBuildVersion {
-    static let current = "1.0.0"
+    static let current = "1.1.0"
 }
 
 struct FirmwareLimitHelperStateResponse: Codable, Equatable {

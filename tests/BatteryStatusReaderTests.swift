@@ -34,6 +34,18 @@ private enum BatteryStatusReaderTests {
         ])
         expect(unplugged.percent == 50 && unplugged.isACConnected == false, "battery power is recognized")
         expect(unplugged.amperageMilliAmps == -360, "signed negative current is retained")
+        let native = MauLeafBatteryStatusReader.parseProperties([
+            "CurrentCapacity": 3_000, "MaxCapacity": 6_000,
+            "IsCharging": false, "ExternalConnected": false, "Amperage": -360
+        ])
+        expect(native == unplugged,
+               "native IORegistry dictionary and ioreg plist path yield identical battery state")
+        let replugged = MauLeafBatteryStatusReader.parseProperties([
+            "CurrentCapacity": 3_000, "MaxCapacity": 6_000,
+            "IsCharging": true, "ExternalConnected": true, "Amperage": 250
+        ])
+        expect(replugged.isACConnected == true && replugged.isCharging,
+               "native dictionary recognizes a fresh external-power connection")
 
         let missing = MauLeafBatteryStatusReader.parse(Data("invalid".utf8))
         expect(missing.percent == nil && missing.isACConnected == nil, "invalid IORegistry output is unknown, never assumed to be AC")

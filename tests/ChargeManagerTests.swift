@@ -941,13 +941,16 @@ private enum ChargeManagerTests {
     }
 
     @MainActor
-    private static func wait(_ predicate: () -> Bool) async throws {
+    private static func wait(_ predicate: () -> Bool,
+                             file: StaticString = #fileID,
+                             line: UInt = #line) async throws {
         for _ in 0..<300 {
             if predicate() { return }
             try await Task.sleep(nanoseconds: 10_000_000)
         }
         throw NSError(domain: "ChargeManagerTests", code: 1,
-                      userInfo: [NSLocalizedDescriptionKey: "Timed out waiting for native manager operation"])
+                      userInfo: [NSLocalizedDescriptionKey:
+                          "Timed out waiting for native manager operation at \\(file):\\(line)"])
     }
 
     @MainActor

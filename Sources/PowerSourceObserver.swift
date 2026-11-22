@@ -27,7 +27,7 @@ final class MauLeafPowerSourceObserver {
         }, context)?.takeRetainedValue() else {
             return false
         }
-        CFRunLoopAddSource(CFRunLoopGetMain(), source, kCFRunLoopCommonModes)
+        CFRunLoopAddSource(CFRunLoopGetMain(), source, CFRunLoopMode.commonModes)
         runLoopSource = source
         started = true
         return true
@@ -42,7 +42,7 @@ final class MauLeafPowerSourceObserver {
         guard started else { return }
         started = false
         if let source = runLoopSource {
-            CFRunLoopRemoveSource(CFRunLoopGetMain(), source, kCFRunLoopCommonModes)
+            CFRunLoopRemoveSource(CFRunLoopGetMain(), source, CFRunLoopMode.commonModes)
             runLoopSource = nil
         }
     }

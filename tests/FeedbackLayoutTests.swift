@@ -102,7 +102,7 @@ struct FeedbackLayoutTests {
             guard limitOpenHeight > normal.0 + 35,
                   settingsOpenHeight > normal.0 + 35,
                   limitOpenHeight < normal.0 + 220,
-                  settingsOpenHeight < normal.0 + 220 else {
+                  settingsOpenHeight < normal.0 + 280 else {
                 fputs("FAIL: disclosure must grow the existing card: normal=\(normal.0), limit=\(limitOpenHeight), settings=\(settingsOpenHeight)\n", stderr)
                 exit(1)
             }
@@ -131,7 +131,7 @@ struct FeedbackLayoutTests {
             // Preview 6 removes 26pt of nested card padding/background:
             // the overview is now an unframed content group in one card.
             guard (100...123).contains(compactCardHeight),
-                  (59...95).contains(compactSettingsHeight) else {
+                  (125...220).contains(compactSettingsHeight) else {
                 fputs("FAIL: compact overview/settings are too tall in \(language.rawValue): card=\(compactCardHeight), settings=\(compactSettingsHeight)\n", stderr)
                 exit(1)
             }

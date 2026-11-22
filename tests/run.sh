@@ -10,6 +10,9 @@ export SWIFT_MODULECACHE_PATH="${SWIFT_MODULECACHE_PATH:-$TMP/ModuleCache}"
 swiftc "$ROOT/Sources/BatteryStatusReader.swift" "$ROOT/tests/BatteryStatusReaderTests.swift" -o "$TMP/batterystatusreadertests"
 "$TMP/batterystatusreadertests"
 
+swiftc "$ROOT/Sources/AboveLimitPowerPolicy.swift" "$ROOT/tests/AboveLimitPowerPolicyTests.swift" -o "$TMP/abovelimitpowerpolicytests"
+"$TMP/abovelimitpowerpolicytests"
+
 swiftc "$ROOT/Sources/FirmwareLimitCore.swift" "$ROOT/tests/FirmwareLimitCoreTests.swift" -o "$TMP/firmwarelimitcoretests"
 "$TMP/firmwarelimitcoretests"
 
@@ -37,7 +40,7 @@ if [[ "$(uname -s)" == Darwin ]]; then
     swiftc -parse-as-library -D MAULEAF_TESTING \
         -framework SwiftUI -framework AppKit -framework Combine -framework IOKit \
         "$ROOT/Sources/MauLeaf.swift" "$ROOT/Sources/AppLocalization.swift" \
-        "$ROOT/Sources/BatteryStatusReader.swift" "$ROOT/Sources/FirmwareLimitCore.swift" \
+        "$ROOT/Sources/BatteryStatusReader.swift" "$ROOT/Sources/AboveLimitPowerPolicy.swift" "$ROOT/Sources/FirmwareLimitCore.swift" \
         "$ROOT/Sources/FirmwareLimitReconciliation.swift" "$ROOT/Sources/SystemFirmwareReader.swift" "$ROOT/Sources/FirmwareLimitRuntime.swift" \
         "$ROOT/Sources/FirmwareLimitHelperProtocol.swift" \
         "$ROOT/Sources/FirmwareLimitHelperClient.swift" \
@@ -59,7 +62,7 @@ PLIST
     swiftc -parse-as-library -D MAULEAF_TESTING -D MAULEAF_LAYOUT_TESTING \
         -framework SwiftUI -framework AppKit -framework Combine -framework IOKit \
         "$ROOT/Sources/MauLeaf.swift" "$ROOT/Sources/AppLocalization.swift" \
-        "$ROOT/Sources/BatteryStatusReader.swift" "$ROOT/Sources/FirmwareLimitCore.swift" \
+        "$ROOT/Sources/BatteryStatusReader.swift" "$ROOT/Sources/AboveLimitPowerPolicy.swift" "$ROOT/Sources/FirmwareLimitCore.swift" \
         "$ROOT/Sources/FirmwareLimitReconciliation.swift" "$ROOT/Sources/SystemFirmwareReader.swift" "$ROOT/Sources/FirmwareLimitRuntime.swift" \
         "$ROOT/Sources/FirmwareLimitHelperProtocol.swift" \
         "$ROOT/Sources/FirmwareLimitHelperClient.swift" \
@@ -70,7 +73,7 @@ fi
 
 swiftc -frontend -parse \
     "$ROOT/Sources/MauLeaf.swift" "$ROOT/Sources/AppLocalization.swift" \
-    "$ROOT/Sources/BatteryStatusReader.swift" "$ROOT/Sources/FirmwareLimitCore.swift" "$ROOT/Sources/FirmwareLimitReconciliation.swift" \
+    "$ROOT/Sources/BatteryStatusReader.swift" "$ROOT/Sources/AboveLimitPowerPolicy.swift" "$ROOT/Sources/FirmwareLimitCore.swift" "$ROOT/Sources/FirmwareLimitReconciliation.swift" \
     "$ROOT/Sources/SystemFirmwareReader.swift" "$ROOT/Sources/FirmwareLimitRuntime.swift" "$ROOT/Sources/FirmwareLimitSMCTransport.swift" \
     "$ROOT/Sources/FirmwareLimitHelperProtocol.swift" "$ROOT/Sources/FirmwareLimitHelperClient.swift" \
     "$ROOT/Sources/FirmwareLimitHelperService.swift" "$ROOT/Sources/FirmwareLimitHelperMain.swift"

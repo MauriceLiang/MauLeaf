@@ -1071,10 +1071,13 @@ final class ChargeManager: ObservableObject {
     @Published var showLegacyDisableConfirmation = false
     @Published private(set) var helperNeedsInstallation = false
     @Published private(set) var helperNeedsUpgrade = false
+    @Published private(set) var helperTooNew = false
     @Published private(set) var helperStateUnknown = false
 
     private let backend: NativeFirmwareBackend
     private let autoInstallNativeHelper: Bool
+    private let autoUpgradeInstalledHelperOnLaunch: Bool
+    private var attemptedStartupHelperUpgrade = false
     private let exitLifecycleForTesting: ((QuitComponentPolicy) async throws -> Void)?
     private let helperInstallerForTesting: (() async throws -> Void)?
     private let helperArtifactsPresent: () -> Bool
@@ -1103,6 +1106,7 @@ final class ChargeManager: ObservableObject {
     init(
         backend: NativeFirmwareBackend = FirmwareLimitHelperClient(),
         autoInstallNativeHelper: Bool = true,
+        autoUpgradeInstalledHelperOnLaunch: Bool? = nil,
         exitLifecycleForTesting: ((QuitComponentPolicy) async throws -> Void)? = nil,
         helperInstallerForTesting: (() async throws -> Void)? = nil,
         helperArtifactsPresent: @escaping () -> Bool = {
@@ -1117,6 +1121,7 @@ final class ChargeManager: ObservableObject {
     ) {
         self.backend = backend
         self.autoInstallNativeHelper = autoInstallNativeHelper
+        self.autoUpgradeInstalledHelperOnLaunch = autoUpgradeInstalledHelperOnLaunch ?? autoInstallNativeHelper
         self.exitLifecycleForTesting = exitLifecycleForTesting
         self.helperInstallerForTesting = helperInstallerForTesting
         self.helperArtifactsPresent = helperArtifactsPresent
@@ -1339,7 +1344,7 @@ final class ChargeManager: ObservableObject {
     /// A stale/unknown installed Helper can be repaired explicitly without
     /// enabling a limit. This is essential when an older version was active.
     var canRepairNativeHelper: Bool {
-        (helperNeedsUpgrade || helperStateUnknown) && helperArtifactsPresent()
+        (helperNeedsUpgrade || helperStateUnknown) && !helperTooNew && helperArtifactsPresent()
             && !isBusy && !isPreparingToQuit
             && !(helperNeedsUpgrade && canEnableLimit)
     }
@@ -1428,19 +1433,30 @@ final class ChargeManager: ObservableObject {
         do {
             let state = try await backend.readState()
             guard !isPreparingToQuit else { return }
-            if state.helperVersion < FirmwareLimitHelperProtocolVersion.current {
-                // Never silently reinstall root code on launch or timer refresh.
+            if !FirmwareLimitHelperProtocolVersion.isCompatible(state.helperVersion) {
+                // Never downgrade an unknown, newer protocol; old Helpers
+                // are migrated only after user-authorized installation.
                 currentState = state
                 helperNeedsInstallation = false
-                helperNeedsUpgrade = true
+                helperNeedsUpgrade = FirmwareLimitHelperProtocolVersion.canUpgradeFrom(state.helperVersion)
+                helperTooNew = !helperNeedsUpgrade
                 helperStateUnknown = false
                 backendReady = false
                 restoreReady = false
                 modeText = "原生控制服务需要更新"
-                statusMessage = state.active || state.hasOriginalStateSnapshot || state.restorePending
-                    ? "旧版控制服务存在未确认的限充或恢复状态，请勿移除恢复组件。"
-                    : "点击启用限制充电时才会申请管理员授权更新服务。"
-                isError = state.active || state.hasOriginalStateSnapshot || state.restorePending
+                if helperTooNew {
+                    statusMessage = "已安装的控制服务版本比当前应用更新；请使用较新版本的 MauLeaf，不会自动降级。"
+                    isError = true
+                } else {
+                    statusMessage = "正在检查已安装控制服务的兼容性；如需升级将请求一次管理员授权。"
+                    isError = state.active || state.hasOriginalStateSnapshot || state.restorePending
+                    if autoUpgradeInstalledHelperOnLaunch && !attemptedStartupHelperUpgrade,
+                       (autoInstallNativeHelper || helperInstallerForTesting != nil),
+                       helperArtifactsPresent() {
+                        attemptedStartupHelperUpgrade = true
+                        Task { await upgradeNativeHelperAfterStartupCheck(previous: state) }
+                    }
+                }
                 return
             }
             let once = try await backend.oneTimeChargeStatus()
@@ -1451,6 +1467,7 @@ final class ChargeManager: ObservableObject {
             backendReady = false
             restoreReady = false
             helperNeedsUpgrade = false
+            helperTooNew = false
             if isHelperUnavailable(error) && !helperArtifactsPresent() {
                 // First launch, no Helper or root-owned recovery files.
                 helperNeedsInstallation = true
@@ -1480,6 +1497,7 @@ final class ChargeManager: ObservableObject {
         currentState = state
         helperNeedsInstallation = false
         helperNeedsUpgrade = false
+        helperTooNew = false
         helperStateUnknown = false
         fullOncePending = oneTime.pending
         fullOnceCancelRequested = oneTime.cancelRequested
@@ -1609,6 +1627,43 @@ final class ChargeManager: ObservableObject {
         }
     }
 
+    /// One attempted upgrade per launch, only for verified older protocols.
+    /// macOS explicitly requests admin authorization; no firmware writes.
+    private func upgradeNativeHelperAfterStartupCheck(previous: FirmwareLimitHelperStateResponse) async {
+        guard !isBusy, !isPreparingToQuit, helperNeedsUpgrade else { return }
+        activeOperation = .repairingHelper
+        defer { activeOperation = nil }
+        isBusy = true
+        isError = false
+        statusMessage = "控制服务版本不兼容，正在请求授权安全升级…"
+        do {
+            if let helperInstallerForTesting {
+                try await helperInstallerForTesting()
+            } else {
+                try await installNativeHelper()
+            }
+            let state = try await backend.readState()
+            guard FirmwareLimitHelperProtocolVersion.isCompatible(state.helperVersion) else {
+                throw NativeControlError.helperUpgradeFailed(
+                    found: state.helperVersion, required: FirmwareLimitHelperProtocolVersion.current
+                )
+            }
+            guard (!previous.active || state.active),
+                  (!previous.hasOriginalStateSnapshot || state.hasOriginalStateSnapshot),
+                  (!previous.restorePending || state.restorePending) else {
+                throw NativeControlError.unsafeStateAfterInstall
+            }
+            let once = try await backend.oneTimeChargeStatus()
+            updateFromNativeState(state, oneTime: once, status: "原生控制服务已更新并验证。")
+            isBusy = false
+        } catch {
+            isBusy = false
+            await refreshNativeState()
+            statusMessage = "自动升级控制服务未完成：\(AppText(error: error))"
+            isError = true
+        }
+    }
+
     /// Explicit recovery of an installed but outdated/unreachable Helper.
     /// No charging-limit write occurs in this path.
     private func repairNativeHelperAfterUserAction() async {
@@ -1625,7 +1680,7 @@ final class ChargeManager: ObservableObject {
                 try await installNativeHelper()
             }
             let state = try await backend.readState()
-            guard state.helperVersion >= FirmwareLimitHelperProtocolVersion.current else {
+            guard FirmwareLimitHelperProtocolVersion.isCompatible(state.helperVersion) else {
                 throw NativeControlError.helperUpgradeFailed(
                     found: state.helperVersion,
                     required: FirmwareLimitHelperProtocolVersion.current
@@ -1676,7 +1731,7 @@ final class ChargeManager: ObservableObject {
                 }
                 // Re-read real firmware before any write, even after install.
                 let state = try await backend.readState()
-                guard state.helperVersion >= FirmwareLimitHelperProtocolVersion.current else {
+                guard FirmwareLimitHelperProtocolVersion.isCompatible(state.helperVersion) else {
                     throw NativeControlError.helperUpgradeFailed(
                         found: state.helperVersion,
                         required: FirmwareLimitHelperProtocolVersion.current
@@ -1952,8 +2007,12 @@ final class ChargeManager: ObservableObject {
                 return true
             }
             let state = try await backend.readState()
-            guard state.helperVersion >= FirmwareLimitHelperProtocolVersion.current else {
-                return cancelTermination("控制服务版本过旧；退出不会自动授权升级。")
+            // Known previous protocol v4 has the same verified restore XPC
+            // and CLI contract. Allow safe restoration without forcing a
+            // reinstall just to quit; never trust arbitrary older/newer ones.
+            guard FirmwareLimitHelperProtocolVersion.isCompatible(state.helperVersion)
+                    || state.helperVersion == 4 else {
+                return cancelTermination("控制服务不支持当前恢复协议，请先完成安全升级；恢复数据将保留。")
             }
             let oneTime = try await backend.oneTimeChargeStatus()
             let needsRestore = state.active || state.hasOriginalStateSnapshot

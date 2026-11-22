@@ -244,3 +244,6 @@
 "无法读取精确电池电量；动态保电未执行固件写入。" = "Precise battery charge is unavailable. Dynamic Hold did not write firmware.";
 "限制充电已启用 · 目标 %@%%" = "Charge limiting enabled · Target %@%%";
 "动态保电已应用：目标 %@%%，临时上限 %@%%；实际供电仍需验证。" = "Dynamic Hold applied: target %@%%, temporary ceiling %@%%. Actual adapter power still needs verification.";
+"本次充满期间不可修改动态保电" = "Dynamic Hold cannot be changed during one-time full charge";
+"本次充满期间动态保电已暂停，完成后自动恢复。" = "Dynamic Hold is paused during one-time full charge and resumes afterward.";
+"本次充满期间不可修改动态保电设置。" = "Dynamic Hold settings cannot be changed during one-time full charge.";

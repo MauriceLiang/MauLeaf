@@ -47,6 +47,15 @@ private enum BatteryStatusReaderTests {
         expect(replugged.isACConnected == true && replugged.isCharging,
                "native dictionary recognizes a fresh external-power connection")
 
+        let precise = MauLeafBatteryStatusReader.parseProperties([
+            "CurrentCapacity": 95, "MaxCapacity": 100,
+            "AppleRawCurrentCapacity": 4770, "AppleRawMaxCapacity": 5000,
+            "IsCharging": false, "ExternalConnected": true
+        ])
+        expect(precise.precisePercent.map { abs($0 - 95.4) < 0.001 } == true,
+               "raw capacities supply fractional SoC for dynamic hold")
+        expect(charging.precisePercent == nil,
+               "missing raw SoC stays unknown instead of guessing from UI percent")
         let missing = MauLeafBatteryStatusReader.parse(Data("invalid".utf8))
         expect(missing.percent == nil && missing.isACConnected == nil, "invalid IORegistry output is unknown, never assumed to be AC")
 

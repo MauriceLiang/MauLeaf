@@ -888,9 +888,9 @@ struct ContentView: View {
             .frame(minHeight: 30)
 
             HStack(spacing: 8) {
-                settingsLabel("超限优先适配器")
+                settingsLabel("动态保电")
                 Spacer(minLength: 8)
-                Picker("", selection: $manager.preferAdapterAboveLimit) {
+                Picker("", selection: $manager.dynamicHoldEnabled) {
                     Text(manager.language == .english ? "Hide" : "关闭").tag(false)
                     Text(manager.language == .english ? "Show" : "开启").tag(true)
                 }
@@ -898,16 +898,16 @@ struct ContentView: View {
                 .labelsHidden()
                 .controlSize(.small)
                 .frame(width: 142)
-                .accessibilityLabel(manager.text("超限优先适配器"))
-                .help(manager.text("预览检测开关；不会修改供电路径"))
+                .accessibilityLabel(manager.text("动态保电"))
+                .help(manager.text("高于目标时尝试保持当前电量；实验功能，供电效果尚待验证"))
             }
             .frame(minHeight: 30)
-            Text(manager.text("Preview 1 仅观察电量与电池电流，不会改变适配器供电或写入额外固件。"))
+            Text(manager.text("电量高于目标时，尝试临时提高固件上限以减少主动放电；仅支持已验证设备。"))
                 .font(.caption2)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
-            if manager.preferAdapterAboveLimit {
-                Text(manager.text(manager.aboveLimitPowerStatus))
+            if manager.dynamicHoldEnabled {
+                Text(manager.text(manager.dynamicHoldStatus))
                     .font(.caption2)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -1054,14 +1054,17 @@ final class ChargeManager: ObservableObject {
     @Published var showBatteryLevel: Bool {
         didSet { UserDefaults.standard.set(showBatteryLevel, forKey: "showBatteryLevel") }
     }
-    /// Opt-in read-only monitoring only. Preview 1 cannot force wall power or
-    /// prevent the firmware from discharging above its configured upper limit.
-    @Published var preferAdapterAboveLimit: Bool {
+    /// Experimental, explicit opt-in. Independent from the deprecated
+    /// Preview 1 observation preference: existing installations are OFF.
+    @Published var dynamicHoldEnabled: Bool {
         didSet {
-            UserDefaults.standard.set(preferAdapterAboveLimit, forKey: "preferAdapterAboveLimit")
+            UserDefaults.standard.set(dynamicHoldEnabled, forKey: "dynamicHoldEnabled")
+            dynamicSessionUpper = nil
             recomputeAboveLimitPowerFinding()
+            if started { scheduleDynamicHoldReconciliation() }
         }
     }
+    @Published private(set) var dynamicHoldStatus: AppText = "尚未开启动态保电"
     @Published private(set) var aboveLimitPowerFinding: AboveLimitPowerFinding = .disabled
     @Published private(set) var menuBarLeafStyle: MenuBarLeafStyle = .green
     @Published private(set) var fullOncePending = false
@@ -1100,6 +1103,13 @@ final class ChargeManager: ObservableObject {
     private var limitDebounce: Task<Void, Never>?
     private var latestBatteryObservation: MauLeafBatterySnapshot?
     private var consecutiveDischargeReadings = 0
+    private var dynamicSessionUpper: Int?
+    private var dynamicACStableSince: Date?
+    private var dynamicLastAC: Bool?
+    private var dynamicReconcileTask: Task<Void, Never>?
+    private var dynamicRetryAfter: Date?
+    private let dynamicSettleInterval: TimeInterval
+    private var lastDynamicAppliedUpper: Int?
     @Published private(set) var currentState: FirmwareLimitHelperStateResponse?
     private var pendingAction: PendingAction?
     private var lastAction: PendingAction?
@@ -1132,11 +1142,13 @@ final class ChargeManager: ObservableObject {
         },
         hardwarePreflightForTesting: (() -> String?)? = nil,
         batteryReader: @escaping () -> MauLeafBatterySnapshot = { MauLeafFastBatteryReader.read() },
-        observePowerSourceChanges: Bool? = nil
+        observePowerSourceChanges: Bool? = nil,
+        dynamicSettleInterval: TimeInterval = 8.0
     ) {
         self.backend = backend
         self.autoInstallNativeHelper = autoInstallNativeHelper
         self.batteryReader = batteryReader
+        self.dynamicSettleInterval = max(0, dynamicSettleInterval)
         // Fixture managers default to no OS observer; the real app enables
         // native events with the existing 20s background polling fallback.
         self.observePowerSourceChanges = observePowerSourceChanges ?? autoInstallNativeHelper
@@ -1156,7 +1168,7 @@ final class ChargeManager: ObservableObject {
         let saved = UserDefaults.standard.integer(forKey: "chargeLimit")
         limit = (50...95).contains(saved) ? saved : 80
         showBatteryLevel = UserDefaults.standard.bool(forKey: "showBatteryLevel")
-        preferAdapterAboveLimit = UserDefaults.standard.bool(forKey: "preferAdapterAboveLimit")
+        dynamicHoldEnabled = UserDefaults.standard.bool(forKey: "dynamicHoldEnabled")
     }
 
     func text(_ message: AppText) -> String { message.localized(in: language) }
@@ -1176,7 +1188,7 @@ final class ChargeManager: ObservableObject {
         case .unknownCurrent: return "电池电流不可用，无法判断是否放电"
         case .chargingAboveLimit: return "高于上限且检测到充电，请检查限充状态"
         case .observingDischarge: return "检测到放电，正在连续确认"
-        case .batteryDischarging: return "连续检测到放电；当前预览版无法切换供电路径"
+        case .batteryDischarging: return "仍检测到持续放电；固件保持效果尚未验证"
         case .noSignificantDischarge: return "未检测到明显放电；无法确认适配器实际供电"
         }
     }
@@ -1186,12 +1198,12 @@ final class ChargeManager: ObservableObject {
     private func recomputeAboveLimitPowerFinding(countNewSample: Bool = false) {
         let observation = latestBatteryObservation
         let finding = AboveLimitPowerPolicy.classify(
-            enabled: preferAdapterAboveLimit,
+            enabled: dynamicHoldEnabled,
             firmwareActive: currentState?.active == true,
             hasOriginalSnapshot: hasOriginalStateSnapshot,
             oneTimeCharge: fullOncePending,
             batteryPercent: observation?.percent,
-            upperLimit: currentState?.upper ?? limit,
+            upperLimit: limit,
             externalConnected: observation?.isACConnected,
             isCharging: observation?.isCharging == true,
             amperageMilliAmps: observation?.amperageMilliAmps
@@ -1279,7 +1291,7 @@ final class ChargeManager: ObservableObject {
             return "已暂停 · \(limit)%"
         }
         if currentState?.active == true && hasOriginalStateSnapshot {
-            return "已启用 · \(currentState?.upper ?? limit)%"
+            return "已启用 · \(dynamicHoldEnabled ? limit : (currentState?.upper ?? limit))%"
         }
         if hasOriginalStateSnapshot { return "待恢复" }
         return "未启用"
@@ -1558,10 +1570,24 @@ final class ChargeManager: ObservableObject {
         restoreReady = state.restoreSupported
         recomputeAboveLimitPowerFinding()
 
-        if oneTime.pending, let restoreUpper = oneTime.restoreUpper {
-            limit = restoreUpper
-        } else if state.active, (50...95).contains(state.upper) {
-            limit = state.upper
+        // The UI always stores the user's desired ceiling, never the
+        // temporary firmware ceiling used by Dynamic Hold.
+        if !dynamicHoldEnabled {
+            if oneTime.pending, let restoreUpper = oneTime.restoreUpper,
+               (50...95).contains(restoreUpper) {
+                limit = restoreUpper
+            } else if state.active, (50...95).contains(state.upper) {
+                limit = state.upper
+            }
+        } else if state.active && state.hasOriginalStateSnapshot
+                    && state.upper > limit && dynamicLastAC != .some(false)
+                    && dynamicSessionUpper == nil {
+            // Recovered after a restart: adopt the existing hold until a
+            // *confirmed* unplug/replug, avoiding repeated SMC rewrites.
+            dynamicSessionUpper = state.upper
+        }
+        if started && state.active && state.hasOriginalStateSnapshot && !oneTime.pending {
+            scheduleDynamicHoldReconciliation()
         }
 
         if state.restorePending {

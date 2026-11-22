@@ -898,15 +898,25 @@ struct ContentView: View {
                 .labelsHidden()
                 .controlSize(.small)
                 .frame(width: 142)
+                .disabled(manager.isDynamicHoldSwitchLocked)
                 .accessibilityLabel(manager.text("动态保电"))
-                .help(manager.text("高于目标时尝试保持当前电量；实验功能，供电效果尚待验证"))
+                .help(manager.text(manager.isDynamicHoldSwitchLocked
+                    ? "本次充满期间不可修改动态保电"
+                    : "高于目标时尝试保持当前电量；实验功能，供电效果尚待验证"))
             }
             .frame(minHeight: 30)
             Text(manager.text("电量高于目标时，尝试临时提高固件上限以减少主动放电；仅支持已验证设备。"))
                 .font(.caption2)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
-            if manager.dynamicHoldEnabled {
+            if manager.fullOncePending {
+                Text(manager.text(manager.dynamicHoldEnabled
+                    ? "本次充满期间动态保电已暂停，完成后自动恢复。"
+                    : "本次充满期间不可修改动态保电设置。"))
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else if manager.dynamicHoldEnabled {
                 Text(manager.text(manager.dynamicHoldStatus))
                     .font(.caption2)
                     .foregroundStyle(.secondary)
@@ -1058,6 +1068,13 @@ final class ChargeManager: ObservableObject {
     /// Preview 1 observation preference: existing installations are OFF.
     @Published var dynamicHoldEnabled: Bool {
         didSet {
+            // Keep both UI and programmatic callers from changing a policy
+            // while the persistent one-time full-charge job owns the SMC.
+            if isDynamicHoldSwitchLocked {
+                dynamicHoldEnabled = oldValue
+                return
+            }
+            guard dynamicHoldEnabled != oldValue else { return }
             UserDefaults.standard.set(dynamicHoldEnabled, forKey: "dynamicHoldEnabled")
             dynamicSessionUpper = nil
             dynamicNeedsNewCapture = dynamicHoldEnabled
@@ -1069,6 +1086,14 @@ final class ChargeManager: ObservableObject {
     @Published private(set) var menuBarLeafStyle: MenuBarLeafStyle = .green
     @Published private(set) var fullOncePending = false
     @Published private(set) var fullOnceCancelRequested = false
+
+    /// Full-charge creation/cancellation and the persistent Helper job own
+    /// charge control. Dynamic Hold cannot be changed until that job ends.
+    var isDynamicHoldSwitchLocked: Bool {
+        fullOncePending || activeOperation == .startingFullCharge
+            || activeOperation == .cancelingFullCharge || isPreparingToQuit
+    }
+
     @Published var modeText: AppText = "正在检查原生固件控制…"
     @Published var statusMessage: AppText = "正在连接 MauLeaf 原生固件服务…"
     @Published var autoApplyFeedback: AppText = "调整后自动应用"
@@ -1649,8 +1674,16 @@ final class ChargeManager: ObservableObject {
         helperNeedsUpgrade = false
         helperTooNew = false
         helperStateUnknown = false
+        let fullChargeJustEnded = fullOncePending && !oneTime.pending
         fullOncePending = oneTime.pending
         fullOnceCancelRequested = oneTime.cancelRequested
+        if fullChargeJustEnded {
+            // The Helper has already restored the last effective interval.
+            // Re-enter the dynamic policy only after that verified transition.
+            dynamicSessionUpper = nil
+            dynamicNeedsNewCapture = true
+            dynamicACStableSince = Date()
+        }
         backendReady = state.writeSupported
         restoreReady = state.restoreSupported
         recomputeAboveLimitPowerFinding()
@@ -2053,7 +2086,14 @@ final class ChargeManager: ObservableObject {
                     ? "已请求取消本次充满，等待恢复充电上限。"
                     : "已取消本次充满，原充电上限已恢复。"
                 isError = false
-                if !response.oneTimePending { scheduleDynamicHoldReconciliation() }
+                if !response.oneTimePending {
+                    dynamicSessionUpper = nil
+                    dynamicNeedsNewCapture = true
+                    // Do not race the Helper or try another SMC write while
+                    // the cancellation operation still has the busy lock.
+                    dynamicACStableSince = Date()
+                    scheduleDynamicHoldReconciliation()
+                }
             } catch {
                 statusMessage = "取消本次充满失败：\(AppText(error: error))"
                 isError = true

@@ -1131,7 +1131,7 @@ final class ChargeManager: ObservableObject {
             ].contains { fs.fileExists(atPath: $0) }
         },
         hardwarePreflightForTesting: (() -> String?)? = nil,
-        batteryReader: @escaping () -> MauLeafBatterySnapshot = { MauLeafBatteryStatusReader.read() },
+        batteryReader: @escaping () -> MauLeafBatterySnapshot = { MauLeafFastBatteryReader.read() },
         observePowerSourceChanges: Bool? = nil
     ) {
         self.backend = backend

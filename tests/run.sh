@@ -183,8 +183,9 @@ if grep -Eq 'oneTimeToggleRow|private var limitAction|Toggle\(isOn:' <<< "$POPOV
 fi
 grep -Fq 'Picker("", selection: $manager.showBatteryLevel)' <<< "$POPOVER_SOURCE"
 grep -Fq 'Picker("", selection: $manager.language)' <<< "$POPOVER_SOURCE"
-[[ "$(grep -Fc '.pickerStyle(.segmented)' <<< "$POPOVER_SOURCE")" -eq 2 ]]
-[[ "$(grep -Fc '.frame(width: 142)' <<< "$POPOVER_SOURCE")" -eq 2 ]]
+grep -Fq 'Picker("", selection: $manager.preferAdapterAboveLimit)' <<< "$POPOVER_SOURCE"
+[[ "$(grep -Fc '.pickerStyle(.segmented)' <<< "$POPOVER_SOURCE")" -eq 3 ]]
+[[ "$(grep -Fc '.frame(width: 142)' <<< "$POPOVER_SOURCE")" -eq 3 ]]
 grep -Fq 'if manager.showBatteryLevel' <<< "$POPOVER_SOURCE"
 grep -Fq 'highlighted: manager.isActivelyCharging' <<< "$POPOVER_SOURCE"
 # Read-only power status aligns with the inner text of the two capsule
@@ -250,7 +251,18 @@ grep -Fq 'deferred-uninstall.pending' "$ROOT/Scripts/uninstall-native-firmware-h
 grep -Fq 'legacy-restore.json' "$ROOT/Sources/FirmwareLimitHelperService.swift"
 grep -Fq 'still quit' "$ROOT/docs/releases/PREVIEW_TEMPLATE.md" || \
   grep -Fq '仍然退出' "$ROOT/docs/releases/PREVIEW_TEMPLATE.md"
-grep -Fq '/usr/bin/cmp -s "$TARGET" "$SOURCE_BINARY"' "$ROOT/Scripts/uninstall-native-firmware-helper.sh"
+# Any compatible, signed root Helper is uninstallable after verified restore.
+if grep -Fq '/usr/bin/cmp -s "$TARGET" "$SOURCE_BINARY"' "$ROOT/Scripts/uninstall-native-firmware-helper.sh"; then
+    echo "Do not couple uninstall to the currently bundled Helper binary." >&2
+    exit 1
+fi
+grep -Fq 'codesign --verify --strict "$TARGET"' "$ROOT/Scripts/uninstall-native-firmware-helper.sh"
+grep -Fq 'helperBuildVersion' "$ROOT/Sources/FirmwareLimitHelperProtocol.swift"
+grep -Fq 'FirmwareLimitHelperProtocolVersion.isCompatible' "$ROOT/Sources/MauLeaf.swift"
+grep -Fq 'upgradeNativeHelperAfterStartupCheck' "$ROOT/Sources/MauLeaf.swift"
+grep -Fq 'trap rollback EXIT' "$ROOT/Scripts/install-native-firmware-helper.sh"
+grep -Fq 'old-helper' "$ROOT/Scripts/install-native-firmware-helper.sh"
+grep -Fq 'snapshot' "$ROOT/Scripts/install-native-firmware-helper.sh"
 bash -n "$ROOT/Scripts/uninstall-macos26-27.sh"
 grep -Fq 'original-firmware-state.json' "$ROOT/Scripts/uninstall-macos26-27.sh"
 grep -Fq 'Native MauLeaf firmware helper or recovery data is present.' "$ROOT/Scripts/uninstall-macos26-27.sh"

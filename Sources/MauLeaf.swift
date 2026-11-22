@@ -2104,10 +2104,13 @@ final class ChargeManager: ObservableObject {
     private func applyLimit(_ value: Int) async {
         guard backendReady, isAdapterConnected, !isBusy, !isPreparingToQuit,
               !fullOncePending else { return }
-        // Refresh telemetry immediately before choosing a temporary ceiling.
-        // Never infer a safe write target from a rounded UI percentage.
-        readSystemBattery(allowDynamicScheduling: false)
-        guard isAdapterConnected else { return }
+        // Only Dynamic Hold requires a fresh, precise hardware SoC.
+        // Ordinary charge limiting retains its original validated flow,
+        // including test machines without AppleSmartBattery.
+        if dynamicHoldEnabled {
+            readSystemBattery(allowDynamicScheduling: false)
+            guard isAdapterConnected else { return }
+        }
         guard let plan = computedDynamicPlan(userTarget: value) else {
             statusMessage = "无法读取精确电池电量；动态保电未执行固件写入。"
             isError = true

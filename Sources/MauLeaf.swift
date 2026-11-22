@@ -1060,6 +1060,7 @@ final class ChargeManager: ObservableObject {
         didSet {
             UserDefaults.standard.set(dynamicHoldEnabled, forKey: "dynamicHoldEnabled")
             dynamicSessionUpper = nil
+            dynamicNeedsNewCapture = dynamicHoldEnabled
             recomputeAboveLimitPowerFinding()
             if started { scheduleDynamicHoldReconciliation() }
         }
@@ -1103,6 +1104,7 @@ final class ChargeManager: ObservableObject {
     private var latestBatteryObservation: MauLeafBatterySnapshot?
     private var consecutiveDischargeReadings = 0
     private var dynamicSessionUpper: Int?
+    private var dynamicNeedsNewCapture = false
     private var dynamicACStableSince: Date?
     private var dynamicLastAC: Bool?
     private var dynamicReconcileTask: Task<Void, Never>?
@@ -1292,6 +1294,7 @@ final class ChargeManager: ObservableObject {
         case .some(false):
             dynamicACStableSince = nil
             dynamicSessionUpper = nil
+            dynamicNeedsNewCapture = true
             dynamicReconcileTask?.cancel()
             dynamicReconcileTask = nil
         case .some(true):
@@ -1663,7 +1666,7 @@ final class ChargeManager: ObservableObject {
             }
         } else if state.active && state.hasOriginalStateSnapshot
                     && state.upper > limit && dynamicLastAC != .some(false)
-                    && dynamicSessionUpper == nil {
+                    && dynamicSessionUpper == nil && !dynamicNeedsNewCapture {
             // Recovered after a restart: adopt the existing hold until a
             // *confirmed* unplug/replug, avoiding repeated SMC rewrites.
             dynamicSessionUpper = state.upper
@@ -1752,6 +1755,7 @@ final class ChargeManager: ObservableObject {
         guard !isPreparingToQuit, (50...95).contains(value) else { return }
         limit = value
         dynamicSessionUpper = nil
+        dynamicNeedsNewCapture = dynamicHoldEnabled
         dynamicRetryAfter = nil
         limitDebounce?.cancel()
 
@@ -2091,6 +2095,7 @@ final class ChargeManager: ObservableObject {
             fullOncePending = response.oneTimePending
             fullOnceCancelRequested = false
             dynamicSessionUpper = plan.isTemporary ? plan.upper : nil
+            dynamicNeedsNewCapture = false
             dynamicRetryAfter = nil
             lastDynamicAppliedUpper = plan.isTemporary ? plan.upper : nil
             recomputeAboveLimitPowerFinding()

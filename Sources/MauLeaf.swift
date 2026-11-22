@@ -887,12 +887,21 @@ struct ContentView: View {
             }
             .frame(minHeight: 30)
 
-            Toggle(manager.text("超限优先适配器"), isOn: $manager.preferAdapterAboveLimit)
-                .toggleStyle(.switch)
-                .font(.caption)
+            HStack(spacing: 8) {
+                settingsLabel("超限优先适配器")
+                Spacer(minLength: 8)
+                Picker("", selection: $manager.preferAdapterAboveLimit) {
+                    Text(manager.language == .english ? "Hide" : "关闭").tag(false)
+                    Text(manager.language == .english ? "Show" : "开启").tag(true)
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
                 .controlSize(.small)
-                .frame(minHeight: 30)
-                .accessibilityHint(manager.text("预览检测开关；不会修改供电路径"))
+                .frame(width: 142)
+                .accessibilityLabel(manager.text("超限优先适配器"))
+                .help(manager.text("预览检测开关；不会修改供电路径"))
+            }
+            .frame(minHeight: 30)
             Text(manager.text("Preview 1 仅观察电量与电池电流，不会改变适配器供电或写入额外固件。"))
                 .font(.caption2)
                 .foregroundStyle(.secondary)

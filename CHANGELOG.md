@@ -1,3 +1,9 @@
+## v0.9.1-preview.1 (experimental)
+
+- Added an opt-in, read-only above-limit supply observation setting; current readings and repeated-discharge diagnostics, with localized results.
+- This preview does **not** switch adapter power or prevent discharge. No new SMC writes or helper protocol changes. Existing snapshot restoration is unchanged.
+- See [bilingual preview notes](docs/releases/v0.9.1-preview.1.md) and [hardware-validation gate](docs/ABOVE_LIMIT_POWER.md).
+
 # MauLeaf 更新日志
 
 ## 0.9.0 — 2026-11-21 正式版

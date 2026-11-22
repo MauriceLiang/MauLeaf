@@ -210,3 +210,18 @@
 // Optional battery display in the compact menu-bar settings.
 "显示当前电量" = "Show battery level";
 "在顶部卡片中显示当前电量百分比" = "Show the battery percentage in the overview card";
+"超限优先适配器" = "Prefer adapter above limit";
+"预览检测开关；不会修改供电路径" = "Preview observation only; does not change the power source";
+"Preview 1 仅观察电量与电池电流，不会改变适配器供电或写入额外固件。" = "Preview 1 only observes battery level and current. It does not change adapter power or write additional firmware registers.";
+"未开启检测" = "Observation off";
+"等待启用限充" = "Waiting for charge limit";
+"本次充满期间暂停检测" = "Observation paused during full charge";
+"未接入适配器或供电状态未知" = "Adapter disconnected or power status unknown";
+"电量信息不可用" = "Battery level unavailable";
+"电量未超过限充上限" = "Battery is not above the limit";
+"电池电流不可用，无法判断是否放电" = "Battery current unavailable; discharge cannot be determined";
+"高于上限且检测到充电，请检查限充状态" = "Above limit and charging detected; check the firmware limit";
+"检测到放电，正在连续确认" = "Battery discharge detected; checking more samples";
+"连续检测到放电；当前预览版无法切换供电路径" = "Repeated battery discharge detected; this preview cannot switch the power source";
+"未检测到明显放电；无法确认适配器实际供电" = "No significant battery drain detected; adapter delivery is not verified";
+"开启" = "On";

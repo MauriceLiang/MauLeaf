@@ -5,6 +5,18 @@ struct MauLeafBatterySnapshot: Equatable {
     let isCharging: Bool
     let isFullyCharged: Bool
     let isACConnected: Bool?
+    /// Signed battery current (mA), when exposed by AppleSmartBattery.
+    /// Negative can indicate discharge; it does not prove wall-power routing.
+    let amperageMilliAmps: Int?
+
+    init(percent: Int?, isCharging: Bool, isFullyCharged: Bool,
+         isACConnected: Bool?, amperageMilliAmps: Int? = nil) {
+        self.percent = percent
+        self.isCharging = isCharging
+        self.isFullyCharged = isFullyCharged
+        self.isACConnected = isACConnected
+        self.amperageMilliAmps = amperageMilliAmps
+    }
 }
 
 enum MauLeafBatteryStatusReader {
@@ -51,7 +63,8 @@ enum MauLeafBatteryStatusReader {
             percent: percent,
             isCharging: charging,
             isFullyCharged: fullyCharged,
-            isACConnected: external
+            isACConnected: external,
+            amperageMilliAmps: integer(battery["Amperage"])
         )
     }
 

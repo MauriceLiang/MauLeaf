@@ -21,6 +21,9 @@
 
 **MauLeaf** is a free, open-source **macOS battery charge limiter and battery care app for Apple Silicon MacBook**. Built with SwiftUI + AppKit and a native AppleSMC controller, it focuses on **charging limits** and **one-time full charge**. It lives in the menu bar as a green leaf, with no separate window or batt dependency. **Firmware writes currently support only one verified M1 Pro hardware profile**, as detailed below.
 
+> [!IMPORTANT]
+> **0.9.1-preview.1 experimental setting: Prefer adapter above limit (observation only).** The new option monitors battery current and can report sustained discharge. **It cannot redirect wall power or prevent above-limit drain.** See [technical validation requirements](docs/ABOVE_LIMIT_POWER.md) and [preview release notes](docs/releases/v0.9.1-preview.1.md).
+
 > [!CAUTION]
 > **A stable release does not imply universal hardware support.** New firmware charging-limit writes are restricted to **MacBookPro18,1 (M1 Pro) + macOS 15 + mBoot-20457.41.3 + arm64**. macOS 26/27, Intel, and unverified devices cannot activate new limits. Battery viewing may still work on other devices. Actual charge-stop and resume percentages have not yet completed full physical validation; successful register read-back is not proof of real charging behavior.
 

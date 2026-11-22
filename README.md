@@ -31,6 +31,10 @@
 > **正式版不等于通用硬件兼容。** 当前新建充电限制只允许 **MacBookPro18,1（M1 Pro）+ macOS 15 + mBoot-20457.41.3 + arm64**。macOS 26/27、Intel 和其他未经验证的设备不能开启新的固件限充。其他环境可以尝试查看电量，但不应期待限充可用。实际停止/恢复充电的百分比仍需要完整真机验证；寄存器读回成功不代表充电行为已经完全验证。
 
 
+### 系统拔电状态延迟诊断
+
+如果拔掉充电器后，**macOS 自带电池菜单**仍持续数秒显示“已连接电源”，请先进行不修改固件的对照测试，而不是反复改动 MauLeaf 界面刷新。运行 `bash Scripts/diagnose-power-transition.sh 25`，在第 10 个采样点左右拔掉电源，比较系统 `pmset` 和 `AppleSmartBattery.ExternalConnected`；然后分别在限充开启、已安全关闭限充、正常退出应用后三次测试。详情见 [系统电源状态排查指南](docs/POWER_SOURCE_TRANSITION_DIAGNOSIS.md)。
+
 ## 应用预览
 
 <p align="center">

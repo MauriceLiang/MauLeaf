@@ -890,7 +890,10 @@ struct ContentView: View {
             HStack(spacing: 8) {
                 settingsLabel("动态保电")
                 Spacer(minLength: 8)
-                Picker("", selection: $manager.dynamicHoldEnabled) {
+                Picker("", selection: Binding(
+                    get: { manager.dynamicHoldEnabled },
+                    set: { manager.setDynamicHoldEnabled($0) }
+                )) {
                     Text(manager.language == .english ? "Hide" : "关闭").tag(false)
                     Text(manager.language == .english ? "Show" : "开启").tag(true)
                 }
@@ -1066,14 +1069,8 @@ final class ChargeManager: ObservableObject {
     }
     /// Experimental, explicit opt-in. Independent from the deprecated
     /// Preview 1 observation preference: existing installations are OFF.
-    @Published var dynamicHoldEnabled: Bool {
+    @Published private(set) var dynamicHoldEnabled: Bool {
         didSet {
-            // Keep both UI and programmatic callers from changing a policy
-            // while the persistent one-time full-charge job owns the SMC.
-            if isDynamicHoldSwitchLocked {
-                dynamicHoldEnabled = oldValue
-                return
-            }
             guard dynamicHoldEnabled != oldValue else { return }
             UserDefaults.standard.set(dynamicHoldEnabled, forKey: "dynamicHoldEnabled")
             dynamicSessionUpper = nil
@@ -1081,6 +1078,15 @@ final class ChargeManager: ObservableObject {
             recomputeAboveLimitPowerFinding()
             if started { scheduleDynamicHoldReconciliation() }
         }
+    }
+
+    /// The only policy mutation entrypoint. A persistent one-time full-charge
+    /// job owns the SMC until the Helper confirms final restoration.
+    /// Never write the @Published property back from its didSet observer:
+    /// doing so can re-enter Combine's property wrapper and crash.
+    func setDynamicHoldEnabled(_ enabled: Bool) {
+        guard !isDynamicHoldSwitchLocked, dynamicHoldEnabled != enabled else { return }
+        dynamicHoldEnabled = enabled
     }
     @Published private(set) var aboveLimitPowerFinding: AboveLimitPowerFinding = .disabled
     @Published private(set) var menuBarLeafStyle: MenuBarLeafStyle = .green

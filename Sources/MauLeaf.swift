@@ -2134,6 +2134,7 @@ final class ChargeManager: ObservableObject {
             fullOncePending = response.oneTimePending
             fullOnceCancelRequested = false
             dynamicSessionUpper = nil
+            dynamicNeedsNewCapture = true
             dynamicReconcileTask?.cancel()
             dynamicReconcileTask = nil
             recomputeAboveLimitPowerFinding()

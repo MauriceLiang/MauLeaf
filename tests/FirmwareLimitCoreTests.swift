@@ -131,7 +131,8 @@ private enum FirmwareLimitCoreTests {
         let expected = try FirmwareLimitRequest(upper: 80, lower: 78)
         expect(standard == expected, "default resume threshold is two points below upper")
         expectThrows({ _ = try FirmwareLimitRequest(upper: 49, lower: 47) }, "upper below MauLeaf's 50% floor is rejected")
-        expect((try FirmwareLimitRequest(upper: 100, lower: 78)).upper == 100,
+        let temporary = try FirmwareLimitRequest(upper: 100, lower: 78)
+        expect(temporary.upper == 100,
                "experimental hold can use a temporary 100 percent firmware ceiling")
         expectThrows({ _ = try FirmwareLimitRequest(upper: 101, lower: 78) },
                      "upper above hardware 100 percent is rejected")

@@ -1442,12 +1442,12 @@ final class ChargeManager: ObservableObject {
         do {
             let state = try await backend.readState()
             guard !isPreparingToQuit else { return }
-            if !FirmwareLimitHelperProtocolVersion.isCompatible(state.helperVersion) {
+            if !FirmwareLimitHelperProtocolVersion.isCompatible(state.helperVersion, build: state.helperBuildVersion) {
                 // Never downgrade an unknown, newer protocol; old Helpers
                 // are migrated only after user-authorized installation.
                 currentState = state
                 helperNeedsInstallation = false
-                helperNeedsUpgrade = FirmwareLimitHelperProtocolVersion.canUpgradeFrom(state.helperVersion)
+                helperNeedsUpgrade = FirmwareLimitHelperProtocolVersion.canUpgradeFrom(state.helperVersion, build: state.helperBuildVersion)
                 helperTooNew = !helperNeedsUpgrade
                 helperStateUnknown = false
                 backendReady = false
@@ -1652,7 +1652,7 @@ final class ChargeManager: ObservableObject {
                 try await installNativeHelper()
             }
             let state = try await backend.readState()
-            guard FirmwareLimitHelperProtocolVersion.isCompatible(state.helperVersion) else {
+            guard FirmwareLimitHelperProtocolVersion.isCompatible(state.helperVersion, build: state.helperBuildVersion) else {
                 throw NativeControlError.helperUpgradeFailed(
                     found: state.helperVersion, required: FirmwareLimitHelperProtocolVersion.current
                 )
@@ -1689,7 +1689,7 @@ final class ChargeManager: ObservableObject {
                 try await installNativeHelper()
             }
             let state = try await backend.readState()
-            guard FirmwareLimitHelperProtocolVersion.isCompatible(state.helperVersion) else {
+            guard FirmwareLimitHelperProtocolVersion.isCompatible(state.helperVersion, build: state.helperBuildVersion) else {
                 throw NativeControlError.helperUpgradeFailed(
                     found: state.helperVersion,
                     required: FirmwareLimitHelperProtocolVersion.current
@@ -1740,7 +1740,7 @@ final class ChargeManager: ObservableObject {
                 }
                 // Re-read real firmware before any write, even after install.
                 let state = try await backend.readState()
-                guard FirmwareLimitHelperProtocolVersion.isCompatible(state.helperVersion) else {
+                guard FirmwareLimitHelperProtocolVersion.isCompatible(state.helperVersion, build: state.helperBuildVersion) else {
                     throw NativeControlError.helperUpgradeFailed(
                         found: state.helperVersion,
                         required: FirmwareLimitHelperProtocolVersion.current
@@ -2019,7 +2019,7 @@ final class ChargeManager: ObservableObject {
             // Known previous protocol v4 has the same verified restore XPC
             // and CLI contract. Allow safe restoration without forcing a
             // reinstall just to quit; never trust arbitrary older/newer ones.
-            guard FirmwareLimitHelperProtocolVersion.isCompatible(state.helperVersion)
+            guard FirmwareLimitHelperProtocolVersion.isCompatible(state.helperVersion, build: state.helperBuildVersion)
                     || state.helperVersion == 4 else {
                 return cancelTermination("控制服务不支持当前恢复协议，请先完成安全升级；恢复数据将保留。")
             }

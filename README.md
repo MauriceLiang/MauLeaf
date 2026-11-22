@@ -47,6 +47,12 @@ English screenshots: [Overview](docs/screenshots/en-overview.webp) · [Charging-
 | 了解功能和具体操作 | [下方功能与操作](#功能与操作) |
 | 下载后打不开或限制无法启用 | [只读诊断与故障 Issue](#无法使用运行诊断脚本并提交-issue) |
 
+### Helper 版本管理与卸载
+
+MauLeaf 的应用版本与特权 Helper 版本独立。每次启动只读检查 XPC 协议是否兼容：兼容时沿用已安装的 Helper，升级界面不会重复要求管理员密码；仅在**已安装旧 Helper 不兼容**时，才申请一次管理员授权升级。首次安装仍由用户主动开启限充触发。升级会保留原始固件快照和恢复任务，失败时尝试恢复旧版可用组件。未知的新协议不会被旧应用自动降级。
+
+无论 App 是否只更新了界面，**移除组件并退出**都使用同一安全卸载流程：先验证固件已恢复，再验证已安装 Helper 的代码签名、root 所有权和服务身份，最后清理 LaunchDaemon 及自身系统文件；不再比较旧 Helper 与新应用内置文件的二进制内容。若未知旧版服务无法完成恢复验证，保留恢复组件，不能强制删除。详情见 [Preview 2 更新说明](docs/releases/v0.9.1-preview.2.md)。
+
 ## 下载与安装
 
 从 [最新正式版 Release](https://github.com/MauriceLiang/MauLeaf/releases/latest) 下载 **macOS Apple Silicon arm64 DMG**，打开后将 MauLeaf.app 拖入「应用程序」，再启动应用。

@@ -31,6 +31,10 @@
 > **A stable release does not imply universal hardware support.** New firmware charging-limit writes are restricted to **MacBookPro18,1 (M1 Pro) + macOS 15 + mBoot-20457.41.3 + arm64**. macOS 26/27, Intel, and unverified devices cannot activate new limits. Battery viewing may still work on other devices. Actual charge-stop and resume percentages have not yet completed full physical validation; successful register read-back is not proof of real charging behavior.
 
 
+### Diagnosing macOS system-level delayed AC unplug recognition
+
+If **macOS' own battery menu** reports the charger connected for several seconds after physical unplugging, first measure system power-source propagation before changing UI code. Run `bash Scripts/diagnose-power-transition.sh 25`, unplug around sample 10, and compare `pmset` versus `AppleSmartBattery.ExternalConnected` with MauLeaf limit on, safely restored/off and after a normal quit. See the [read-only A/B diagnosis guide](docs/POWER_SOURCE_TRANSITION_DIAGNOSIS.md).
+
 ## Screenshots
 
 <p align="center">

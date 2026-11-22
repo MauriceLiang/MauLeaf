@@ -160,6 +160,7 @@ private enum ChargeManagerTests {
                   "quitting after manual disable leaves the original firmware state intact")
 
         try await testDynamicHoldAboveTargetAndReconnect()
+        try await testDynamicHoldSuspendsDuringOneTimeFullCharge()
         try await testImmediatePowerEventRefresh()
         try await testFirstLaunchDefersAuthorization()
         try await testMissingHelperQuitsWithoutAuthorization()
@@ -267,6 +268,83 @@ private enum ChargeManagerTests {
         let stopped = await manager.prepareForTermination()
         try check(stopped && !backend.state.active && !manager.hasOriginalStateSnapshot,
                   "dynamic hold exits through original exact firmware restoration")
+        UserDefaults.standard.set(false, forKey: "nativeFirmwareWriteConfirmed")
+        UserDefaults.standard.removeObject(forKey: "dynamicHoldEnabled")
+        UserDefaults.standard.set(80, forKey: "chargeLimit")
+    }
+
+    @MainActor
+    private static func testDynamicHoldSuspendsDuringOneTimeFullCharge() async throws {
+        UserDefaults.standard.set(80, forKey: "chargeLimit")
+        UserDefaults.standard.set(true, forKey: "dynamicHoldEnabled")
+        UserDefaults.standard.set(true, forKey: "nativeFirmwareWriteConfirmed")
+
+        let backend = FixtureNativeFirmwareBackend()
+        var battery = MauLeafBatterySnapshot(
+            percent: 95, isCharging: false, isFullyCharged: false,
+            isACConnected: true, amperageMilliAmps: 0, precisePercent: 95.4
+        )
+        let manager = ChargeManager(
+            backend: backend, autoInstallNativeHelper: false,
+            batteryReader: { battery }, observePowerSourceChanges: false,
+            dynamicSettleInterval: 0.05
+        )
+        manager.start()
+        try await wait { manager.backendReady && manager.currentState != nil }
+        try check(manager.dynamicHoldEnabled && !manager.isDynamicHoldSwitchLocked,
+                  "dynamic preference is available before one-time full charge")
+        manager.toggleLimitFromCard()
+        try await wait { backend.applyCount == 1 && !manager.isBusy }
+        try check(backend.state.upper == 96 && manager.limit == 80,
+                  "a temporary firmware ceiling is applied before full charge")
+
+        manager.beginOneTimeFullCharge()
+        try await wait { backend.beginCount == 1 && manager.fullOncePending && !manager.isBusy }
+        try check(manager.isDynamicHoldSwitchLocked,
+                  "one-time full charge disables the Dynamic Hold switch")
+        try check(manager.dynamicHoldStatus.source == "本次充满期间暂停动态保电",
+                  "the running one-time task explicitly suspends the dynamic policy")
+        let preference = UserDefaults.standard.bool(forKey: "dynamicHoldEnabled")
+        manager.dynamicHoldEnabled = false
+        try check(manager.dynamicHoldEnabled && preference
+                  && UserDefaults.standard.bool(forKey: "dynamicHoldEnabled"),
+                  "even a programmatic setting change cannot override a running full-charge task")
+        manager.refresh()
+        try await Task.sleep(nanoseconds: 400_000_000)
+        try check(backend.applyCount == 1,
+                  "periodic state refresh never re-applies firmware limits during one-time charge")
+
+        // Simulate the root Helper automatically restoring its saved interval
+        // after charging reaches 100 percent, without the user pressing Cancel.
+        battery = MauLeafBatterySnapshot(
+            percent: 100, isCharging: false, isFullyCharged: true,
+            isACConnected: true, amperageMilliAmps: 0, precisePercent: 100
+        )
+        _ = try await backend.cancelOneTimeCharge()
+        manager.refresh()
+        try await wait { !manager.fullOncePending && !manager.isDynamicHoldSwitchLocked }
+        try check(manager.dynamicHoldEnabled
+                  && UserDefaults.standard.bool(forKey: "dynamicHoldEnabled"),
+                  "full-charge completion restores the previous enabled preference and unlocks control")
+        try await wait {
+            backend.applyCount >= 2 && !manager.isBusy && backend.state.upper == 100
+        }
+        try check(manager.limit == 80 && backend.state.lower == 78,
+                  "after full charge, Dynamic Hold resumes at actual full SoC without losing user target")
+
+        manager.dynamicHoldEnabled = false
+        try check(!manager.dynamicHoldEnabled
+                  && !UserDefaults.standard.bool(forKey: "dynamicHoldEnabled"),
+                  "after completion the user can turn the policy off again")
+        try await wait {
+            backend.applyCount >= 3 && !manager.isBusy && backend.state.upper == 80
+        }
+        try check(backend.state.lower == 78,
+                  "disabling resumed Dynamic Hold restores the user's configured firmware interval")
+        let quit = await manager.prepareForTermination()
+        try check(quit && !backend.state.active,
+                  "full-charge completion followed by policy changes still safely restores the original SMC snapshot")
+
         UserDefaults.standard.set(false, forKey: "nativeFirmwareWriteConfirmed")
         UserDefaults.standard.removeObject(forKey: "dynamicHoldEnabled")
         UserDefaults.standard.set(80, forKey: "chargeLimit")

@@ -4,6 +4,14 @@
 - This preview does **not** switch adapter power or prevent discharge. No new SMC writes or helper protocol changes. Existing snapshot restoration is unchanged.
 - See [bilingual preview notes](docs/releases/v0.9.1-preview.1.md) and [hardware-validation gate](docs/ABOVE_LIMIT_POWER.md).
 
+## v0.9.1-preview.2 (Helper lifecycle fixes)
+
+- Helper build version is independent of app release. Compatible installed protocol v5 is reused on startup with no password for UI-only changes; older incompatible Helpers are upgraded once with macOS administrator authorization.
+- Installer validates and stages replacement binaries, preserves restoration snapshots and rolls back on failure. Newer unknown protocols are not downgraded.
+- Cross-version uninstall no longer rejects a trusted signed root Helper solely because its bytes differ from the app bundle. Firmware restoration and readback verification remain mandatory.
+- Experimental above-limit observation now matches the other segmented Settings controls. It remains read-only and cannot prevent battery discharge.
+- See [bilingual preview notes](docs/releases/v0.9.1-preview.2.md).
+
 # MauLeaf 更新日志
 
 ## 0.9.0 — 2026-11-21 正式版

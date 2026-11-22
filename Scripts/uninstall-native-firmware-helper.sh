@@ -46,7 +46,7 @@ fi
 # Prevent following symlinked application/helper paths and prohibit use of a
 # copied standalone script to recursively delete an unrelated app bundle.
 if [[ -L "$APP" || -L "$TARGET" || -L "$PLIST_TARGET" || ! -d "$APP" \
-      || ! -x "$TARGET" || ! -f "$PLIST_TARGET" || ! -x "$SOURCE_BINARY" ]]; then
+      || ! -x "$TARGET" || ! -f "$PLIST_TARGET" ]]; then
   echo "MauLeaf 应用或原生服务缺失/包含符号链接。未删除任何文件。" >&2
   exit 2
 fi
@@ -64,9 +64,13 @@ if [[ "$BUNDLE_ID" != "com.local.chargecap" || "$PLIST_LABEL" != "$LABEL" \
   echo "MauLeaf 应用/Helper 身份不匹配，拒绝删除。" >&2
   exit 3
 fi
-if ! /usr/bin/codesign --verify --strict "$SOURCE_BINARY" >/dev/null 2>&1 \
-    || ! /usr/bin/cmp -s "$TARGET" "$SOURCE_BINARY"; then
-  echo "已安装的 Helper 与当前应用不匹配。请先重新启动当前版本完成升级，未卸载。" >&2
+# UI-only updates and compatible older Helper builds are deliberately allowed.
+# Require the installed root executable to have the expected signed identity
+# instead of demanding byte-for-byte equality with the current app bundle.
+if [[ "$(/usr/bin/stat -f '%u' "$TARGET")" != "0" \
+      || "$(/usr/bin/stat -f '%u' "$PLIST_TARGET")" != "0" ]] \
+    || ! /usr/bin/codesign --verify --strict "$TARGET" >/dev/null 2>&1; then
+  echo "已安装的 Helper 签名或 root 所有权无效，不能安全卸载；所有恢复文件均已保留。" >&2
   exit 9
 fi
 if [[ "$MODE" == "complete" ]] && /usr/bin/pgrep -x MauLeaf >/dev/null 2>&1; then
@@ -88,7 +92,7 @@ fi
 
 if ! RESTORE_OUTPUT=$("$TARGET" --restore-original-state 2>&1); then
   printf '%s\n' "$RESTORE_OUTPUT" >&2
-  echo "固件恢复未验证成功；MauLeaf、Helper、快照和脚本全部保留。"
+  echo "旧版 Helper 无法完成固件恢复时不得删除组件；MauLeaf、Helper、快照和脚本全部保留。"
   echo "请检查电池供电状态/电量，或接上电源后重试。" >&2
   /bin/launchctl bootstrap system "$PLIST_TARGET" >/dev/null 2>&1 || true
   exit 5

@@ -1,4 +1,6 @@
 #!/bin/bash
+# Idempotent, rollback-capable installer for the privileged Helper.
+# Never touch root-owned charge-limit snapshots or recovery jobs.
 set -euo pipefail
 
 LABEL="com.local.chargecap.firmware-helper"
@@ -9,6 +11,7 @@ DEFERRED_SCRIPT_SOURCE="$SOURCE_DIR/complete-deferred-uninstall.sh"
 TARGET="/Library/PrivilegedHelperTools/$LABEL"
 PLIST_TARGET="/Library/LaunchDaemons/$LABEL.plist"
 JOB_DIR="/Library/Application Support/MauLeaf"
+FINALIZER="$JOB_DIR/complete-deferred-uninstall.sh"
 
 if [[ "$EUID" -ne 0 ]]; then
   echo "请使用管理员授权运行此脚本。" >&2
@@ -19,37 +22,93 @@ if [[ ! -x "$BINARY" || ! -f "$PLIST_SOURCE" || ! -f "$DEFERRED_SCRIPT_SOURCE" ]
   exit 2
 fi
 /usr/bin/codesign --verify --strict "$BINARY"
-IDENTIFIER=$(/usr/bin/codesign -dv --verbose=2 "$BINARY" 2>&1 | /usr/bin/sed -n 's/^Identifier=//p')
-if [[ "$IDENTIFIER" != "$LABEL" ]]; then
-  echo "原生服务签名标识不正确：$IDENTIFIER" >&2
+source_identifier=$(/usr/bin/codesign -dv --verbose=2 "$BINARY" 2>&1 | /usr/bin/sed -n 's/^Identifier=//p')
+if [[ "$source_identifier" != "$LABEL" ]]; then
+  echo "原生服务签名标识不正确：$source_identifier" >&2
+  exit 4
+fi
+plist_label=$(/usr/libexec/PlistBuddy -c 'Print :Label' "$PLIST_SOURCE" 2>/dev/null || true)
+plist_program=$(/usr/libexec/PlistBuddy -c 'Print :ProgramArguments:0' "$PLIST_SOURCE" 2>/dev/null || true)
+if [[ "$plist_label" != "$LABEL" || "$plist_program" != "$TARGET" ]]; then
+  echo "应用包中的 LaunchDaemon 身份不正确，拒绝安装。" >&2
   exit 4
 fi
 
-if [[ -e "$TARGET" || -e "$PLIST_TARGET" ]]; then
-  if [[ ! -f "$TARGET" || ! -f "$PLIST_TARGET" ]]; then
+had_previous=false
+if [[ -e "$TARGET" || -e "$PLIST_TARGET" || -L "$TARGET" || -L "$PLIST_TARGET" ]]; then
+  if [[ -L "$TARGET" || -L "$PLIST_TARGET" || ! -f "$TARGET" || ! -f "$PLIST_TARGET" ]]; then
     echo "检测到不完整或来源不明的同名服务，拒绝覆盖。" >&2
     exit 3
   fi
-  EXISTING_LABEL=$(/usr/libexec/PlistBuddy -c 'Print :Label' "$PLIST_TARGET" 2>/dev/null || true)
-  EXISTING_PROGRAM=$(/usr/libexec/PlistBuddy -c 'Print :ProgramArguments:0' "$PLIST_TARGET" 2>/dev/null || true)
-  EXISTING_IDENTIFIER=$(/usr/bin/codesign -dv --verbose=2 "$TARGET" 2>&1 | /usr/bin/sed -n 's/^Identifier=//p')
-  if [[ "$EXISTING_LABEL" != "$LABEL" || "$EXISTING_PROGRAM" != "$TARGET" || "$EXISTING_IDENTIFIER" != "$LABEL" ]]; then
-    echo "现有同名服务并非 MauLeaf 管理的原生服务，拒绝覆盖。" >&2
+  existing_label=$(/usr/libexec/PlistBuddy -c 'Print :Label' "$PLIST_TARGET" 2>/dev/null || true)
+  existing_program=$(/usr/libexec/PlistBuddy -c 'Print :ProgramArguments:0' "$PLIST_TARGET" 2>/dev/null || true)
+  existing_identifier=$(/usr/bin/codesign -dv --verbose=2 "$TARGET" 2>&1 | /usr/bin/sed -n 's/^Identifier=//p')
+  if [[ "$existing_label" != "$LABEL" || "$existing_program" != "$TARGET" || "$existing_identifier" != "$LABEL" ]] ||
+     [[ "$(/usr/bin/stat -f '%u' "$TARGET")" != "0" || "$(/usr/bin/stat -f '%u' "$PLIST_TARGET")" != "0" ]] ||
+     ! /usr/bin/codesign --verify --strict "$TARGET"; then
+    echo "现有同名服务不是受信任的 MauLeaf root Helper，拒绝覆盖。" >&2
     exit 3
   fi
-  /bin/launchctl bootout "system/$LABEL" >/dev/null 2>&1 || true
+  had_previous=true
 fi
 
 /bin/mkdir -p /Library/PrivilegedHelperTools /Library/LaunchDaemons "$JOB_DIR"
-/usr/bin/install -o root -g wheel -m 755 "$BINARY" "$TARGET"
-# Keep a small, root-owned standalone finalizer outside MauLeaf.app, so app
-# removal while on battery does not discard firmware recovery capability.
-/usr/bin/install -o root -g wheel -m 700 "$DEFERRED_SCRIPT_SOURCE" "$JOB_DIR/complete-deferred-uninstall.sh"
-/usr/bin/install -o root -g wheel -m 644 "$PLIST_SOURCE" "$PLIST_TARGET"
 /usr/sbin/chown root:wheel "$JOB_DIR"
 /bin/chmod 755 "$JOB_DIR"
-/usr/bin/plutil -lint "$PLIST_TARGET"
+staging=$(/usr/bin/mktemp -d "$JOB_DIR/.helper-install.XXXXXXXX")
+/bin/chmod 700 "$staging"
+was_running=false
+replaced=false
+rollback() {
+  local rc=$?
+  trap - EXIT
+  if [[ "$rc" -ne 0 && "$replaced" == true ]]; then
+    echo "新 Helper 安装未完成，回滚已安装的二进制文件；恢复快照始终保留。" >&2
+    if [[ "$had_previous" == true ]]; then
+      /usr/bin/install -o root -g wheel -m 755 "$staging/old-helper" "$TARGET" || true
+      /usr/bin/install -o root -g wheel -m 644 "$staging/old-plist" "$PLIST_TARGET" || true
+      if [[ -f "$staging/old-finalizer" ]]; then
+        /usr/bin/install -o root -g wheel -m 700 "$staging/old-finalizer" "$FINALIZER" || true
+      fi
+      if [[ "$was_running" == true ]]; then
+        /bin/launchctl bootstrap system "$PLIST_TARGET" >/dev/null 2>&1 || true
+      fi
+    else
+      /bin/rm -f "$TARGET" "$PLIST_TARGET"
+    fi
+  elif [[ "$rc" -ne 0 && "$had_previous" == true && "$was_running" == true ]]; then
+    /bin/launchctl bootstrap system "$PLIST_TARGET" >/dev/null 2>&1 || true
+  fi
+  /bin/rm -rf "$staging"
+  exit "$rc"
+}
+trap rollback EXIT
+
+# Stage and verify all new files before interrupting an existing Helper.
+/usr/bin/install -o root -g wheel -m 755 "$BINARY" "$staging/new-helper"
+/usr/bin/install -o root -g wheel -m 644 "$PLIST_SOURCE" "$staging/new-plist"
+/usr/bin/install -o root -g wheel -m 700 "$DEFERRED_SCRIPT_SOURCE" "$staging/new-finalizer"
+/usr/bin/codesign --verify --strict "$staging/new-helper"
+/usr/bin/plutil -lint "$staging/new-plist"
+if [[ "$had_previous" == true ]]; then
+  /bin/cp -p "$TARGET" "$staging/old-helper"
+  /bin/cp -p "$PLIST_TARGET" "$staging/old-plist"
+  if [[ -f "$FINALIZER" && ! -L "$FINALIZER" ]]; then
+    /bin/cp -p "$FINALIZER" "$staging/old-finalizer"
+  fi
+  if /bin/launchctl print "system/$LABEL" >/dev/null 2>&1; then
+    was_running=true
+    /bin/launchctl bootout "system/$LABEL"
+  fi
+fi
+
+# Replace executable and registration atomically on the same APFS volume.
+# Snapshot, deferred recovery and one-time-charge records are never removed.
+/bin/mv -f "$staging/new-helper" "$TARGET"
+replaced=true
+/bin/mv -f "$staging/new-plist" "$PLIST_TARGET"
+/bin/mv -f "$staging/new-finalizer" "$FINALIZER"
 /bin/launchctl bootstrap system "$PLIST_TARGET"
 /bin/launchctl print "system/$LABEL" >/dev/null
 
-echo "MauLeaf 原生 AppleSMC 固件服务已启用。"
+echo "MauLeaf 原生 Helper 已安装并验证；原始固件快照及恢复任务未更改。"

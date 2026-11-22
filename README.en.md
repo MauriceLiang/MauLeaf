@@ -47,6 +47,12 @@
 | Explore features and controls | [Features and controls](#features-and-controls) |
 | Report that it doesn't start or won't charge-limit | [Read-only diagnostics and bug report](#not-working-run-diagnostics-and-open-an-issue) |
 
+### Helper version compatibility and uninstall
+
+MauLeaf's privileged Helper has a build version and XPC protocol independent of the app release. Each launch checks protocol compatibility read-only. Compatible Helpers are reused without another administrator password after a UI-only update. Only an **installed incompatible older Helper** triggers a one-time user-authorized upgrade attempt. First installation remains opt-in. Previous restoration snapshots and pending jobs are preserved. Unknown newer protocols are never silently downgraded.
+
+Uninstall no longer requires the installed Helper executable to match the binary bundled with the updated app. It verifies expected code-signing identity, root ownership and exact firmware restoration before removing privileged components. If an unknown old Helper cannot prove successful restoration, the recovery components are retained. See [Preview 2 notes](docs/releases/v0.9.1-preview.2.md).
+
 ## Download and install
 
 Get the **macOS Apple Silicon arm64 DMG** from the [latest stable Release](https://github.com/MauriceLiang/MauLeaf/releases/latest), then drag MauLeaf.app to Applications and open it.

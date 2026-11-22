@@ -12,12 +12,56 @@ import Foundation
     func oneTimeChargeStatus(withReply reply: @escaping (NSData?, NSString?) -> Void)
 }
 
+/// Compatibility is intentionally independent of the visible app version.
+/// A UI-only release never requires reinstalling the privileged Helper.
 enum FirmwareLimitHelperProtocolVersion {
     static let current = 5
+    static let supported: ClosedRange<Int> = 5...5
+
+    /// Increment this floor only when a Helper behavior fix is required by
+    /// the app. A cosmetic app version must NEVER change it.
+    static let minimumBuild = "1.0.0"
+    /// Legacy protocol-v5 Helpers did not advertise a build version. Their
+    /// API is known-compatible; no forced reinstall is needed.
+    static let acceptsUnversionedV5 = true
+
+    static func isCompatible(_ installed: Int, build: String? = nil) -> Bool {
+        guard supported.contains(installed) else { return false }
+        guard let build else { return acceptsUnversionedV5 }
+        guard let actual = versionParts(build), let minimum = versionParts(minimumBuild) else {
+            return false
+        }
+        return actual.lexicographicallyPrecedes(minimum) == false
+    }
+
+    static func canUpgradeFrom(_ installed: Int, build: String? = nil) -> Bool {
+        if installed < supported.lowerBound { return true }
+        if installed > supported.upperBound { return false }
+        guard let build else { return !acceptsUnversionedV5 }
+        guard let actual = versionParts(build), let minimum = versionParts(minimumBuild) else {
+            return false // Invalid metadata requires manual investigation.
+        }
+        return actual.lexicographicallyPrecedes(minimum)
+    }
+
+    private static func versionParts(_ value: String) -> [Int]? {
+        let items = value.split(separator: ".", omittingEmptySubsequences: false)
+        guard items.count == 3 else { return nil }
+        let values = items.compactMap { Int($0) }
+        guard values.count == 3, values.allSatisfy({ $0 >= 0 }) else { return nil }
+        return values
+    }
+}
+
+/// Version of the privileged binary, distinct from MauLeaf's app version.
+/// A UI-only change does not change this constant.
+enum FirmwareLimitHelperBuildVersion {
+    static let current = "1.0.0"
 }
 
 struct FirmwareLimitHelperStateResponse: Codable, Equatable {
     let helperVersion: Int
+    let helperBuildVersion: String?
     let activationByte: UInt8
     let active: Bool
     let upper: Int
@@ -37,6 +81,7 @@ struct FirmwareLimitHelperStateResponse: Codable, Equatable {
         durableRecoveryRecorded: Bool = true
     ) {
         helperVersion = FirmwareLimitHelperProtocolVersion.current
+        helperBuildVersion = FirmwareLimitHelperBuildVersion.current
         activationByte = state.activationByte
         active = state.isActive
         upper = state.upper
@@ -70,7 +115,7 @@ struct FirmwareLimitHelperStateResponse: Codable, Equatable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case helperVersion, activationByte, active, upper, lower, writeSupported, writeBlockReason
+        case helperVersion, helperBuildVersion, activationByte, active, upper, lower, writeSupported, writeBlockReason
         case hasOriginalStateSnapshot, restorePending, restoreSupported, restoreBlockReason
     }
 
@@ -78,6 +123,7 @@ struct FirmwareLimitHelperStateResponse: Codable, Equatable {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         // Missing helperVersion identifies a previously installed helper.
         helperVersion = try container.decodeIfPresent(Int.self, forKey: .helperVersion) ?? 0
+        helperBuildVersion = try container.decodeIfPresent(String.self, forKey: .helperBuildVersion)
         activationByte = try container.decode(UInt8.self, forKey: .activationByte)
         active = try container.decode(Bool.self, forKey: .active)
         upper = try container.decode(Int.self, forKey: .upper)

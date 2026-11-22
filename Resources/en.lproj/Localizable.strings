@@ -225,3 +225,9 @@
 "连续检测到放电；当前预览版无法切换供电路径" = "Repeated battery discharge detected; this preview cannot switch the power source";
 "未检测到明显放电；无法确认适配器实际供电" = "No significant battery drain detected; adapter delivery is not verified";
 "开启" = "On";
+"控制服务版本不兼容，正在请求授权安全升级…" = "The installed helper is incompatible. Requesting administrator authorization to upgrade safely…";
+"原生控制服务已更新并验证。" = "The native helper was updated and verified.";
+"自动升级控制服务未完成：%@" = "Automatic helper upgrade was not completed: %@";
+"已安装的控制服务版本比当前应用更新；请使用较新版本的 MauLeaf，不会自动降级。" = "The installed helper is newer than this app. Install a newer MauLeaf version; the helper will not be downgraded.";
+"正在检查已安装控制服务的兼容性；如需升级将请求一次管理员授权。" = "Checking installed helper compatibility; administrator authorization is only requested for an upgrade.";
+"控制服务不支持当前恢复协议，请先完成安全升级；恢复数据将保留。" = "The installed helper cannot use this restoration protocol. Upgrade safely first; recovery data is preserved.";

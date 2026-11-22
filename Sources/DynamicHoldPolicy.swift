@@ -25,7 +25,7 @@ enum DynamicHoldPolicy {
     static func plan(userTarget: Int, rawPercent: Double?,
                      holdingUpper: Int? = nil) -> Plan? {
         guard (50...95).contains(userTarget),
-              let rawPercent, rawPercent.isFinite, (0...101).contains(rawPercent) else {
+              let rawPercent, rawPercent.isFinite, (0...100).contains(rawPercent) else {
             return nil
         }
         let resume = max(5, userTarget - 2)

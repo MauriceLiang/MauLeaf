@@ -104,6 +104,7 @@ jobs:
           GITHUB_REF_NAME_VALUE: ${{ github.ref_name }}
           PREVIEW_TAG: ${{ inputs.preview_tag }}
           EXISTING_RELEASE_TAG: ${{ inputs.release_tag }}
+          GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
           set -euo pipefail
@@ -126,14 +127,25 @@ jobs:
             fi
             if [[ -s "docs/releases/v${BASE_VERSION}.md" ]]; then
               RELEASE_TAG="v${BASE_VERSION}"
+              CREATE_TAG=true
             else
               latest="$(git tag --list "v${BASE_VERSION}-preview.*" \
                 | sed -nE 's/^v[0-9]+\.[0-9]+\.[0-9]+-preview\.([0-9]+)$/\1/p' \
                 | sort -n | tail -n 1)"
-              next=$((${latest:-0} + 1))
-              RELEASE_TAG="v${BASE_VERSION}-preview.${next}"
+              # Resume a preview whose tag and DMG build succeeded but whose
+              # Release publishing step failed (e.g., a notes validation issue).
+              # Never replace a published tag or increment the preview number
+              # solely because the previous Release is missing.
+              if [[ -n "$latest" ]] && ! gh release view "v${BASE_VERSION}-preview.${latest}" >/dev/null 2>&1; then
+                RELEASE_TAG="v${BASE_VERSION}-preview.${latest}"
+                CREATE_TAG=false
+                echo "Resuming missing Release for existing tag: $RELEASE_TAG"
+              else
+                next=$(("${latest:-0}" + 1))
+                RELEASE_TAG="v${BASE_VERSION}-preview.${next}"
+                CREATE_TAG=true
+              fi
             fi
-            CREATE_TAG=true
           elif [[ "$EVENT_NAME" == "workflow_dispatch" && -n "$PREVIEW_TAG" ]]; then
             [[ "$GITHUB_REF_VALUE" == "refs/heads/main" ]] || {
               echo "Create preview tags from main only." >&2
@@ -238,6 +250,12 @@ jobs:
           fi
           grep -q '## 简体中文' artifacts/RELEASE_NOTES.md
           grep -q '## English' artifacts/RELEASE_NOTES.md
+          # Platform metadata is a release property, not a localization test.
+          # Supply an explicit platform note if a dedicated bilingual note
+          # uses only "arm64" without spelling out "Apple Silicon".
+          if ! grep -qi 'Apple Silicon' artifacts/RELEASE_NOTES.md; then
+            printf '\n\nTarget platform: Apple Silicon (arm64) only.\n' >> artifacts/RELEASE_NOTES.md
+          fi
           grep -qi 'Apple Silicon' artifacts/RELEASE_NOTES.md
           test -s "artifacts/MauLeaf-${RELEASE_LABEL}-macos-arm64.dmg"
           if find artifacts -maxdepth 1 -type f | grep -Eq 'x86_64|INTEL'; then

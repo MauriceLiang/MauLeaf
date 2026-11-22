@@ -2064,7 +2064,7 @@ final class ChargeManager: ObservableObject {
             // and CLI contract. Allow safe restoration without forcing a
             // reinstall just to quit; never trust arbitrary older/newer ones.
             guard FirmwareLimitHelperProtocolVersion.isCompatible(state.helperVersion, build: state.helperBuildVersion)
-                    || state.helperVersion == 4 else {
+                    || state.helperVersion == 4 || state.helperVersion == 5 else {
                 return cancelTermination("控制服务不支持当前恢复协议，请先完成安全升级；恢复数据将保留。")
             }
             let oneTime = try await backend.oneTimeChargeStatus()

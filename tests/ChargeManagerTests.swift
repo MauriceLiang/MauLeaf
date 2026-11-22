@@ -169,6 +169,9 @@ private enum ChargeManagerTests {
         try await testMissingHelperQuitsWithoutAuthorization()
         try await testUnknownInstalledHelperDoesNotAssumeSafeState()
         try await testUpgradeRequiresExplicitEnable()
+        try await testStartupAutoUpgradeReusesCompatibleHelper()
+        try await testStartupAutoUpgradeOutdatedHelperOnce()
+        try await testNewerHelperCannotBeDowngraded()
         try await testOutdatedActiveHelperCanBeRepairedWithoutFirmwareWrite()
         try await testInstallFailureDoesNotWriteFirmware()
         try await testAutomaticQuitRestore()
@@ -304,6 +307,78 @@ private enum ChargeManagerTests {
         try await wait { installs == 1 && backend.applyCount == 1 && !manager.isBusy }
         try check(!manager.isError && backend.state.active && manager.hasOriginalStateSnapshot,
                   "explicit enable upgrades once, checks new protocol and then writes safely")
+    }
+
+    @MainActor
+    private static func testStartupAutoUpgradeReusesCompatibleHelper() async throws {
+        let backend = FixtureNativeFirmwareBackend()
+        var installs = 0
+        let manager = ChargeManager(
+            backend: backend,
+            autoInstallNativeHelper: false,
+            autoUpgradeInstalledHelperOnLaunch: true,
+            helperInstallerForTesting: { installs += 1 },
+            helperArtifactsPresent: { true }
+        )
+        manager.start()
+        try await wait { manager.currentState != nil && manager.backendReady }
+        try check(FirmwareLimitHelperProtocolVersion.isCompatible(backend.state.helperVersion)
+                  && installs == 0 && backend.applyCount == 0,
+                  "UI-only application upgrade reuses a compatible helper without password or SMC writes")
+
+        let encoded = try JSONEncoder().encode(backend.state)
+        var dictionary = try JSONSerialization.jsonObject(with: encoded) as! [String: Any]
+        dictionary.removeValue(forKey: "helperBuildVersion")
+        let oldVersionPayload = try JSONSerialization.data(withJSONObject: dictionary)
+        let legacy = try JSONDecoder().decode(FirmwareLimitHelperStateResponse.self, from: oldVersionPayload)
+        try check(legacy.helperBuildVersion == nil
+                  && FirmwareLimitHelperProtocolVersion.isCompatible(legacy.helperVersion),
+                  "an older helper with the compatible v5 protocol but no build-version field is reusable")
+    }
+
+    @MainActor
+    private static func testStartupAutoUpgradeOutdatedHelperOnce() async throws {
+        let backend = FixtureNativeFirmwareBackend()
+        backend.reportedHelperVersion = FirmwareLimitHelperProtocolVersion.current - 1
+        var installs = 0
+        let manager = ChargeManager(
+            backend: backend,
+            autoInstallNativeHelper: false,
+            autoUpgradeInstalledHelperOnLaunch: true,
+            helperInstallerForTesting: {
+                installs += 1
+                backend.reportedHelperVersion = nil
+            },
+            helperArtifactsPresent: { true }
+        )
+        manager.start()
+        try await wait { installs == 1 && manager.backendReady && !manager.isBusy }
+        try check(!manager.helperNeedsUpgrade && !manager.isError
+                  && backend.applyCount == 0 && backend.restoreCount == 0,
+                  "outdated installed helper auto-upgrades once without touching charging state")
+        manager.refresh()
+        try await Task.sleep(nanoseconds: 100_000_000)
+        try check(installs == 1, "periodic refresh never re-installs a compatible helper")
+    }
+
+    @MainActor
+    private static func testNewerHelperCannotBeDowngraded() async throws {
+        let backend = FixtureNativeFirmwareBackend()
+        backend.reportedHelperVersion = FirmwareLimitHelperProtocolVersion.current + 1
+        var installs = 0
+        let manager = ChargeManager(
+            backend: backend,
+            autoInstallNativeHelper: false,
+            autoUpgradeInstalledHelperOnLaunch: true,
+            helperInstallerForTesting: { installs += 1 },
+            helperArtifactsPresent: { true }
+        )
+        manager.start()
+        try await wait { manager.helperTooNew }
+        try check(installs == 0 && !manager.canRepairNativeHelper
+                  && !manager.canToggleLimitFromCard && !manager.backendReady
+                  && backend.applyCount == 0,
+                  "an older app cannot auto-replace an unknown newer helper")
     }
 
     @MainActor

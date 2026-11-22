@@ -887,25 +887,12 @@ struct ContentView: View {
             }
             .frame(minHeight: 30)
 
-            HStack(spacing: 8) {
-                settingsLabel("超限优先适配器")
-                Spacer(minLength: 8)
-                Button {
-                    manager.preferAdapterAboveLimit.toggle()
-                } label: {
-                    Text(manager.text(manager.preferAdapterAboveLimit ? "开启" : "关闭"))
-                        .font(.caption.weight(.medium))
-                        .frame(width: 62, height: 26)
-                        .background(
-                            manager.preferAdapterAboveLimit ? Color.primary.opacity(0.14) : Color.primary.opacity(0.06),
-                            in: RoundedRectangle(cornerRadius: 7)
-                        )
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel(manager.text("超限优先适配器"))
+            Toggle(manager.text("超限优先适配器"), isOn: $manager.preferAdapterAboveLimit)
+                .toggleStyle(.switch)
+                .font(.caption)
+                .controlSize(.small)
+                .frame(minHeight: 30)
                 .accessibilityHint(manager.text("预览检测开关；不会修改供电路径"))
-            }
-            .frame(minHeight: 30)
             Text(manager.text("Preview 1 仅观察电量与电池电流，不会改变适配器供电或写入额外固件。"))
                 .font(.caption2)
                 .foregroundStyle(.secondary)

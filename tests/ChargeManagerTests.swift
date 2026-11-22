@@ -443,7 +443,7 @@ private enum ChargeManagerTests {
         )
         manager.start()
         try await wait { manager.currentState != nil && manager.backendReady }
-        try check(FirmwareLimitHelperProtocolVersion.isCompatible(backend.state.helperVersion)
+        try check(FirmwareLimitHelperProtocolVersion.isCompatible(backend.state.helperVersion, build: backend.state.helperBuildVersion)
                   && installs == 0 && backend.applyCount == 0,
                   "UI-only application upgrade reuses a compatible helper without password or SMC writes")
 

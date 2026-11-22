@@ -8,6 +8,7 @@ private enum ChargeManagerTests {
         UserDefaults.standard.set(false, forKey: "nativeFirmwareWriteConfirmed")
         UserDefaults.standard.set(80, forKey: "chargeLimit")
         UserDefaults.standard.removeObject(forKey: "showBatteryLevel")
+        UserDefaults.standard.removeObject(forKey: "preferAdapterAboveLimit")
         let manager = ChargeManager(backend: backend, autoInstallNativeHelper: false)
         manager.start()
         try await wait { manager.backendReady && manager.currentState != nil }
@@ -60,6 +61,14 @@ private enum ChargeManagerTests {
                   "battery power stays a separate state")
         manager.batteryStateText = "正在充电"
 
+        try check(!manager.preferAdapterAboveLimit && manager.aboveLimitPowerFinding == .disabled,
+                  "above-limit monitoring is off by default")
+        manager.preferAdapterAboveLimit = true
+        try check(UserDefaults.standard.bool(forKey: "preferAdapterAboveLimit"),
+                  "setting persists without SMC writes")
+        let observedReload = ChargeManager(backend: FixtureNativeFirmwareBackend(), autoInstallNativeHelper: false)
+        try check(observedReload.preferAdapterAboveLimit,
+                  "setting survives manager recreation")
         manager.requestLimit(85, immediate: true)
         try check(manager.limit == 85 && backend.applyCount == 0 && !manager.showNativeWriteConfirmation,
                   "changing the limit before activation only saves the local preference")
@@ -84,6 +93,17 @@ private enum ChargeManagerTests {
                   "limit success is concise and localized; raw helper audit text is never user-facing")
 
         manager.batteryPercent = 90
+        let aboveLimit = MauLeafBatterySnapshot(percent: 90, isCharging: false, isFullyCharged: false,
+            isACConnected: true, amperageMilliAmps: -400)
+        manager.recordPowerObservation(aboveLimit)
+        manager.recordPowerObservation(aboveLimit)
+        manager.recordPowerObservation(aboveLimit)
+        try check(manager.aboveLimitPowerFinding == .batteryDischarging && backend.applyCount == 1,
+                  "three consecutive discharge samples do not trigger firmware writes")
+        manager.recordPowerObservation(MauLeafBatterySnapshot(percent: 90, isCharging: false,
+            isFullyCharged: false, isACConnected: true, amperageMilliAmps: -5))
+        try check(manager.aboveLimitPowerFinding == .noSignificantDischarge && backend.applyCount == 1,
+                  "near-zero current resets discharge detection")
         try check(manager.fullChargeCardActionHint.localized(in: .english).contains("100%"),
                   "short Full charge title retains one-time behavior explanation on hover")
         manager.toggleFullChargeFromCard()
@@ -168,6 +188,7 @@ private enum ChargeManagerTests {
         try await testUnknownFirmwareStateBlocksQuit()
 
         UserDefaults.standard.removeObject(forKey: "nativeFirmwareWriteConfirmed")
+        UserDefaults.standard.removeObject(forKey: "preferAdapterAboveLimit")
         print("ChargeManagerTests: PASS (deferred first-use install, password-free Keep, safe read-only launch, recovery guards, existing restore and legacy coverage)")
     }
 

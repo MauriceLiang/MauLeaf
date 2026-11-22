@@ -12,12 +12,31 @@ import Foundation
     func oneTimeChargeStatus(withReply reply: @escaping (NSData?, NSString?) -> Void)
 }
 
+/// Compatibility is intentionally independent of the visible app version.
+/// A UI-only release never requires reinstalling the privileged Helper.
 enum FirmwareLimitHelperProtocolVersion {
     static let current = 5
+    static let supported: ClosedRange<Int> = 5...5
+
+    static func isCompatible(_ installed: Int) -> Bool {
+        supported.contains(installed)
+    }
+
+    static func canUpgradeFrom(_ installed: Int) -> Bool {
+        installed < supported.lowerBound
+    }
+}
+
+/// Version of the actual privileged executable, NOT the parent app release.
+/// Change this only when the Helper implementation ships a meaningful update.
+/// Older v5 Helpers omit this field and remain compatible.
+enum FirmwareLimitHelperBuildVersion {
+    static let current = "1.0.0"
 }
 
 struct FirmwareLimitHelperStateResponse: Codable, Equatable {
     let helperVersion: Int
+    let helperBuildVersion: String?
     let activationByte: UInt8
     let active: Bool
     let upper: Int
@@ -37,6 +56,7 @@ struct FirmwareLimitHelperStateResponse: Codable, Equatable {
         durableRecoveryRecorded: Bool = true
     ) {
         helperVersion = FirmwareLimitHelperProtocolVersion.current
+        helperBuildVersion = FirmwareLimitHelperBuildVersion.current
         activationByte = state.activationByte
         active = state.isActive
         upper = state.upper
@@ -70,7 +90,7 @@ struct FirmwareLimitHelperStateResponse: Codable, Equatable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case helperVersion, activationByte, active, upper, lower, writeSupported, writeBlockReason
+        case helperVersion, helperBuildVersion, activationByte, active, upper, lower, writeSupported, writeBlockReason
         case hasOriginalStateSnapshot, restorePending, restoreSupported, restoreBlockReason
     }
 
@@ -78,6 +98,7 @@ struct FirmwareLimitHelperStateResponse: Codable, Equatable {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         // Missing helperVersion identifies a previously installed helper.
         helperVersion = try container.decodeIfPresent(Int.self, forKey: .helperVersion) ?? 0
+        helperBuildVersion = try container.decodeIfPresent(String.self, forKey: .helperBuildVersion)
         activationByte = try container.decode(UInt8.self, forKey: .activationByte)
         active = try container.decode(Bool.self, forKey: .active)
         upper = try container.decode(Int.self, forKey: .upper)

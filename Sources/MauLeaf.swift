@@ -886,6 +886,36 @@ struct ContentView: View {
                 .help(manager.text("切换界面语言"))
             }
             .frame(minHeight: 30)
+
+            HStack(spacing: 8) {
+                settingsLabel("超限优先适配器")
+                Spacer(minLength: 8)
+                Button {
+                    manager.preferAdapterAboveLimit.toggle()
+                } label: {
+                    Text(manager.text(manager.preferAdapterAboveLimit ? "开启" : "关闭"))
+                        .font(.caption.weight(.medium))
+                        .frame(width: 62, height: 26)
+                        .background(
+                            manager.preferAdapterAboveLimit ? Color.primary.opacity(0.14) : Color.primary.opacity(0.06),
+                            in: RoundedRectangle(cornerRadius: 7)
+                        )
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(manager.text("超限优先适配器"))
+                .accessibilityHint(manager.text("预览检测开关；不会修改供电路径"))
+            }
+            .frame(minHeight: 30)
+            Text(manager.text("Preview 1 仅观察电量与电池电流，不会改变适配器供电或写入额外固件。"))
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            if manager.preferAdapterAboveLimit {
+                Text(manager.text(manager.aboveLimitPowerStatus))
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         }
         .padding(.vertical, 2)
     }
@@ -1028,6 +1058,15 @@ final class ChargeManager: ObservableObject {
     @Published var showBatteryLevel: Bool {
         didSet { UserDefaults.standard.set(showBatteryLevel, forKey: "showBatteryLevel") }
     }
+    /// Opt-in read-only monitoring only. Preview 1 cannot force wall power or
+    /// prevent the firmware from discharging above its configured upper limit.
+    @Published var preferAdapterAboveLimit: Bool {
+        didSet {
+            UserDefaults.standard.set(preferAdapterAboveLimit, forKey: "preferAdapterAboveLimit")
+            recomputeAboveLimitPowerFinding()
+        }
+    }
+    @Published private(set) var aboveLimitPowerFinding: AboveLimitPowerFinding = .disabled
     @Published private(set) var menuBarLeafStyle: MenuBarLeafStyle = .green
     @Published private(set) var fullOncePending = false
     @Published private(set) var fullOnceCancelRequested = false
@@ -1056,6 +1095,8 @@ final class ChargeManager: ObservableObject {
     private var started = false
     private var refreshTimer: Timer?
     private var limitDebounce: Task<Void, Never>?
+    private var latestBatteryObservation: MauLeafBatterySnapshot?
+    private var consecutiveDischargeReadings = 0
     @Published private(set) var currentState: FirmwareLimitHelperStateResponse?
     private var pendingAction: PendingAction?
     private var lastAction: PendingAction?
@@ -1104,12 +1145,59 @@ final class ChargeManager: ObservableObject {
         let saved = UserDefaults.standard.integer(forKey: "chargeLimit")
         limit = (50...95).contains(saved) ? saved : 80
         showBatteryLevel = UserDefaults.standard.bool(forKey: "showBatteryLevel")
+        preferAdapterAboveLimit = UserDefaults.standard.bool(forKey: "preferAdapterAboveLimit")
     }
 
     func text(_ message: AppText) -> String { message.localized(in: language) }
 
     var isActivelyCharging: Bool {
         batteryStateText == "正在充电"
+    }
+
+    var aboveLimitPowerStatus: AppText {
+        switch aboveLimitPowerFinding {
+        case .disabled: return "未开启检测"
+        case .limitInactive: return "等待启用限充"
+        case .oneTimeCharge: return "本次充满期间暂停检测"
+        case .disconnected: return "未接入适配器或供电状态未知"
+        case .unknownBattery: return "电量信息不可用"
+        case .withinLimit: return "电量未超过限充上限"
+        case .unknownCurrent: return "电池电流不可用，无法判断是否放电"
+        case .chargingAboveLimit: return "高于上限且检测到充电，请检查限充状态"
+        case .observingDischarge: return "检测到放电，正在连续确认"
+        case .batteryDischarging: return "连续检测到放电；当前预览版无法切换供电路径"
+        case .noSignificantDischarge: return "未检测到明显放电；无法确认适配器实际供电"
+        }
+    }
+
+    /// The observation is separate from firmware application. Never silently
+    /// reconfigure bf* registers or claim battery drain was prevented.
+    private func recomputeAboveLimitPowerFinding() {
+        let observation = latestBatteryObservation
+        let finding = AboveLimitPowerPolicy.classify(
+            enabled: preferAdapterAboveLimit,
+            firmwareActive: currentState?.active == true,
+            hasOriginalSnapshot: hasOriginalStateSnapshot,
+            oneTimeCharge: fullOncePending,
+            batteryPercent: observation?.percent,
+            upperLimit: currentState?.upper ?? limit,
+            externalConnected: observation?.isACConnected,
+            isCharging: observation?.isCharging == true,
+            amperageMilliAmps: observation?.amperageMilliAmps
+        )
+        if finding == .observingDischarge {
+            consecutiveDischargeReadings += 1
+            aboveLimitPowerFinding = consecutiveDischargeReadings >= AboveLimitPowerPolicy.dischargeSamplesRequired
+                ? .batteryDischarging : .observingDischarge
+        } else {
+            consecutiveDischargeReadings = 0
+            aboveLimitPowerFinding = finding
+        }
+    }
+
+    func recordPowerObservation(_ snapshot: MauLeafBatterySnapshot) {
+        latestBatteryObservation = snapshot
+        recomputeAboveLimitPowerFinding()
     }
 
     /// Keep battery digits neutral while charging; only an unplugged low
@@ -1410,6 +1498,7 @@ final class ChargeManager: ObservableObject {
         fullOnceCancelRequested = oneTime.cancelRequested
         backendReady = state.writeSupported
         restoreReady = state.restoreSupported
+        recomputeAboveLimitPowerFinding()
 
         if oneTime.pending, let restoreUpper = oneTime.restoreUpper {
             limit = restoreUpper
@@ -1781,6 +1870,7 @@ final class ChargeManager: ObservableObject {
             restoreReady = response.state.restoreSupported
             fullOncePending = response.oneTimePending
             fullOnceCancelRequested = false
+            recomputeAboveLimitPowerFinding()
             modeText = "限制充电已启用 · 上限 \(value)%"
             autoApplyFeedback = "已写入并读回 \(value)%"
             NSLog("MauLeaf firmware limit apply: %@", response.message)
@@ -2003,6 +2093,7 @@ final class ChargeManager: ObservableObject {
 
     private func readSystemBattery() {
         let snapshot = MauLeafBatteryStatusReader.read()
+        recordPowerObservation(snapshot)
         batteryPercent = snapshot.percent
         isAdapterConnected = snapshot.isACConnected == true
 

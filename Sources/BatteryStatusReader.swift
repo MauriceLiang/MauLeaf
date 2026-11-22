@@ -20,6 +20,8 @@ struct MauLeafBatterySnapshot: Equatable {
 }
 
 enum MauLeafBatteryStatusReader {
+    /// Conservative ioreg path retained for the root Helper's power/restore
+    /// safety checks. The UI uses a separate fast IOKit reader instead.
     static func read() -> MauLeafBatterySnapshot {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/sbin/ioreg")
@@ -28,7 +30,6 @@ enum MauLeafBatteryStatusReader {
         let output = Pipe()
         process.standardOutput = output
         process.standardError = FileHandle.nullDevice
-
         do {
             try process.run()
             let data = output.fileHandleForReading.readDataToEndOfFile()
@@ -46,7 +47,10 @@ enum MauLeafBatteryStatusReader {
               let battery = rows.first else {
             return unavailable
         }
+        return parseProperties(battery)
+    }
 
+    static func parseProperties(_ battery: [String: Any]) -> MauLeafBatterySnapshot {
         let current = integer(battery["CurrentCapacity"])
         let maximum = integer(battery["MaxCapacity"])
         let percent: Int?

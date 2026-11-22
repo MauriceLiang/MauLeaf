@@ -1085,6 +1085,10 @@ final class ChargeManager: ObservableObject {
 
     private let backend: NativeFirmwareBackend
     private let autoInstallNativeHelper: Bool
+    private let batteryReader: () -> MauLeafBatterySnapshot
+    private let observePowerSourceChanges: Bool
+    private var powerSourceObserver: MauLeafPowerSourceObserver?
+    private var powerRecheckTask: Task<Void, Never>?
     private let autoUpgradeInstalledHelperOnLaunch: Bool
     private var attemptedStartupHelperUpgrade = false
     private let exitLifecycleForTesting: ((QuitComponentPolicy) async throws -> Void)?
@@ -1126,10 +1130,16 @@ final class ChargeManager: ObservableObject {
                 "/Library/Application Support/MauLeaf"
             ].contains { fs.fileExists(atPath: $0) }
         },
-        hardwarePreflightForTesting: (() -> String?)? = nil
+        hardwarePreflightForTesting: (() -> String?)? = nil,
+        batteryReader: @escaping () -> MauLeafBatterySnapshot = { MauLeafFastBatteryReader.read() },
+        observePowerSourceChanges: Bool? = nil
     ) {
         self.backend = backend
         self.autoInstallNativeHelper = autoInstallNativeHelper
+        self.batteryReader = batteryReader
+        // Fixture managers default to no OS observer; the real app enables
+        // native events with the existing 20s background polling fallback.
+        self.observePowerSourceChanges = observePowerSourceChanges ?? autoInstallNativeHelper
         self.autoUpgradeInstalledHelperOnLaunch = autoUpgradeInstalledHelperOnLaunch ?? autoInstallNativeHelper
         self.exitLifecycleForTesting = exitLifecycleForTesting
         self.helperInstallerForTesting = helperInstallerForTesting
@@ -1416,6 +1426,16 @@ final class ChargeManager: ObservableObject {
         guard !started else { return }
         started = true
         readSystemBattery()
+        if observePowerSourceChanges {
+            let observer = MauLeafPowerSourceObserver { [weak self] in
+                self?.handlePowerSourceChange()
+            }
+            if observer.start() {
+                powerSourceObserver = observer
+            } else {
+                NSLog("MauLeaf IOKit power-source notification unavailable; periodic refresh remains active")
+            }
+        }
         Task { await refreshNativeState() }
         refreshTimer = Timer.scheduledTimer(withTimeInterval: 20, repeats: true) { [weak self] _ in
             Task { @MainActor in
@@ -1425,6 +1445,30 @@ final class ChargeManager: ObservableObject {
             }
         }
     }
+
+    /// On AC plug/unplug, update battery UI immediately (without waiting
+    /// for the 20-second timer). A couple of bounded follow-up reads absorb
+    /// transient lag while macOS updates AppleSmartBattery registry fields.
+    /// No privileged Helper calls are made for these telemetry events.
+    private func handlePowerSourceChange() {
+        guard started, !isPreparingToQuit else { return }
+        readSystemBattery()
+        powerRecheckTask?.cancel()
+        powerRecheckTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 350_000_000)
+            guard !Task.isCancelled, let self, !self.isPreparingToQuit else { return }
+            self.readSystemBattery()
+            try? await Task.sleep(nanoseconds: 850_000_000)
+            guard !Task.isCancelled, !self.isPreparingToQuit else { return }
+            self.readSystemBattery()
+        }
+    }
+
+    #if MAULEAF_TESTING
+    func simulatePowerSourceNotificationForTesting() {
+        handlePowerSourceChange()
+    }
+    #endif
 
     func setPanelVisible(_ visible: Bool) {
         if visible { refresh() }
@@ -2106,6 +2150,10 @@ final class ChargeManager: ObservableObject {
             isBusy = false
             refreshTimer?.invalidate()
             refreshTimer = nil
+            powerRecheckTask?.cancel()
+            powerRecheckTask = nil
+            powerSourceObserver?.stop()
+            powerSourceObserver = nil
             return true
         } catch {
             return cancelTermination("固件已恢复，但无法安全处理后台控制组件：\(AppText(error: error))")
@@ -2148,7 +2196,7 @@ final class ChargeManager: ObservableObject {
     }
 
     private func readSystemBattery() {
-        let snapshot = MauLeafBatteryStatusReader.read()
+        let snapshot = batteryReader()
         recordPowerObservation(snapshot)
         batteryPercent = snapshot.percent
         isAdapterConnected = snapshot.isACConnected == true

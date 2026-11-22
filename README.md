@@ -21,6 +21,9 @@
 
 **MauLeaf** 是一款免费的开源 **MacBook 电池充电管理 / macOS battery charge limiter**，基于 SwiftUI + AppKit 与自研 AppleSMC 控制器。它专注于 **充电上限**和**本次充满**：常驻菜单栏、绿色叶子图标、无需独立主窗口，不依赖 batt。
 
+> [!NOTE]
+> **Preview 3 电源状态响应修复：** 拔插电源后改为由 IOKit 事件触发更新，并使用快速原生电池读取；仍保留低频轮询兜底。该变化只影响供电状态显示，不会主动切换适配器供电。参见 [Preview 3 说明](docs/releases/v0.9.1-preview.3.md)。
+
 > [!IMPORTANT]
 > **0.9.1-preview.1 实验功能：超限优先适配器（仅检测）。** 设置中新增可开启的超限状态观察，读取电池电流并提示持续放电。**此预览版不会改变供电路径，也不能阻止超过上限时的放电。** 详情：[技术验证边界](docs/ABOVE_LIMIT_POWER.md) · [预览版说明](docs/releases/v0.9.1-preview.1.md)。
 

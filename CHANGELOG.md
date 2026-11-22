@@ -1,3 +1,10 @@
+## v0.9.1-preview.3 — 电源状态实时刷新
+
+- 新增 Apple IOKit 电源事件监听，拔插电源时无需等待 20 秒兜底轮询，立即刷新菜单栏充电/供电状态。
+- 应用端直接读取 I/O Registry，免除频繁创建 `ioreg` 进程；驱动短暂延迟时补两次限时读回。
+- 特权 Helper 保留原来的电源安全判断及版本，没有改变任何固件写入和退出卸载机制。
+- 补充拔电、插电即时状态和无额外特权调用的回归测试。详见 [预览说明](docs/releases/v0.9.1-preview.3.md)。
+
 ## v0.9.1-preview.1 (experimental)
 
 - Added an opt-in, read-only above-limit supply observation setting; current readings and repeated-discharge diagnostics, with localized results.

@@ -165,6 +165,7 @@ private enum ChargeManagerTests {
         try check(!backend.state.active && !backend.pending && backend.restoreCount == 1,
                   "quitting after manual disable leaves the original firmware state intact")
 
+        try await testImmediatePowerEventRefresh()
         try await testFirstLaunchDefersAuthorization()
         try await testMissingHelperQuitsWithoutAuthorization()
         try await testUnknownInstalledHelperDoesNotAssumeSafeState()
@@ -194,6 +195,50 @@ private enum ChargeManagerTests {
         UserDefaults.standard.removeObject(forKey: "nativeFirmwareWriteConfirmed")
         UserDefaults.standard.removeObject(forKey: "preferAdapterAboveLimit")
         print("ChargeManagerTests: PASS (deferred first-use install, password-free Keep, safe read-only launch, recovery guards, existing restore and legacy coverage)")
+    }
+
+    @MainActor
+    private static func testImmediatePowerEventRefresh() async throws {
+        let backend = FixtureNativeFirmwareBackend()
+        var battery = MauLeafBatterySnapshot(
+            percent: 91, isCharging: true, isFullyCharged: false,
+            isACConnected: true, amperageMilliAmps: 250
+        )
+        let manager = ChargeManager(
+            backend: backend, autoInstallNativeHelper: false,
+            batteryReader: { battery }, observePowerSourceChanges: false
+        )
+        manager.start()
+        try await wait { manager.currentState != nil }
+        try check(manager.isAdapterConnected && manager.isActivelyCharging,
+                  "startup reads AC power and charging state")
+        let helperReads = backend.readCount
+        battery = MauLeafBatterySnapshot(
+            percent: 91, isCharging: false, isFullyCharged: false,
+            isACConnected: false, amperageMilliAmps: -700
+        )
+        manager.simulatePowerSourceNotificationForTesting()
+        try check(!manager.isAdapterConnected && !manager.isActivelyCharging
+                  && manager.batteryStateText == "电池供电"
+                  && manager.popoverPowerStatus.source == "电池供电",
+                  "unplug updates power state synchronously without waiting for timer")
+        battery = MauLeafBatterySnapshot(
+            percent: 91, isCharging: true, isFullyCharged: false,
+            isACConnected: true, amperageMilliAmps: 400
+        )
+        manager.simulatePowerSourceNotificationForTesting()
+        try check(manager.isAdapterConnected && manager.isActivelyCharging,
+                  "replugging reports AC power immediately")
+        try await Task.sleep(nanoseconds: 1_350_000_000)
+        try check(backend.readCount == helperReads && backend.applyCount == 0,
+                  "battery-source events must not invoke the root Helper or write SMC")
+        battery = MauLeafBatterySnapshot(
+            percent: 90, isCharging: false, isFullyCharged: false,
+            isACConnected: false, amperageMilliAmps: -500
+        )
+        manager.refresh()
+        try check(!manager.isAdapterConnected && manager.batteryPercent == 90,
+                  "the original manual refresh remains usable when events are unavailable")
     }
 
     @MainActor

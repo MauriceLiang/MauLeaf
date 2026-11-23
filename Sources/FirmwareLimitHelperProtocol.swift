@@ -73,6 +73,12 @@ struct FirmwareLimitHelperStateResponse: Codable, Equatable {
     let restoreSupported: Bool
     let restoreBlockReason: String?
 
+    /// Reported by the v6/1.2 Helper when firmware exposes inactive
+    /// zeroed thresholds after boot. This is not a valid saved limit.
+    var isInactiveUninitialized: Bool {
+        activationByte == 0x00 && upper == 0 && lower == 0
+    }
+
     init(
         state: FirmwareLimitState,
         identity: FirmwareLimitDeviceIdentity? = nil,

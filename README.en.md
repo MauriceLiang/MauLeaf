@@ -1,3 +1,5 @@
+> **Preview 11:** Hiding Power Flow now keeps a compact, read-only supply status and the exact same state badge shown above the expanded diagram. Re-enable the option to restore live wattage visualization; firmware behavior is unchanged. [Release notes](docs/releases/v0.9.1-preview.11.md).
+
 > **Preview 10:** Live power flow samples automatically at approximately 2-second intervals while the panel is open, with read-only SMC fallback. The manual refresh selector is removed. Quitting now follows the persistent **Remove components on quit** preference (Off by default) without the repeated modal. Enable it and quit successfully before uninstalling the app. [Release notes](docs/releases/v0.9.1-preview.10.md).
 
 > **Preview 9:** Power Flow refresh is configurable (2–60 seconds, default 5 seconds) and runs only while the menu panel is open. The separate firmware safety poll is unchanged. Shorter Dynamic Hold help notes that fixed-limit mode may show delayed unplug detection on the tested Mac. [Release notes](docs/releases/v0.9.1-preview.9.md).

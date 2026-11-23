@@ -133,11 +133,21 @@ final class FirmwareLimitHelperService: NSObject, FirmwareLimitHelperProtocol {
             guard originalSnapshotLoadError == nil else {
                 throw FirmwareLimitCoreError.invalidOriginalSnapshot
             }
-            let state = try withHardwareWatchdog { try controller.readState() }
+            let state = try withHardwareWatchdog { try readStateForDisplay() }
             let response = stateResponse(state)
             reply(try JSONEncoder().encode(response) as NSData, nil)
         } catch {
             reply(nil, error.localizedDescription as NSString)
+        }
+    }
+
+    /// Only one invalid hardware shape (bfF0=active, upper/lower=0/0)
+    /// is exposed to the UI as a *read-only* recovery diagnosis.
+    /// Invalid ranges remain invalid for normal firmware writes.
+    private func readStateForDisplay() throws -> FirmwareLimitState {
+        do { return try controller.readState() }
+        catch FirmwareLimitCoreError.invalidStoredBand {
+            return try controller.readActiveZeroedForRecovery()
         }
     }
 
@@ -448,7 +458,12 @@ final class FirmwareLimitHelperService: NSObject, FirmwareLimitHelperProtocol {
             removePersistedJob()
             startMonitoring()
 
-            let current = try controller.readState()
+            let current = try readStateForDisplay()
+            if current.isActiveZeroed && !isOnACPower() {
+                throw FirmwareLimitCoreError.transportFailure(
+                    "Active zeroed firmware cannot be restored on battery power; original snapshot retained for verified AC recovery."
+                )
+            }
             let restored: FirmwareLimitState
             if current == requested.state {
                 // All keys already match: verification requires no write
@@ -700,7 +715,8 @@ final class FirmwareLimitHelperService: NSObject, FirmwareLimitHelperProtocol {
 
         if let snapshot, snapshot.restoreRequested {
             do {
-                let current = try controller.readState()
+                let current = try readStateForDisplay()
+                if current.isActiveZeroed && !isOnACPower() { return }
                 if current != snapshot.state {
                     let permit = try writeRestorePermit(for: snapshot)
                     _ = try controller.restore(

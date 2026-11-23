@@ -343,6 +343,103 @@ private enum FirmwareLimitHelperServiceTests {
                      "verified deferred restore removes its pending markers")
         try restartedOfflineService.verifyReadyForDeferredRemoval()
 
-        print("FirmwareLimitHelperServiceTests: PASS (snapshot, offline legacy restore, deferred retry, uninstall verification)")
+        // Simulate a full system reboot while a managed limit was active.
+        // On this firmware, bfF0 may be inactive while both thresholds are 0.
+        let bootDir = directory.appendingPathComponent("reboot-zero", isDirectory: true)
+        try FileManager.default.createDirectory(at: bootDir, withIntermediateDirectories: true)
+        let bootTransport = HelperFakeTransport()
+        let bootSnapshotURL = bootDir.appendingPathComponent("original-firmware-state.json")
+        func bootService() -> FirmwareLimitHelperService {
+            FirmwareLimitHelperService(
+                transport: bootTransport,
+                identityProvider: { identity },
+                isOnACPower: { true },
+                isAdministrator: { true },
+                batteryObservation: { observation },
+                pmsetReportsBatteryPower: { false },
+                isChargingNow: { false },
+                jobURL: bootDir.appendingPathComponent("one-time-charge.json"),
+                originalStateURL: bootSnapshotURL,
+                restoreRequestURL: bootDir.appendingPathComponent("restore-original-state.pending"),
+                backgroundRecoveryURL: bootDir.appendingPathComponent("background-recovery.pending"),
+                legacyRestoreURL: bootDir.appendingPathComponent("legacy-restore.json"),
+                monitorEnabled: false
+            )
+        }
+        let bootInitial = bootService()
+        var bootAppliedData: NSData?
+        var bootAppliedError: NSString?
+        bootInitial.applyLimit(upper: 85, lower: 83, confirmed: true) {
+            bootAppliedData = $0; bootAppliedError = $1
+        }
+        precondition(bootAppliedError == nil && bootAppliedData != nil
+                     && FileManager.default.fileExists(atPath: bootSnapshotURL.path),
+                     "managed charge limit captures a durable original snapshot")
+
+        bootTransport.activation = 0
+        bootTransport.upper = 0
+        bootTransport.lower = 0
+        let rebooted = bootService()
+        let writesBeforeRead = bootTransport.writes.count
+        var bootReadData: NSData?
+        var bootReadError: NSString?
+        rebooted.readState { bootReadData = $0; bootReadError = $1 }
+        precondition(bootReadError == nil && bootReadData != nil,
+                     "boot-time inactive zeroed firmware is reported, not treated as a broken helper")
+        let bootState = try JSONDecoder().decode(
+            FirmwareLimitHelperStateResponse.self, from: bootReadData! as Data
+        )
+        precondition(bootState.isInactiveUninitialized && bootState.hasOriginalStateSnapshot
+                     && bootState.writeSupported && bootState.restoreSupported
+                     && bootTransport.writes.count == writesBeforeRead,
+                     "zero/zero is read-only, with saved snapshot still available for managed recovery")
+
+        var bootRecoveredData: NSData?
+        var bootRecoveredError: NSString?
+        rebooted.applyLimit(upper: 80, lower: 78, confirmed: true) {
+            bootRecoveredData = $0; bootRecoveredError = $1
+        }
+        precondition(bootRecoveredError == nil && bootRecoveredData != nil
+                     && bootTransport.activation == 2 && bootTransport.upper == 80
+                     && bootTransport.lower == 78 && FileManager.default.fileExists(atPath: bootSnapshotURL.path),
+                     "only the already-managed device can reapply its target without deleting original restore data")
+
+        bootTransport.activation = 0
+        bootTransport.upper = 0
+        bootTransport.lower = 0
+        var bootRestoredData: NSData?
+        var bootRestoredError: NSString?
+        rebooted.restoreOriginalState { bootRestoredData = $0; bootRestoredError = $1 }
+        precondition(bootRestoredError == nil && bootRestoredData != nil
+                     && bootTransport.activation == 0 && bootTransport.upper == 80
+                     && bootTransport.lower == 78
+                     && !FileManager.default.fileExists(atPath: bootSnapshotURL.path),
+                     "exact original snapshot can be restored from post-reboot 0/0 and only then deleted")
+
+        // Without any snapshot, 0/0 must not be captured as the previous
+        // firmware configuration or authorize a new privileged write.
+        bootTransport.activation = 0
+        bootTransport.upper = 0
+        bootTransport.lower = 0
+        let noSnapshotService = bootService()
+        let beforeRejected = bootTransport.writes.count
+        var noSnapshotStateData: NSData?
+        noSnapshotService.readState { noSnapshotStateData = $0 }
+        let noSnapshotState = try JSONDecoder().decode(
+            FirmwareLimitHelperStateResponse.self, from: noSnapshotStateData! as Data
+        )
+        precondition(noSnapshotState.isInactiveUninitialized
+                     && !noSnapshotState.hasOriginalStateSnapshot
+                     && !noSnapshotState.writeSupported,
+                     "unmanaged boot zero/zero remains read-only and blocks new activation")
+        var noSnapshotError: NSString?
+        noSnapshotService.applyLimit(upper: 80, lower: 78, confirmed: true) {
+            _, error in noSnapshotError = error
+        }
+        precondition(noSnapshotError != nil && bootTransport.writes.count == beforeRejected
+                     && !FileManager.default.fileExists(atPath: bootSnapshotURL.path),
+                     "unmanaged zero/zero neither writes SMC nor creates an invalid original snapshot")
+
+        print("FirmwareLimitHelperServiceTests: PASS (snapshot, offline legacy restore, deferred retry, boot zero recovery, uninstall verification)")
     }
 }

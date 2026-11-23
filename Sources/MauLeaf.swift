@@ -1291,6 +1291,8 @@ final class ChargeManager: ObservableObject {
         automaticUnplugRestoreTask?.cancel()
         automaticUnplugRestoreTask = nil
         guard started, !isPreparingToQuit, !isAdapterConnected,
+              latestBatteryObservation?.isACConnected == false,
+              dynamicLastAC == false,
               let state = currentState, state.hasOriginalStateSnapshot,
               !state.restorePending, !isBusy, state.restoreSupported else { return }
         if let retry = automaticUnplugRetryAfter, retry > Date() { return }
@@ -1900,7 +1902,8 @@ final class ChargeManager: ObservableObject {
             dynamicSessionUpper = state.upper
         }
         if started {
-            if !isAdapterConnected && state.hasOriginalStateSnapshot && !state.restorePending {
+            if latestBatteryObservation?.isACConnected == false
+                && state.hasOriginalStateSnapshot && !state.restorePending {
                 scheduleUnpluggedFirmwareRestore()
             } else if isAdapterConnected {
                 if state.hasOriginalStateSnapshot && !oneTime.pending

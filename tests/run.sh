@@ -199,6 +199,9 @@ grep -Fq '.disabled(manager.isDynamicHoldSwitchLocked)' <<< "$POPOVER_SOURCE"
 [[ "$(grep -Fc '.pickerStyle(.segmented)' <<< "$POPOVER_SOURCE")" -eq 4 ]]
 [[ "$(grep -Fc '.frame(width: 142)' <<< "$POPOVER_SOURCE")" -eq 4 ]]
 grep -Fq 'if manager.showPowerFlow' <<< "$POPOVER_SOURCE"
+grep -Fq 'MauLeafPowerStatusRow(mode: manager.powerFlow.mode' <<< "$POPOVER_SOURCE"
+grep -Fq 'MauLeafPowerStatusBadge(mode: flow.mode, language: language)' "$ROOT/Sources/PowerFlowView.swift"
+grep -Fq 'MauLeafPowerStatusBadge(mode: mode, language: language)' "$ROOT/Sources/PowerFlowView.swift"
 if grep -Fq 'title: "供电状态"' <<< "$POPOVER_SOURCE"; then
     echo "Power source is already shown by the graph and must not be repeated" >&2
     exit 1

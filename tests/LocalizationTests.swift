@@ -46,6 +46,29 @@ struct LocalizationTests {
             check(!value.isEmpty, "translation is not empty: \(key)")
         }
 
+        // Audit every static, Chinese-keyed visible settings label and
+        // manager.text(...) call so missing new English keys fail CI instead
+        // of silently falling back to Chinese in the English popover.
+        let appSourceURL = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("Sources/MauLeaf.swift")
+        let appSource = try String(contentsOf: appSourceURL, encoding: .utf8)
+        let staticUIKeyPattern = try NSRegularExpression(
+            pattern: #"(?:settingsLabel|manager\.text)\("([^"\\]+)"\)"#
+        )
+        let sourceRange = NSRange(appSource.startIndex..., in: appSource)
+        let staticMatches = staticUIKeyPattern.matches(in: appSource, range: sourceRange)
+        check(!staticMatches.isEmpty, "the visible UI localization audit found source keys")
+        for match in staticMatches {
+            guard let range = Range(match.range(at: 1), in: appSource) else { continue }
+            let key = String(appSource[range])
+            guard key.rangeOfCharacter(from: .init(charactersIn: "一-龥")) != nil
+                || key.unicodeScalars.contains(where: { (0x3400...0x9FFF).contains($0.value) })
+            else { continue }
+            check(chinese[key] == key && translations[key] != nil && translations[key] != key,
+                  "static visible UI text lacks a distinct English translation: \(key)")
+        }
+
         let limit: AppText = "原生固件限充至 \(85)%"
         check(limit.source == "原生固件限充至 85%", "Chinese interpolation preserves the percent sign")
         check(limit.localized(in: .english) == "Native firmware limit: 85%", "English native firmware status")

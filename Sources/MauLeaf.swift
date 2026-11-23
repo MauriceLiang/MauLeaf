@@ -1141,6 +1141,7 @@ final class ChargeManager: ObservableObject {
     private var dynamicReconcileTask: Task<Void, Never>?
     private var dynamicRetryAfter: Date?
     private let dynamicSettleInterval: TimeInterval
+    private let rebootSettleInterval: TimeInterval
     private var lastDynamicAppliedUpper: Int?
     @Published private(set) var currentState: FirmwareLimitHelperStateResponse?
     private var pendingAction: PendingAction?
@@ -1175,12 +1176,14 @@ final class ChargeManager: ObservableObject {
         hardwarePreflightForTesting: (() -> String?)? = nil,
         batteryReader: @escaping () -> MauLeafBatterySnapshot = { MauLeafFastBatteryReader.read() },
         observePowerSourceChanges: Bool? = nil,
-        dynamicSettleInterval: TimeInterval = 8.0
+        dynamicSettleInterval: TimeInterval = 8.0,
+        rebootSettleInterval: TimeInterval = 15.0
     ) {
         self.backend = backend
         self.autoInstallNativeHelper = autoInstallNativeHelper
         self.batteryReader = batteryReader
         self.dynamicSettleInterval = max(0, dynamicSettleInterval)
+        self.rebootSettleInterval = max(0, rebootSettleInterval)
         // Fixture managers default to no OS observer; the real app enables
         // native events with the existing 20s background polling fallback.
         self.observePowerSourceChanges = observePowerSourceChanges ?? autoInstallNativeHelper
@@ -1307,7 +1310,9 @@ final class ChargeManager: ObservableObject {
         let stableSince = dynamicACStableSince ?? Date()
         // Allow the SMC more time to finish its boot-time initialization
         // before reconfiguring any managed firmware limits.
-        let requiredStableTime = bootReapply ? max(15, dynamicSettleInterval) : dynamicSettleInterval
+        let requiredStableTime = bootReapply
+            ? max(rebootSettleInterval, dynamicSettleInterval)
+            : dynamicSettleInterval
         let waitSeconds = max(0, requiredStableTime - Date().timeIntervalSince(stableSince))
         dynamicReconcileTask = Task { [weak self] in
             try? await Task.sleep(nanoseconds: UInt64(waitSeconds * 1_000_000_000))
@@ -1702,8 +1707,27 @@ final class ChargeManager: ObservableObject {
                 modeText = "固件控制状态未知"
                 statusMessage = "无法连接固件控制服务；请保留恢复组件：\(AppText(error: error))"
                 isError = true
+                // Preview 4 Helper could not report inactive 0/0 after boot
+                // and fails before it can advertise its build version.
+                // Replace that known older binary once, using the existing
+                // root-preserving installer. Never classify arbitrary remote
+                // failures as a clean or reinstallable firmware state.
+                if isLegacyInactiveZeroFailure(error)
+                    && autoUpgradeInstalledHelperOnLaunch
+                    && !attemptedStartupHelperUpgrade
+                    && (autoInstallNativeHelper || helperInstallerForTesting != nil)
+                    && helperArtifactsPresent() {
+                    attemptedStartupHelperUpgrade = true
+                    Task { await repairNativeHelperAfterUserAction() }
+                }
             }
         }
+    }
+
+    private func isLegacyInactiveZeroFailure(_ error: Error) -> Bool {
+        guard let failure = error as? FirmwareLimitHelperClientError,
+              case .remote(let message) = failure else { return false }
+        return message.contains("Stored firmware limits are invalid: upper 0%, lower 0%.")
     }
 
     private func updateFromNativeState(

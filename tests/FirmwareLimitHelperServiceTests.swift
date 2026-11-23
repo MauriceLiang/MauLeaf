@@ -424,7 +424,7 @@ private enum FirmwareLimitHelperServiceTests {
         let noSnapshotService = bootService()
         let beforeRejected = bootTransport.writes.count
         var noSnapshotStateData: NSData?
-        noSnapshotService.readState { noSnapshotStateData = $0 }
+        noSnapshotService.readState { data, _ in noSnapshotStateData = data }
         let noSnapshotState = try JSONDecoder().decode(
             FirmwareLimitHelperStateResponse.self, from: noSnapshotStateData! as Data
         )

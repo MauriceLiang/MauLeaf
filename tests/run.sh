@@ -10,6 +10,9 @@ export SWIFT_MODULECACHE_PATH="${SWIFT_MODULECACHE_PATH:-$TMP/ModuleCache}"
 swiftc "$ROOT/Sources/BatteryStatusReader.swift" "$ROOT/tests/BatteryStatusReaderTests.swift" -o "$TMP/batterystatusreadertests"
 "$TMP/batterystatusreadertests"
 
+swiftc "$ROOT/Sources/BatteryStatusReader.swift" "$ROOT/Sources/PowerFlowModel.swift" "$ROOT/tests/PowerFlowModelTests.swift" -o "$TMP/powerflowmodeltests"
+"$TMP/powerflowmodeltests"
+
 swiftc "$ROOT/Sources/AboveLimitPowerPolicy.swift" "$ROOT/tests/AboveLimitPowerPolicyTests.swift" -o "$TMP/abovelimitpowerpolicytests"
 
 swiftc "$ROOT/Sources/DynamicHoldPolicy.swift" "$ROOT/tests/DynamicHoldPolicyTests.swift" -o "$TMP/dynamicholdpolicytests"
@@ -43,7 +46,7 @@ if [[ "$(uname -s)" == Darwin ]]; then
     swiftc -parse-as-library -D MAULEAF_TESTING \
         -framework SwiftUI -framework AppKit -framework Combine -framework IOKit \
         "$ROOT/Sources/MauLeaf.swift" "$ROOT/Sources/AppLocalization.swift" \
-        "$ROOT/Sources/BatteryStatusReader.swift" "$ROOT/Sources/FastBatteryReader.swift" "$ROOT/Sources/PowerSourceObserver.swift" "$ROOT/Sources/AboveLimitPowerPolicy.swift" "$ROOT/Sources/DynamicHoldPolicy.swift" "$ROOT/Sources/FirmwareLimitCore.swift" \
+        "$ROOT/Sources/BatteryStatusReader.swift" "$ROOT/Sources/PowerFlowModel.swift" "$ROOT/Sources/PowerFlowView.swift" "$ROOT/Sources/FastBatteryReader.swift" "$ROOT/Sources/PowerSourceObserver.swift" "$ROOT/Sources/AboveLimitPowerPolicy.swift" "$ROOT/Sources/DynamicHoldPolicy.swift" "$ROOT/Sources/FirmwareLimitCore.swift" \
         "$ROOT/Sources/FirmwareLimitReconciliation.swift" "$ROOT/Sources/SystemFirmwareReader.swift" "$ROOT/Sources/FirmwareLimitRuntime.swift" \
         "$ROOT/Sources/FirmwareLimitHelperProtocol.swift" \
         "$ROOT/Sources/FirmwareLimitHelperClient.swift" \
@@ -65,7 +68,7 @@ PLIST
     swiftc -parse-as-library -D MAULEAF_TESTING -D MAULEAF_LAYOUT_TESTING \
         -framework SwiftUI -framework AppKit -framework Combine -framework IOKit \
         "$ROOT/Sources/MauLeaf.swift" "$ROOT/Sources/AppLocalization.swift" \
-        "$ROOT/Sources/BatteryStatusReader.swift" "$ROOT/Sources/FastBatteryReader.swift" "$ROOT/Sources/PowerSourceObserver.swift" "$ROOT/Sources/AboveLimitPowerPolicy.swift" "$ROOT/Sources/DynamicHoldPolicy.swift" "$ROOT/Sources/FirmwareLimitCore.swift" \
+        "$ROOT/Sources/BatteryStatusReader.swift" "$ROOT/Sources/PowerFlowModel.swift" "$ROOT/Sources/PowerFlowView.swift" "$ROOT/Sources/FastBatteryReader.swift" "$ROOT/Sources/PowerSourceObserver.swift" "$ROOT/Sources/AboveLimitPowerPolicy.swift" "$ROOT/Sources/DynamicHoldPolicy.swift" "$ROOT/Sources/FirmwareLimitCore.swift" \
         "$ROOT/Sources/FirmwareLimitReconciliation.swift" "$ROOT/Sources/SystemFirmwareReader.swift" "$ROOT/Sources/FirmwareLimitRuntime.swift" \
         "$ROOT/Sources/FirmwareLimitHelperProtocol.swift" \
         "$ROOT/Sources/FirmwareLimitHelperClient.swift" \
@@ -76,7 +79,7 @@ fi
 
 swiftc -frontend -parse \
     "$ROOT/Sources/MauLeaf.swift" "$ROOT/Sources/AppLocalization.swift" \
-    "$ROOT/Sources/BatteryStatusReader.swift" "$ROOT/Sources/FastBatteryReader.swift" "$ROOT/Sources/PowerSourceObserver.swift" "$ROOT/Sources/AboveLimitPowerPolicy.swift" "$ROOT/Sources/DynamicHoldPolicy.swift" "$ROOT/Sources/FirmwareLimitCore.swift" "$ROOT/Sources/FirmwareLimitReconciliation.swift" \
+    "$ROOT/Sources/BatteryStatusReader.swift" "$ROOT/Sources/PowerFlowModel.swift" "$ROOT/Sources/PowerFlowView.swift" "$ROOT/Sources/FastBatteryReader.swift" "$ROOT/Sources/PowerSourceObserver.swift" "$ROOT/Sources/AboveLimitPowerPolicy.swift" "$ROOT/Sources/DynamicHoldPolicy.swift" "$ROOT/Sources/FirmwareLimitCore.swift" "$ROOT/Sources/FirmwareLimitReconciliation.swift" \
     "$ROOT/Sources/SystemFirmwareReader.swift" "$ROOT/Sources/FirmwareLimitRuntime.swift" "$ROOT/Sources/FirmwareLimitSMCTransport.swift" \
     "$ROOT/Sources/FirmwareLimitHelperProtocol.swift" "$ROOT/Sources/FirmwareLimitHelperClient.swift" \
     "$ROOT/Sources/FirmwareLimitHelperService.swift" "$ROOT/Sources/FirmwareLimitHelperMain.swift"

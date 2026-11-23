@@ -119,6 +119,9 @@ struct LocalizationTests {
         check(translations["目标 %@%% · 临时上限 %@%%"] != nil
               && translations["动态保电已应用：目标 %@%%，临时上限 %@%%。"] != nil,
               "Dynamic Hold retains concise localized numeric ceilings")
+        check(chinese["关闭后保留供电状态，仅隐藏供电流向图"] == "关闭后保留供电状态，仅隐藏供电流向图"
+              && translations["关闭后保留供电状态，仅隐藏供电流向图"] == "When disabled, keep the power status visible and hide only the flow diagram.",
+              "power details setting clearly explains that the compact status remains")
         check(translations["退出 MauLeaf"] == "Quit MauLeaf"
               && translations["供电状态"] == "Power"
               && translations["限制充电"] == "Charge limit"

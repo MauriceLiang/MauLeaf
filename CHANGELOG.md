@@ -1,77 +1,15 @@
-## v0.9.1-preview.11 — 关闭供电详情仍保留状态
-
-- 在设置中关闭供电详情后，顶部改为紧凑的「供电状态 + 状态胶囊」，仅隐藏功率流向图；展开与收起共用同一套状态文案和颜色。
-- 关闭图表后依靠现有电源事件和 20 秒兜底检查更新状态，不启动 2 秒功率图采样；开启后仍保留 Preview 10 的快速刷新。
-- 补充中英文、明暗主题、五种供电模式与收起高度回归测试；固件控制及退出组件设置不变。
-- [Preview 11 说明](docs/releases/v0.9.1-preview.11.md)。
-
-## v0.9.1-preview.10 — 实时供电刷新与退出时移除组件
-
-- 参考 Status Trio，供电流向图改为菜单面板打开时自动每 2 秒读取只读功率 SMC 通道，关闭面板停止；移除手动刷新间隔设置。
-- 设置新增「退出时移除组件」开关，默认关闭：关闭时恢复固件并保留组件，开启时恢复固件、验证后清理 Helper/LaunchDaemon/脚本；正常退出不再重复询问。
-- 保留固件恢复失败时的安全阻断与异常确认。建议卸载前开启清理并正常退出确认后再删除 App。
-- 20 秒固件安全轮询、动态保电及本次充满控制逻辑不变。详见 [Preview 10](docs/releases/v0.9.1-preview.10.md)。
-
-## v0.9.1-preview.9 — 供电刷新间隔与动态保电说明
-
-- 设置新增供电详情刷新间隔（2 / 5 / 10 / 20 / 30 / 60 秒，默认 5 秒），只在弹出面板打开且图表可见时进行额外的只读功率采样；关闭后立即停止。
-- 保留 20 秒固件/Helper 安全状态轮询及拔插电 IOKit 事件实时响应；调节功率刷新不会增加固件写入、特权操作或后台耗电。
-- 动态保电说明缩短，并提示关闭后在已测试机型上可能出现拔电识别延迟。保留目标与临时上限数字，移除不适用于现有真机验证结果的笼统「供电效果待验证」说明。
-- 增加持久化、定时器生命周期、语言资源检查，详见 [Preview 9](docs/releases/v0.9.1-preview.9.md)。
-
-## v0.9.1-preview.8 — Status Trio 风格紧凑供电图
-
-- 参考 [Status Trio](https://github.com/lingyired/status-trio) 的紧凑节点、渐变比例流带及半透明卡片接缝遮罩，将 Preview 7 的宽大彩色卡片改成更轻巧的原生 SwiftUI 供电图。
-- 保留电池/适配器/充电/电池辅助四种供电模式和节点瓦数；仅可靠的完整采样绘制比例流带，缺失和冲突读数不虚构功率。
-- 扩展中英文、深浅色、328pt 及部分缺失功率的布局测试；无 Helper/固件/权限/轮询改动。用户已验证动态保电下的供电行为，但普通限充拔电延迟属于另一个待查问题。
-- 详见 [Preview 8 说明](docs/releases/v0.9.1-preview.8.md)。
-
-## v0.9.1-preview.7 — 顶部供电流向图
-
-- 使用原生 SwiftUI 在顶部直接显示电池、适配器与系统的功率流向，替代原有大号电量数字与重复的供电状态行；图下方不再增加汇总条。
-- 对电池供电、适配器供电、正在充电以及插电仍放电四种情况进行区分；图内节点显示功率，无法获取的指标显示“—”。
-- 只读从 AppleSmartBattery 电压/电流、PowerTelemetryData 获取实际功率，不把充电器额定瓦数当成输入功率；流线仅用于方向示意。
-- 设置中「显示当前电量」改为默认开启的「显示供电详情」；保持英文/中文适配及不可滚动弹窗。
-- 只修改 App 展示和只读采样，不修改固件与 Helper v6 / 1.3.0。详见 [Preview 7](docs/releases/v0.9.1-preview.7.md)。
-
-## v0.9.1-preview.6 — 拔电恢复原始固件与条件重插电
-
-- **拔电后真实关闭限充**：系统确认转为电池供电时，经 Helper 使用受验证的离线恢复路径将原始 `bfF0/bfD0/bfE0` 精确恢复，不再仅停止动态保电或修改菜单栏状态。写回及读回验证失败时保留快照及后台任务。
-- 保存用户是否明确开启限充的独立意图：重新插电后仅在原恢复完成、AC 稳定且此前已授权的情况下重新启用，手动关闭或正常退出则不自动重新开启。
-- 「本次充满」期间拔电同样先安全恢复原始固件并终止本次任务；不会在下次插电自动重新开始本次充满。
-- Helper build 1.3.0（XPC v6），支持仅凭原始可信快照从重启后激活且无效的 `0/0` 状态通过严格离线许可恢复；其余未知状态继续禁止新写入。
-- 已知 macOS 拔电事件本身可能延迟 4–6 秒，无法保证在物理拔出瞬间恢复，详见 [Preview 6 说明](docs/releases/v0.9.1-preview.6.md)。
-
-## v0.9.1-preview.5 — 重启后 0/0 固件状态与安全恢复
-
-- 修复 macOS 重启后 SMC 若报告非活动且上下限 `0/0`，旧 Helper 直接拒绝读取、导致 MauLeaf 状态未知的问题。仅对此特定状态启用只读识别，活动 `0/0`、部分为零和其他损坏寄存器仍严格拒绝。
-- 存在有效身份匹配的原始快照时，待电源连续稳定并再次读回后尝试恢复原先的用户限充目标；未保存快照时严禁从 `0/0` 自动创建新快照或写入 SMC。
-- 确认原始恢复快照后可从非活动 `0/0` 逐项恢复原始区间；删除快照前仍需精确读回验证。
-- 修复旧 Helper 在返回版本信息前因 `0/0` 报错而无法自动升级的问题；一次授权升级，无其他自动重装。独立 Helper 版本升为 `1.2.0`，协议保持 v6。
-- 新增重启、兼容、无快照、恢复、禁止危险写入测试。详见 [Preview 5 说明](docs/releases/v0.9.1-preview.5.md)。
-
-## v0.9.1-preview.3 — 电源状态实时刷新
-
-- 新增 Apple IOKit 电源事件监听，拔插电源时无需等待 20 秒兜底轮询，立即刷新菜单栏充电/供电状态。
-- 应用端直接读取 I/O Registry，免除频繁创建 `ioreg` 进程；驱动短暂延迟时补两次限时读回。
-- 特权 Helper 保留原来的电源安全判断及版本，没有改变任何固件写入和退出卸载机制。
-- 补充拔电、插电即时状态和无额外特权调用的回归测试。详见 [预览说明](docs/releases/v0.9.1-preview.3.md)。
-
-## v0.9.1-preview.1 (experimental)
-
-- Added an opt-in, read-only above-limit supply observation setting; current readings and repeated-discharge diagnostics, with localized results.
-- This preview does **not** switch adapter power or prevent discharge. No new SMC writes or helper protocol changes. Existing snapshot restoration is unchanged.
-- See [bilingual preview notes](docs/releases/v0.9.1-preview.1.md) and [hardware-validation gate](docs/ABOVE_LIMIT_POWER.md).
-
-## v0.9.1-preview.2 (Helper lifecycle fixes)
-
-- Helper build version is independent of app release. Compatible installed protocol v5 is reused on startup with no password for UI-only changes; older incompatible Helpers are upgraded once with macOS administrator authorization.
-- Installer validates and stages replacement binaries, preserves restoration snapshots and rolls back on failure. Newer unknown protocols are not downgraded.
-- Cross-version uninstall no longer rejects a trusted signed root Helper solely because its bytes differ from the app bundle. Firmware restoration and readback verification remain mandatory.
-- Experimental above-limit observation now matches the other segmented Settings controls. It remains read-only and cannot prevent battery discharge.
-- See [bilingual preview notes](docs/releases/v0.9.1-preview.2.md).
-
 # MauLeaf 更新日志
+
+## 1.0.0 — 2026-11-23 正式版
+
+- 基于合并至 `main` 的 `v0.9.1-preview.11` 功能升级为正式版，完整保留原生 SMC 限充、本次充满、动态保电和受验证的固件恢复机制。
+- 供电详情使用原生 SwiftUI 流向图，菜单面板打开时以约 2 秒间隔读取只读实时功率；关闭详情仅隐藏流向图，继续显示简洁供电状态。
+- 动态保电支持超限时保持电量；在已测试设备中启用时拔电反馈正常，但固定限充模式的拔电识别延迟仍待解决（见 Issue #53）。
+- 退出时移除组件改为设置中的持久开关（默认关闭），正常退出无需重复确认，先验证原始固件恢复，再按设置保留或清理 Helper、LaunchDaemon 和脚本。
+- 完善英文界面设置与异常提示：补充“显示供电详情”等缺失翻译，动态保电英文字段统一使用 On/Off；新增中文/English 本地化与布局检查。
+- 保留 macOS 15 + MacBookPro18,1 + mBoot-20457.41.3 的固件写入限制；只发布 Apple Silicon arm64 DMG，附 SHA256，未经过 Apple 公证。详见 [双语正式版说明](docs/releases/v1.0.0.md)。
+
+
 
 ## 0.9.0 — 2026-11-21 正式版
 

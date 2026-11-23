@@ -171,7 +171,7 @@ if grep -Fq 'BatteryStatusRing(' <<< "$POPOVER_SOURCE"; then
     echo "The oversized battery ring must not return to the compact menu-bar overview" >&2
     exit 1
 fi
-for required in 'manager.popoverPowerStatus' 'manager.popoverLimitStatus' \
+for required in 'MauLeafPowerFlowView(flow: manager.powerFlow' 'manager.popoverLimitStatus' \
     'manager.popoverFullChargeStatus' 'limitExpanded' 'settingsExpanded' \
     'manager.toggleLimitFromCard()' 'manager.toggleFullChargeFromCard()' \
     'private var limitControls' 'NSApp.terminate(nil)'; do
@@ -181,20 +181,31 @@ for required in 'manager.popoverPowerStatus' 'manager.popoverLimitStatus' \
     fi
 done
 
-# Both compact preferences must share the native segmented style. Never
+# All three preferences must share the native segmented style. Never
 # restore the redundant limit/full-charge switches or the mixed settings UI.
 if grep -Eq 'oneTimeToggleRow|private var limitAction|Toggle\(isOn:' <<< "$POPOVER_SOURCE"; then
     echo "The compact popover must not contain old switches or lower charge actions" >&2
     exit 1
 fi
-grep -Fq 'Picker("", selection: $manager.showBatteryLevel)' <<< "$POPOVER_SOURCE"
+grep -Fq 'Picker("", selection: $manager.showPowerFlow)' <<< "$POPOVER_SOURCE"
 grep -Fq 'Picker("", selection: $manager.language)' <<< "$POPOVER_SOURCE"
 grep -Fq 'set: { manager.setDynamicHoldEnabled($0) }' <<< "$POPOVER_SOURCE"
 grep -Fq '.disabled(manager.isDynamicHoldSwitchLocked)' <<< "$POPOVER_SOURCE"
 [[ "$(grep -Fc '.pickerStyle(.segmented)' <<< "$POPOVER_SOURCE")" -eq 3 ]]
 [[ "$(grep -Fc '.frame(width: 142)' <<< "$POPOVER_SOURCE")" -eq 3 ]]
-grep -Fq 'if manager.showBatteryLevel' <<< "$POPOVER_SOURCE"
-grep -Fq 'highlighted: manager.isActivelyCharging' <<< "$POPOVER_SOURCE"
+grep -Fq 'if manager.showPowerFlow' <<< "$POPOVER_SOURCE"
+if grep -Fq 'title: "供电状态"' <<< "$POPOVER_SOURCE"; then
+    echo "Power source is already shown by the graph and must not be repeated" >&2
+    exit 1
+fi
+if grep -Eq '当前电量|font\(\.system\(size: 42' <<< "$POPOVER_SOURCE"; then
+    echo "The obsolete oversized battery percentage must not return" >&2
+    exit 1
+fi
+if grep -Eq '总输入|充电功率|底部功率汇总' <<< "$POPOVER_SOURCE"; then
+    echo "No extra summary strip below power-flow diagram" >&2
+    exit 1
+fi
 # Read-only power status aligns with the inner text of the two capsule
 # buttons (which have 12pt horizontal inset), not their outer borders.
 POWER_READONLY_SOURCE="$(sed -n '/\/\/ Power is a read-only measurement/,/\.accessibilityLabel(/p' "$ROOT/Sources/MauLeaf.swift")"

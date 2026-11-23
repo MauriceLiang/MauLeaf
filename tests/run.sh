@@ -203,7 +203,7 @@ if grep -Fq 'Text(manager.text("当前电量"))' <<< "$POPOVER_SOURCE" \
     echo "The obsolete oversized battery percentage must not return" >&2
     exit 1
 fi
-if grep -Eq '总输入|充电功率|底部功率汇总' <<< "$POPOVER_SOURCE"; then
+if grep -Eq 'Text\("总输入"\)|Text\("充电功率"\)|powerSummaryRow\(' <<< "$POPOVER_SOURCE"; then
     echo "No extra summary strip below power-flow diagram" >&2
     exit 1
 fi

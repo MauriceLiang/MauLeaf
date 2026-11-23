@@ -9,6 +9,7 @@ private enum ChargeManagerTests {
         UserDefaults.standard.set(80, forKey: "chargeLimit")
         UserDefaults.standard.removeObject(forKey: "showBatteryLevel")
         UserDefaults.standard.removeObject(forKey: "dynamicHoldEnabled")
+        UserDefaults.standard.removeObject(forKey: "showPowerFlow")
         UserDefaults.standard.removeObject(forKey: "desiredChargeLimitEnabled")
         let manager = ChargeManager(backend: backend, autoInstallNativeHelper: false)
         manager.start()
@@ -25,16 +26,17 @@ private enum ChargeManagerTests {
         try check(languageReload.language == .english,
                   "language preference survives app model recreation")
         manager.language = originalLanguage
-        try check(!manager.showBatteryLevel, "new and upgraded installs default to a compact card without battery digits")
-        manager.showBatteryLevel = true
-        try check(UserDefaults.standard.bool(forKey: "showBatteryLevel"),
-                  "enabling the battery percentage saves its preference")
+        try check(manager.showPowerFlow,
+                  "Preview 7 shows the power-flow diagram by default even when old battery digits were off")
+        manager.showPowerFlow = false
+        try check(!UserDefaults.standard.bool(forKey: "showPowerFlow"),
+                  "hiding the flow persists independently from the obsolete battery display preference")
         let restoredPreference = ChargeManager(backend: FixtureNativeFirmwareBackend(), autoInstallNativeHelper: false)
-        try check(restoredPreference.showBatteryLevel,
-                  "battery percentage preference survives manager recreation")
-        manager.showBatteryLevel = false
-        try check(!UserDefaults.standard.bool(forKey: "showBatteryLevel"),
-                  "disabling the battery percentage restores compact mode")
+        try check(!restoredPreference.showPowerFlow,
+                  "power-flow visibility persists across app restart")
+        manager.showPowerFlow = true
+        try check(UserDefaults.standard.bool(forKey: "showPowerFlow"),
+                  "the top power-flow visualization can be re-enabled")
         try check(manager.limit == 80 && manager.modeText.source == "限制充电未启用"
                   && manager.popoverLimitStatus.source == "未启用"
                   && manager.popoverFullChargeStatus.source == "未开启"
@@ -199,6 +201,7 @@ private enum ChargeManagerTests {
         UserDefaults.standard.removeObject(forKey: "nativeFirmwareWriteConfirmed")
         UserDefaults.standard.removeObject(forKey: "dynamicHoldEnabled")
         UserDefaults.standard.removeObject(forKey: "desiredChargeLimitEnabled")
+        UserDefaults.standard.removeObject(forKey: "showPowerFlow")
         print("ChargeManagerTests: PASS (deferred first-use install, password-free Keep, safe read-only launch, recovery guards, existing restore and legacy coverage)")
     }
 

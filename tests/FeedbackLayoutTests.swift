@@ -25,7 +25,7 @@ struct FeedbackLayoutTests {
         defer { try? FileManager.default.removeItem(at: directory) }
 
         UserDefaults.standard.set(80, forKey: "chargeLimit")
-        UserDefaults.standard.removeObject(forKey: "showBatteryLevel")
+        UserDefaults.standard.removeObject(forKey: "showPowerFlow")
         UserDefaults.standard.set(true, forKey: "nativeFirmwareWriteConfirmed")
         let backend = FixtureNativeFirmwareBackend()
         let manager = ChargeManager(backend: backend, autoInstallNativeHelper: false)
@@ -106,15 +106,12 @@ struct FeedbackLayoutTests {
                 fputs("FAIL: disclosure must grow the existing card: normal=\(normal.0), limit=\(limitOpenHeight), settings=\(settingsOpenHeight)\n", stderr)
                 exit(1)
             }
-            guard (275...335).contains(normal.0) else {
-                fputs("FAIL: single-card compact popover height unexpected: \(normal.0)\n", stderr)
+            guard (345...475).contains(normal.0) else {
+                fputs("FAIL: Preview 7 flow panel height unexpected: \(normal.0)\n", stderr)
                 exit(1)
             }
-            // Measure each piece separately: the closed battery card must
-            // actually reclaim space, not merely shrink its outer popover.
-            // Each isolated card hosts a fresh view because the observed
-            // ContentView wrapper is not mounted when extracting this private
-            // subview. Reusing that detached host would retain stale state.
+            // A single original card with two charging actions and a flow
+            // diagram must still fit inside a normal menu-bar popover.
             func measuredCardHeight() -> CGFloat {
                 let cardHost = NSHostingView(rootView: ContentView(manager: manager)
                     .batteryCardForTesting.frame(width: 328)
@@ -126,42 +123,64 @@ struct FeedbackLayoutTests {
                 .settingsControlsForTesting.frame(width: 298)
                 .environment(\.colorScheme, .dark))
             settingsHost.layoutSubtreeIfNeeded()
-            let compactCardHeight = measuredCardHeight()
+            let diagramCardHeight = measuredCardHeight()
             let compactSettingsHeight = settingsHost.fittingSize.height
-            // Preview 6 removes 26pt of nested card padding/background:
-            // the overview is now an unframed content group in one card.
-            guard (100...123).contains(compactCardHeight),
+            guard (155...250).contains(diagramCardHeight),
                   (125...220).contains(compactSettingsHeight) else {
-                fputs("FAIL: compact overview/settings are too tall in \(language.rawValue): card=\(compactCardHeight), settings=\(compactSettingsHeight)\n", stderr)
+                fputs("FAIL: diagram or settings overflow in \(language.rawValue): card=\(diagramCardHeight), settings=\(compactSettingsHeight)\n", stderr)
                 exit(1)
             }
-            guard !manager.showBatteryLevel else {
-                fatalError("Compact mode must be the default.")
+            guard manager.showPowerFlow else {
+                fatalError("Preview 7 must display power flow by default.")
             }
-            manager.showBatteryLevel = true
+
+            // Draw every supported power path in both localizations at the
+            // exact 328pt card width; no over-wide node labels or scroll.
+            let powerScenarios: [MauLeafBatterySnapshot] = [
+                .init(percent: 85, isCharging: false, isFullyCharged: false,
+                      isACConnected: false, batteryPowerWatts: -8.41),
+                .init(percent: 85, isCharging: false, isFullyCharged: true,
+                      isACConnected: true, batteryPowerWatts: 0,
+                      adapterInputWatts: 7.1),
+                .init(percent: 85, isCharging: true, isFullyCharged: false,
+                      isACConnected: true, batteryPowerWatts: 8.41,
+                      adapterInputWatts: 27),
+                .init(percent: 95, isCharging: false, isFullyCharged: false,
+                      isACConnected: true, batteryPowerWatts: -9.9,
+                      adapterInputWatts: 0.5)
+            ]
+            for snapshot in powerScenarios {
+                let scenario = MauLeafPowerFlow(snapshot: snapshot)
+                let view = NSHostingView(rootView:
+                    MauLeafPowerFlowView(flow: scenario, language: language)
+                        .frame(width: 328).environment(\.colorScheme, .dark))
+                view.layoutSubtreeIfNeeded()
+                let bounds = view.fittingSize
+                guard abs(bounds.width - 328) < 1.5,
+                      (105...210).contains(bounds.height) else {
+                    fputs("FAIL: power diagram geometry overflows in \(language.rawValue), mode=\(scenario.mode), size=\(bounds)\n", stderr)
+                    exit(1)
+                }
+            }
+
+            manager.showPowerFlow = false
             try await Task.sleep(nanoseconds: 280_000_000)
-            let expanded = measure()
-            panelHost.layoutSubtreeIfNeeded()
-            guard panelHost.fittingSize.height > normal.0 + 40,
-                  !containsScrollView(panelHost) else {
-                fputs("FAIL: non-scrolling popup did not grow with optional battery header\n", stderr)
+            let hidden = measure()
+            let hiddenCardHeight = measuredCardHeight()
+            guard hidden.0 < normal.0 - 85,
+                  hiddenCardHeight < diagramCardHeight - 85,
+                  !UserDefaults.standard.bool(forKey: "showPowerFlow")
+                  && !containsScrollView(panelHost) else {
+                fputs("FAIL: hiding diagram must recover top space without scrolling: visible=\(normal), hidden=\(hidden)\n", stderr)
                 exit(1)
             }
-            let expandedCardHeight = measuredCardHeight()
-            guard expandedCardHeight > compactCardHeight + 40,
-                  expanded.0 > normal.0 + 40 && expanded.1 == 0
-                  && UserDefaults.standard.bool(forKey: "showBatteryLevel") else {
-                fputs("FAIL: optional battery display should expand the panel without an overlay: compact=\(normal), expanded=\(expanded), isolated cards=\(compactCardHeight)/\(expandedCardHeight)\n", stderr)
-                exit(1)
-            }
-            manager.showBatteryLevel = false
+            manager.showPowerFlow = true
             try await Task.sleep(nanoseconds: 280_000_000)
-            let compactAgain = measure()
-            let restoredCardHeight = measuredCardHeight()
-            guard abs(restoredCardHeight - compactCardHeight) < 1.5,
-                  abs(compactAgain.0 - normal.0) < 1.5
-                  && !UserDefaults.standard.bool(forKey: "showBatteryLevel") else {
-                fputs("FAIL: disabling battery level should reclaim header space: normal=\(normal), compactAgain=\(compactAgain)\n", stderr)
+            let reShown = measure()
+            guard abs(reShown.0 - normal.0) < 1.5,
+                  abs(measuredCardHeight() - diagramCardHeight) < 1.5
+                  && UserDefaults.standard.bool(forKey: "showPowerFlow") else {
+                fputs("FAIL: power diagram should return to its original height: normal=\(normal), shown=\(reShown)\n", stderr)
                 exit(1)
             }
             for supplyState in ["正在充电", "已接电源，未充电", "已接电源，已充满", "电池供电", "电池状态不可用"] {
@@ -197,7 +216,7 @@ struct FeedbackLayoutTests {
                 fputs("FAIL: inline feedback layout: normal=\(normal), busy=\(busy), success=\(success), failure=\(failure); progress=\(limitProgress)\n", stderr)
                 exit(1)
             }
-            print("FeedbackLayoutTests: PASS (\(language.rawValue); single card=\(normal.0)pt, expanded limit=\(limitOpenHeight)pt, expanded settings=\(settingsOpenHeight)pt, status group=\(compactCardHeight)pt, optional battery and inline feedback)")
+            print("FeedbackLayoutTests: PASS (\(language.rawValue); single card=\(normal.0)pt, expanded limit=\(limitOpenHeight)pt, expanded settings=\(settingsOpenHeight)pt, status group=\(diagramCardHeight)pt, power flow and inline feedback)")
         }
         _ = await manager.prepareForTermination()
         UserDefaults.standard.removeObject(forKey: "nativeFirmwareWriteConfirmed")

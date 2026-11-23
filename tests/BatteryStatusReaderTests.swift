@@ -56,6 +56,37 @@ private enum BatteryStatusReaderTests {
                "raw capacities supply fractional SoC for dynamic hold")
         expect(charging.precisePercent == nil,
                "missing raw SoC stays unknown instead of guessing from UI percent")
+        let power = MauLeafBatteryStatusReader.parseProperties([
+            "CurrentCapacity": 4800, "MaxCapacity": 6000,
+            "IsCharging": true, "ExternalConnected": true,
+            "Voltage": 12000, "Amperage": 700,
+            "PowerTelemetryData": [
+                "SystemPowerIn": 27000, "SystemLoad": 18600
+            ],
+            "AdapterDetails": ["Watts": 140]
+        ])
+        expect(abs((power.batteryPowerWatts ?? 0) - 8.4) < 0.001,
+               "battery current mA and voltage mV yield signed battery watts")
+        expect(power.adapterInputWatts == 27.0 && power.systemLoadWatts == 18.6,
+               "adapter input and system load are parsed from telemetry mW")
+        expect(power.adapterInputWatts != 140,
+               "adapter rated maximum must never masquerade as live power draw")
+        let unpluggedPower = MauLeafBatteryStatusReader.parseProperties([
+            "CurrentCapacity": 2500, "MaxCapacity": 6000,
+            "IsCharging": false, "ExternalConnected": false,
+            "Voltage": 12000, "InstantAmperage": -500,
+            "PowerTelemetryData": ["SystemPowerIn": 12000]
+        ])
+        expect(unpluggedPower.batteryPowerWatts == -6.0
+               && unpluggedPower.adapterInputWatts == nil,
+               "disconnected state ignores stale adapter watts and preserves signed discharge")
+        let invalidPower = MauLeafBatteryStatusReader.parseProperties([
+            "ExternalConnected": true, "Voltage": 0,
+            "Amperage": -400, "PowerTelemetryData": ["SystemPowerIn": -1000]
+        ])
+        expect(invalidPower.batteryPowerWatts == nil
+               && invalidPower.adapterInputWatts == nil,
+               "invalid telemetry is missing rather than rendered as negative or false power")
         let missing = MauLeafBatteryStatusReader.parse(Data("invalid".utf8))
         expect(missing.percent == nil && missing.isACConnected == nil, "invalid IORegistry output is unknown, never assumed to be AC")
 

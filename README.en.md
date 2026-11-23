@@ -30,13 +30,19 @@
 
 ## Screenshots
 
-<p align="center">
-  <img src="docs/screenshots/en-overview.webp" width="300" alt="MauLeaf menu bar app: battery level, power supply, charging limit, and one-time full charge">
-  <img src="docs/screenshots/en-limit-expanded.webp" width="300" alt="MauLeaf charging limit slider and preset percentages in the expanded menu-bar popover">
-</p>
-<p align="center"><sub>Actual dark-mode UI · Left: overview · Right: charging-limit settings. The charging limit is disabled in these screenshots.</sub></p>
+### English UI
 
-中文界面：[状态总览](docs/screenshots/zh-overview.webp) · [充电上限](docs/screenshots/zh-limit-expanded.webp)
+| Power Flow | Compact Power Status |
+| --- | --- |
+| ![MauLeaf English UI showing battery-to-system live power flow](docs/screenshots/en-power-flow.webp) | ![MauLeaf English UI showing compact On Battery status and charging controls](docs/screenshots/en-power-compact.webp) |
+
+### 中文界面
+
+| 供电详情（展开模式） | 供电状态（简洁模式） |
+| --- | --- |
+| ![MauLeaf 中文界面：电池向系统供电的实时功率流向图](docs/screenshots/zh-power-flow.webp) | ![MauLeaf 中文界面：电池供电状态、充电限制和本次充满](docs/screenshots/zh-power-compact.webp) |
+
+<sub>Actual macOS dark-mode screenshots. Power Flow can be hidden while the supply-status badge stays visible.</sub>
 
 ## Quick links
 

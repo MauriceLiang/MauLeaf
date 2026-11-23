@@ -134,6 +134,18 @@ struct FeedbackLayoutTests {
                 fatalError("Preview 7 must display power flow by default.")
             }
 
+            // Power shares require a complete, valid, positive sample.
+            let shares = MauLeafPowerFlowView.fractions([18.59, 8.41])
+            guard let shares, shares.count == 2,
+                  abs(shares[0] - 18.59 / 27) < 0.001,
+                  abs(shares[1] - 8.41 / 27) < 0.001,
+                  MauLeafPowerFlowView.fractions([nil, 8.41]) == nil,
+                  MauLeafPowerFlowView.fractions([0, 0]) == nil,
+                  MauLeafPowerFlowView.fractions([-2, 4]) == nil,
+                  MauLeafPowerFlowView.fractions([.infinity, 4]) == nil else {
+                fatalError("Flow ribbons must never invent incomplete power budgets.")
+            }
+
             // Draw every supported power path in both localizations at the
             // exact 328pt card width; no over-wide node labels or scroll.
             let powerScenarios: [MauLeafBatterySnapshot] = [
@@ -147,19 +159,25 @@ struct FeedbackLayoutTests {
                       adapterInputWatts: 27),
                 .init(percent: 95, isCharging: false, isFullyCharged: false,
                       isACConnected: true, batteryPowerWatts: -9.9,
-                      adapterInputWatts: 0.5)
+                      adapterInputWatts: 0.5),
+                .init(percent: 90, isCharging: true, isFullyCharged: false,
+                      isACConnected: true, batteryPowerWatts: 8.41),
+                .init(percent: 90, isCharging: false, isFullyCharged: false,
+                      isACConnected: nil)
             ]
             for snapshot in powerScenarios {
                 let scenario = MauLeafPowerFlow(snapshot: snapshot)
-                let view = NSHostingView(rootView:
-                    MauLeafPowerFlowView(flow: scenario, language: language)
-                        .frame(width: 328).environment(\.colorScheme, .dark))
-                view.layoutSubtreeIfNeeded()
-                let bounds = view.fittingSize
-                guard abs(bounds.width - 328) < 1.5,
-                      (105...210).contains(bounds.height) else {
-                    fputs("FAIL: power diagram geometry overflows in \(language.rawValue), mode=\(scenario.mode), size=\(bounds)\n", stderr)
-                    exit(1)
+                for scheme in [ColorScheme.dark, .light] {
+                    let view = NSHostingView(rootView:
+                        MauLeafPowerFlowView(flow: scenario, language: language)
+                            .frame(width: 328).environment(\.colorScheme, scheme))
+                    view.layoutSubtreeIfNeeded()
+                    let bounds = view.fittingSize
+                    guard abs(bounds.width - 328) < 1.5,
+                          (105...210).contains(bounds.height) else {
+                        fputs("FAIL: power diagram overflows in \(language.rawValue), \(scheme), mode=\(scenario.mode), size=\(bounds)\n", stderr)
+                        exit(1)
+                    }
                 }
             }
 

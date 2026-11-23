@@ -1465,6 +1465,8 @@ final class ChargeManager: ObservableObject {
         dynamicLastAC = external
         switch external {
         case .some(false):
+            limitDebounce?.cancel()
+            limitDebounce = nil
             dynamicACStableSince = nil
             dynamicSessionUpper = nil
             dynamicNeedsNewCapture = true
@@ -2390,7 +2392,11 @@ final class ChargeManager: ObservableObject {
         isBusy = true
         isError = false
         statusMessage = "正在启动原生本次充满任务…"
-        defer { isBusy = false; activeOperation = nil }
+        defer {
+            isBusy = false
+            activeOperation = nil
+            if !isAdapterConnected { scheduleUnpluggedFirmwareRestore() }
+        }
         do {
             let response = try await backend.beginOneTimeCharge(
                 upper: currentState?.upper ?? limit,

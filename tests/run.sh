@@ -195,6 +195,12 @@ if grep -Eq 'powerFlowRefreshSeconds|供电刷新间隔' <<< "$POPOVER_SOURCE"; 
     exit 1
 fi
 grep -Fq 'set: { manager.setDynamicHoldEnabled($0) }' <<< "$POPOVER_SOURCE"
+# The power diagram may use Show/Hide, but Dynamic Hold is a policy switch
+# and must read On/Off in English (rather than displaying "Hide/Show").
+DYNAMIC_HOLD_TOGGLE="$(sed -n '/settingsLabel("动态保电")/,/\.disabled(manager.isDynamicHoldSwitchLocked)/p' "$ROOT/Sources/MauLeaf.swift")"
+grep -Fq 'Text(manager.language == .english ? "Off" : "关闭").tag(false)' <<< "$DYNAMIC_HOLD_TOGGLE"
+grep -Fq 'Text(manager.language == .english ? "On" : "开启").tag(true)' <<< "$DYNAMIC_HOLD_TOGGLE"
+grep -Fq 'settingsLabel("显示供电详情")' <<< "$POPOVER_SOURCE"
 grep -Fq '.disabled(manager.isDynamicHoldSwitchLocked)' <<< "$POPOVER_SOURCE"
 [[ "$(grep -Fc '.pickerStyle(.segmented)' <<< "$POPOVER_SOURCE")" -eq 4 ]]
 [[ "$(grep -Fc '.frame(width: 142)' <<< "$POPOVER_SOURCE")" -eq 4 ]]

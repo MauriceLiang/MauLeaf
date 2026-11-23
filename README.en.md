@@ -1,17 +1,3 @@
-> **Preview 11:** Hiding Power Flow now keeps a compact, read-only supply status and the exact same state badge shown above the expanded diagram. Re-enable the option to restore live wattage visualization; firmware behavior is unchanged. [Release notes](docs/releases/v0.9.1-preview.11.md).
-
-> **Preview 10:** Live power flow samples automatically at approximately 2-second intervals while the panel is open, with read-only SMC fallback. The manual refresh selector is removed. Quitting now follows the persistent **Remove components on quit** preference (Off by default) without the repeated modal. Enable it and quit successfully before uninstalling the app. [Release notes](docs/releases/v0.9.1-preview.10.md).
-
-> **Preview 9:** Power Flow refresh is configurable (2–60 seconds, default 5 seconds) and runs only while the menu panel is open. The separate firmware safety poll is unchanged. Shorter Dynamic Hold help notes that fixed-limit mode may show delayed unplug detection on the tested Mac. [Release notes](docs/releases/v0.9.1-preview.9.md).
-
-> **Preview 8 compact power flow:** MauLeaf's top diagram adopts compact metric cards, smooth proportional ribbons and translucent-card cutouts inspired by [Status Trio](https://github.com/lingyired/status-trio). Proportions appear only with complete, trustworthy samples. No new SMC control or sampling is involved. The user reports verified power behavior with Dynamic Hold on the tested Mac; fixed-limit unplug-state latency remains a separate open issue. [Preview 8 notes](docs/releases/v0.9.1-preview.8.md).
-
-> **Preview 7 power-flow header:** The oversized battery percentage and duplicate power-status row have been replaced by a compact adapter/battery/system flow. Watts appear only inside each node; there is no redundant summary strip. Missing sensor values appear as dashes, not invented power data. Show Power Flow is enabled by default. Read-only app telemetry; no privileged Helper or firmware changes. [Preview 7 notes](docs/releases/v0.9.1-preview.7.md).
-
-> **Preview 6 unplug recovery:** When a charger is disconnected, MauLeaf restores the **actual original SMC firmware parameters**, not merely the menu label. The privileged Helper must verify every register before declaring restoration complete; unsafe conditions preserve the exact snapshot and durable background recovery. Replugging resumes the previously authorized limit only after successful restore and stable AC; manual off or normal quit disables automatic reactivation. See [Preview 6 notes](docs/releases/v0.9.1-preview.6.md). The OS can report physical unplugging several seconds late, so restoration cannot be instantaneous.
-
-> **Preview 5 restart recovery**: An inactive `bfF0=0`, `bfD0/bfE0=0/0` reading is reported as uninitialized instead of a failed Helper. Previously authorized managed limits can resume after stable AC and validated original snapshot checks. Unknown zero states are never written or captured as original snapshots. See [release notes](docs/releases/v0.9.1-preview.5.md).
-
 [简体中文](README.md) | [English](README.en.md)
 
 <p align="center">
@@ -36,10 +22,7 @@
 **MauLeaf** is a free, open-source **macOS battery charge limiter and battery care app for Apple Silicon MacBook**. Built with SwiftUI + AppKit and a native AppleSMC controller, it focuses on **charging limits** and **one-time full charge**. It lives in the menu bar as a green leaf, with no separate window or batt dependency. **Firmware writes currently support only one verified M1 Pro hardware profile**, as detailed below.
 
 > [!NOTE]
-> **Preview 3 power-state responsiveness:** Native IOKit notifications now update the UI on adapter plug/unplug, backed by fast registry reads and a low-frequency polling fallback. This does **not** switch actual power routing. See [Preview 3 notes](docs/releases/v0.9.1-preview.3.md).
-
-> [!IMPORTANT]
-> **0.9.1-preview.1 experimental setting: Prefer adapter above limit (observation only).** The new option monitors battery current and can report sustained discharge. **It cannot redirect wall power or prevent above-limit drain.** See [technical validation requirements](docs/ABOVE_LIMIT_POWER.md) and [preview release notes](docs/releases/v0.9.1-preview.1.md).
+> **MauLeaf v1.0.0** includes native charge limits, one-time full charge, Dynamic Hold, live power flow, compact power status when the diagram is hidden, and a persistent quit cleanup setting. This stable release promotes the validated Preview 11 code without changing the firmware controller. [Stable release notes](docs/releases/v1.0.0.md).
 
 > [!CAUTION]
 > **A stable release does not imply universal hardware support.** New firmware charging-limit writes are restricted to **MacBookPro18,1 (M1 Pro) + macOS 15 + mBoot-20457.41.3 + arm64**. macOS 26/27, Intel, and unverified devices cannot activate new limits. Battery viewing may still work on other devices. Actual charge-stop and resume percentages have not yet completed full physical validation; successful register read-back is not proof of real charging behavior.
@@ -68,7 +51,7 @@
 
 MauLeaf's privileged Helper has a build version and XPC protocol independent of the app release. Each launch checks protocol compatibility read-only. Compatible Helpers are reused without another administrator password after a UI-only update. Only an **installed incompatible older Helper** triggers a one-time user-authorized upgrade attempt. First installation remains opt-in. Previous restoration snapshots and pending jobs are preserved. Unknown newer protocols are never silently downgraded.
 
-Uninstall no longer requires the installed Helper executable to match the binary bundled with the updated app. It verifies expected code-signing identity, root ownership and exact firmware restoration before removing privileged components. If an unknown old Helper cannot prove successful restoration, the recovery components are retained. See [Preview 2 notes](docs/releases/v0.9.1-preview.2.md).
+The **Remove components on quit** setting defaults to Off. Normal quit always restores and verifies the original firmware; Off retains the Helper for reuse, while On removes the Helper, LaunchDaemon, and scripts after verified recovery. No repeated normal-quit chooser appears. Enable removal before uninstalling. Any unsafe or unknown recovery state still blocks removal and preserves recovery data.
 
 ## Download and install
 
@@ -82,12 +65,13 @@ The current package is **ad-hoc code-signed, without Apple Developer ID signing 
 
 | Feature | Behavior |
 | --- | --- |
-| Battery and power | Fixed green menu-bar leaf; popover shows battery level and current power source |
+| Power and live watts | Green menu-bar leaf; native adapter/system/battery power-flow diagram refreshes approximately every 2 seconds while visible; compact mode keeps only the supply-status badge |
 | Charging limit | Click the top-card Disabled status to enable, or the active status to disable |
 | Limit setting | 50–95% slider and 70 / 75 / 80 / 85 / 90 / 95% presets; settings are local only when disabled |
 | One-time full charge | Start or cancel from the top card, available only while MauLeaf is managing an active limit |
-| Settings | Switch between Simplified Chinese and English inside the popover |
-| Quit | Restore and verify original firmware, then retain or remove native control components |
+| Dynamic Hold | Optional charge-holding policy when above the target; turning it off may delay unplug recognition on the tested Mac |
+| Settings | Power details, Chinese/English interface, Dynamic Hold, and Remove components on quit |
+| Quit | Automatically follow the saved cleanup preference; always restore and verify the original firmware first |
 
 Before first activation, the privileged Helper snapshots the original bfF0, bfD0 and bfE0 values with device identity in a root-owned recovery file. Later limit changes or one-time full charge never overwrite the snapshot. Disabling a limit restores all original values with read-back verification; unknown states or failed restores are never reported as safe.
 
@@ -104,15 +88,14 @@ If you use a fixed charging limit in MauLeaf (for example, **85%**), **we recomm
 
 ### Quit and uninstall
 
-| Choice | Behavior | Administrator password |
+| Remove components on quit | Behavior on every normal quit | Administrator password |
 | --- | --- | --- |
-| Keep components and quit | Restore and verify original firmware; preserve launchd registration; Helper exits when idle and is reusable next launch | Normally not required |
-| Remove components and quit | Restore and verify original firmware, then remove the installed Helper, LaunchDaemon and related recovery components; app remains until moved to Trash | Required when deleting privileged components |
-| Cancel | Return to the app without cleanup | Not required |
+| Off (default) | Restore and verify original firmware; retain the Helper and launchd registration for the next launch | Normally not required |
+| On | Restore and verify original firmware; then remove the installed Helper, LaunchDaemon and scripts; the app remains until moved to Trash | Required when removing privileged components |
 
 On battery power alone, full restoration is allowed only when the validated identity and all additional checks pass (including independent power-source checks, battery at least 30%, and a valid original snapshot). **Failed restoration blocks normal removal and retains recovery data.** Force Quit, crashes, and dragging the App to Trash directly cannot guarantee firmware restoration.
 
-If you previously kept the components and later want a complete uninstall, run the bundled uninstaller *while MauLeaf.app still exists*:
+**Recommended uninstall:** Enable **Remove components on quit** in Settings, quit normally and confirm successful cleanup, then move MauLeaf.app to Trash. If you previously kept components and need manual recovery, run the bundled uninstaller *while MauLeaf.app still exists*:
 
 ~~~bash
 sudo "/Applications/MauLeaf.app/Contents/Resources/MauLeafNativeControl/uninstall-native-firmware-helper.sh"

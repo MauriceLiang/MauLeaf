@@ -46,6 +46,29 @@ struct LocalizationTests {
             check(!value.isEmpty, "translation is not empty: \(key)")
         }
 
+        // Audit every static, Chinese-keyed visible settings label and
+        // manager.text(...) call so missing new English keys fail CI instead
+        // of silently falling back to Chinese in the English popover.
+        let appSourceURL = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("Sources/MauLeaf.swift")
+        let appSource = try String(contentsOf: appSourceURL, encoding: .utf8)
+        let staticUIKeyPattern = try NSRegularExpression(
+            pattern: #"(?:settingsLabel|manager\.text)\("([^"\\]+)"\)"#
+        )
+        let sourceRange = NSRange(appSource.startIndex..., in: appSource)
+        let staticMatches = staticUIKeyPattern.matches(in: appSource, range: sourceRange)
+        check(!staticMatches.isEmpty, "the visible UI localization audit found source keys")
+        for match in staticMatches {
+            guard let range = Range(match.range(at: 1), in: appSource) else { continue }
+            let key = String(appSource[range])
+            guard key.rangeOfCharacter(from: .init(charactersIn: "一-龥")) != nil
+                || key.unicodeScalars.contains(where: { (0x3400...0x9FFF).contains($0.value) })
+            else { continue }
+            check(chinese[key] == key && translations[key] != nil && translations[key] != key,
+                  "static visible UI text lacks a distinct English translation: \(key)")
+        }
+
         let limit: AppText = "原生固件限充至 \(85)%"
         check(limit.source == "原生固件限充至 85%", "Chinese interpolation preserves the percent sign")
         check(limit.localized(in: .english) == "Native firmware limit: 85%", "English native firmware status")
@@ -122,6 +145,27 @@ struct LocalizationTests {
         check(chinese["关闭后保留供电状态，仅隐藏供电流向图"] == "关闭后保留供电状态，仅隐藏供电流向图"
               && translations["关闭后保留供电状态，仅隐藏供电流向图"] == "When disabled, keep the power status visible and hide only the flow diagram.",
               "power details setting clearly explains that the compact status remains")
+        check(translations["显示供电详情"] == "Power details"
+              && chinese["显示供电详情"] == "显示供电详情",
+              "Power Flow details setting is fully translated in English")
+        check(AppText(key: "显示供电详情").localized(in: .english) == "Power details",
+              "live AppText settings label never falls back to Chinese")
+        for key in [
+            "固件异常 · 待恢复", "固件异常", "已配置 · 电池供电",
+            "已读取原生固件状态。", "等待恢复原始固件配置",
+            "固件控制异常 · 已阻止新的限充写入",
+            "重启后读到激活的无效固件上限 0/0；原始快照已保留。请连接充电器后通过关闭限充恢复原始配置。",
+            "重启后读到激活的无效固件上限 0/0，且没有可信原始快照；已阻止写入，请保留 Helper 并反馈诊断。",
+            "固件尚未恢复：已保留后台恢复任务。请连接电源或改善电池状态后重试正常退出；若仍然退出，删除应用前请先确认恢复完成。",
+            "无法确认三个固件寄存器已恢复，请勿删除 MauLeaf 或恢复服务。",
+            "退出前已将限充恢复至原始固件配置并完成校验。现在可以安全关闭应用。",
+            "应用包中缺少 MauLeaf 原生固件服务文件，请重新安装 MauLeaf。"
+        ] {
+            check(chinese[key] == key
+                  && translations[key] != nil
+                  && translations[key] != key,
+                  "firmware/error status must not leak untranslated Chinese in English UI: \(key)")
+        }
         check(translations["退出 MauLeaf"] == "Quit MauLeaf"
               && translations["供电状态"] == "Power"
               && translations["限制充电"] == "Charge limit"

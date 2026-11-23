@@ -855,8 +855,8 @@ struct ContentView: View {
                     get: { manager.dynamicHoldEnabled },
                     set: { manager.setDynamicHoldEnabled($0) }
                 )) {
-                    Text(manager.language == .english ? "Hide" : "关闭").tag(false)
-                    Text(manager.language == .english ? "Show" : "开启").tag(true)
+                    Text(manager.language == .english ? "Off" : "关闭").tag(false)
+                    Text(manager.language == .english ? "On" : "开启").tag(true)
                 }
                 .pickerStyle(.segmented)
                 .labelsHidden()
@@ -2772,7 +2772,7 @@ private enum NativeControlError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .missingBundledHelper:
-            return "应用包中缺少 MauLeaf 原生固件服务文件，请重新安装预览版。"
+            return "应用包中缺少 MauLeaf 原生固件服务文件，请重新安装 MauLeaf。"
         case .authorizationFailed(let detail):
             return detail
         case .unsafeStateAfterInstall:

@@ -564,12 +564,18 @@ struct ContentView: View {
         .task { manager.start() }
     }
 
-    /// Power flow replaces the oversized battery percent and the redundant
-    /// power-status row. All watts live INSIDE their respective diagram nodes.
+    /// Power flow replaces oversized battery digits. In compact mode the
+    /// same source-state badge remains visible without any watt diagram.
     private var batteryCard: some View {
         VStack(alignment: .leading, spacing: 3) {
             if manager.showPowerFlow {
                 MauLeafPowerFlowView(flow: manager.powerFlow, language: manager.language)
+                    .padding(.bottom, 8)
+                    .transition(.opacity)
+            } else {
+                // Hiding the chart never hides power-source information.
+                // The exact same badge is used by the expanded diagram.
+                MauLeafPowerStatusRow(mode: manager.powerFlow.mode, language: manager.language)
                     .padding(.bottom, 8)
                     .transition(.opacity)
             }
@@ -822,7 +828,7 @@ struct ContentView: View {
                 .controlSize(.small)
                 .frame(width: 142)
                 .accessibilityLabel(manager.text("显示供电详情"))
-                .help(manager.text("在顶部显示适配器、电池与系统的功率流向"))
+                .help(manager.text("关闭后保留供电状态，仅隐藏供电流向图"))
             }
             .frame(minHeight: 30)
 
@@ -1047,7 +1053,15 @@ final class ChargeManager: ObservableObject {
             guard showPowerFlow != oldValue else { return }
             UserDefaults.standard.set(showPowerFlow, forKey: "showPowerFlow")
             restartPowerFlowTimer()
-            if showPowerFlow && panelVisible { refreshPowerFlowOnly() }
+            if panelVisible {
+                if showPowerFlow {
+                    refreshPowerFlowOnly()
+                } else {
+                    // Update the status badge immediately from the native
+                    // battery registry, without changing firmware policy.
+                    readSystemBattery(allowDynamicScheduling: false)
+                }
+            }
         }
     }
     @Published var removeComponentsOnQuit: Bool {
@@ -1738,7 +1752,9 @@ final class ChargeManager: ObservableObject {
                 guard let self, !self.isBusy else { return }
                 // Preserve the independent 20s Helper/safety fallback.
                 // The visible diagram refreshes on its own 2s rhythm.
-                self.readSystemBattery(updateDisplayedPowerFlow: false)
+                // Compact status still follows the 20 s fallback and
+                // native power-source notifications while live watts are off.
+                self.readSystemBattery(updateDisplayedPowerFlow: !self.showPowerFlow)
                 await self.refreshNativeState()
             }
         }

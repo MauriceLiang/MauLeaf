@@ -34,13 +34,13 @@
 
 | 供电状态（简洁模式） | 供电详情（展开模式） |
 | --- | --- |
-| ![MauLeaf 中文界面：电池供电状态、限制充电、本次充满与设置](docs/screenshots/zh-power-compact.webp) | ![MauLeaf 中文界面：电池向系统供电的实时功率流向图](docs/screenshots/zh-power-flow.webp) |
+| <a href="docs/screenshots/zh-power-compact.webp"><img src="docs/screenshots/zh-power-compact.webp" width="300" alt="MauLeaf 中文界面：电池供电状态、限制充电、本次充满与设置"></a> | <a href="docs/screenshots/zh-power-flow.webp"><img src="docs/screenshots/zh-power-flow.webp" width="300" alt="MauLeaf 中文界面：电池向系统供电的实时功率流向图"></a> |
 
 ### English UI
 
 | Power Flow | Compact Power Status |
 | --- | --- |
-| ![MauLeaf English interface: battery-to-system power-flow diagram](docs/screenshots/en-power-flow.webp) | ![MauLeaf English interface: compact On Battery status and charging controls](docs/screenshots/en-power-compact.webp) |
+| <a href="docs/screenshots/en-power-flow.webp"><img src="docs/screenshots/en-power-flow.webp" width="300" alt="MauLeaf English interface: battery-to-system power-flow diagram"></a> | <a href="docs/screenshots/en-power-compact.webp"><img src="docs/screenshots/en-power-compact.webp" width="300" alt="MauLeaf English interface: compact On Battery status and charging controls"></a> |
 
 <sub>macOS 深色模式真实截图。供电详情支持显示或隐藏；隐藏图表时仍保留电源状态。</sub>
 

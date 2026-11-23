@@ -416,6 +416,62 @@ private enum FirmwareLimitHelperServiceTests {
                      && !FileManager.default.fileExists(atPath: bootSnapshotURL.path),
                      "exact original snapshot can be restored from post-reboot 0/0 and only then deleted")
 
+        // The same root-owned snapshot also permits exact offline restore
+        // when reboot leaves bfF0 ACTIVE with an invalid zeroed band. The
+        // target-Mac offline permit must independently verify pmset battery,
+        // AppleSmartBattery unplugged, >=30% capacity and no charging.
+        var activeAppliedError: NSString?
+        bootService().applyLimit(upper: 85, lower: 83, confirmed: true) {
+            _, error in activeAppliedError = error
+        }
+        precondition(activeAppliedError == nil
+                     && FileManager.default.fileExists(atPath: bootSnapshotURL.path),
+                     "a managed active limit must have the original snapshot before offline recovery")
+        bootTransport.activation = 0x02
+        bootTransport.upper = 0
+        bootTransport.lower = 0
+        let offlineActiveZero = FirmwareLimitHelperService(
+            transport: bootTransport,
+            identityProvider: { identity },
+            isOnACPower: { false },
+            isAdministrator: { true },
+            batteryObservation: {
+                FirmwareLimitBatteryObservation(
+                    percent: 80, fullyCharged: false, externalConnected: false
+                )
+            },
+            pmsetReportsBatteryPower: { true },
+            isChargingNow: { false },
+            jobURL: bootDir.appendingPathComponent("one-time-charge.json"),
+            originalStateURL: bootSnapshotURL,
+            restoreRequestURL: bootDir.appendingPathComponent("restore-original-state.pending"),
+            backgroundRecoveryURL: bootDir.appendingPathComponent("background-recovery.pending"),
+            legacyRestoreURL: bootDir.appendingPathComponent("legacy-restore.json"),
+            monitorEnabled: false
+        )
+        var abnormalData: NSData?
+        var abnormalError: NSString?
+        offlineActiveZero.readState { data, error in
+            abnormalData = data; abnormalError = error
+        }
+        precondition(abnormalError == nil && abnormalData != nil,
+                     "read-only active zero diagnostic remains available after reboot")
+        let abnormalState = try JSONDecoder().decode(
+            FirmwareLimitHelperStateResponse.self, from: abnormalData! as Data
+        )
+        precondition(abnormalState.isActiveZeroed && !abnormalState.writeSupported
+                     && abnormalState.restoreSupported && abnormalState.hasOriginalStateSnapshot,
+                     "active 0/0 can only restore the verified original snapshot, never apply a new charge limit")
+        var offlineRecoveredError: NSString?
+        offlineActiveZero.restoreOriginalState { _, error in
+            offlineRecoveredError = error
+        }
+        precondition(offlineRecoveredError == nil
+                     && bootTransport.activation == 0 && bootTransport.upper == 80
+                     && bootTransport.lower == 78
+                     && !FileManager.default.fileExists(atPath: bootSnapshotURL.path),
+                     "battery-only active 0/0 recovers exactly under the strict offline permit")
+
         // Without any snapshot, 0/0 must not be captured as the previous
         // firmware configuration or authorize a new privileged write.
         bootTransport.activation = 0

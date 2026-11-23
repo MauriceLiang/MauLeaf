@@ -459,11 +459,10 @@ final class FirmwareLimitHelperService: NSObject, FirmwareLimitHelperProtocol {
             startMonitoring()
 
             let current = try readStateForDisplay()
-            if current.isActiveZeroed && !isOnACPower() {
-                throw FirmwareLimitCoreError.transportFailure(
-                    "Active zeroed firmware cannot be restored on battery power; original snapshot retained for verified AC recovery."
-                )
-            }
+            // Even active zeroed thresholds may be restored from a verified
+            // original snapshot on battery power. Offline permit validation
+            // still requires exact hardware identity, both power sources
+            // agreeing on battery, >=30% SoC and no charging before EACH write.
             let restored: FirmwareLimitState
             if current == requested.state {
                 // All keys already match: verification requires no write
@@ -716,7 +715,9 @@ final class FirmwareLimitHelperService: NSObject, FirmwareLimitHelperProtocol {
         if let snapshot, snapshot.restoreRequested {
             do {
                 let current = try readStateForDisplay()
-                if current.isActiveZeroed && !isOnACPower() { return }
+                // A snapshot-bound offline recovery is permitted even
+                // after an active 0/0 boot read, but never without the
+                // already-validated offline restore preflight.
                 if current != snapshot.state {
                     let permit = try writeRestorePermit(for: snapshot)
                     _ = try controller.restore(

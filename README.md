@@ -30,13 +30,19 @@
 
 ## 应用预览
 
-<p align="center">
-  <img src="docs/screenshots/zh-overview.webp" width="300" alt="MauLeaf 中文菜单栏：80% 电量、供电状态、限充与本次充满开关">
-  <img src="docs/screenshots/zh-limit-expanded.webp" width="300" alt="MauLeaf 中文菜单栏：展开充电上限、滑杆和快捷预设">
-</p>
-<p align="center"><sub>深色模式真实界面 · 左：状态总览 · 右：充电上限展开。示例中限充处于未启用状态。</sub></p>
+### 中文界面
 
-English screenshots: [Overview](docs/screenshots/en-overview.webp) · [Charging-limit controls](docs/screenshots/en-limit-expanded.webp)
+| 供电状态（简洁模式） | 供电详情（展开模式） |
+| --- | --- |
+| ![MauLeaf 中文界面：电池供电状态、限制充电、本次充满与设置](docs/screenshots/zh-power-compact.webp) | ![MauLeaf 中文界面：电池向系统供电的实时功率流向图](docs/screenshots/zh-power-flow.webp) |
+
+### English UI
+
+| Power Flow | Compact Power Status |
+| --- | --- |
+| ![MauLeaf English interface: battery-to-system power-flow diagram](docs/screenshots/en-power-flow.webp) | ![MauLeaf English interface: compact On Battery status and charging controls](docs/screenshots/en-power-compact.webp) |
+
+<sub>macOS 深色模式真实截图。供电详情支持显示或隐藏；隐藏图表时仍保留电源状态。</sub>
 
 ## 快速入口
 

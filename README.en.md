@@ -1,3 +1,5 @@
+> **Preview 5 restart recovery**: An inactive `bfF0=0`, `bfD0/bfE0=0/0` reading is reported as uninitialized instead of a failed Helper. Previously authorized managed limits can resume after stable AC and validated original snapshot checks. Unknown zero states are never written or captured as original snapshots. See [release notes](docs/releases/v0.9.1-preview.5.md).
+
 [简体中文](README.md) | [English](README.en.md)
 
 <p align="center">

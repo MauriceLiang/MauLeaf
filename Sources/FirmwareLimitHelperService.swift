@@ -410,6 +410,11 @@ final class FirmwareLimitHelperService: NSObject, FirmwareLimitHelperProtocol {
         guard !previous.isActive else {
             throw FirmwareLimitCoreError.legacyActiveStateWithoutSnapshot
         }
+        // Inactive zero/zero after reboot is not a valid pre-install
+        // firmware state and must NEVER become an original snapshot.
+        guard previous.isValid else {
+            throw FirmwareLimitCoreError.invalidStoredBand(upper: previous.upper, lower: previous.lower)
+        }
         let snapshot = try FirmwareLimitOriginalStateSnapshot(
             deviceIdentity: identityProvider(),
             state: previous

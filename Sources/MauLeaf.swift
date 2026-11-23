@@ -1304,7 +1304,11 @@ final class ChargeManager: ObservableObject {
             self.activeOperation = .restoringLimit
             self.isBusy = true
             self.statusMessage = "已检测到电源断开，正在恢复原始固件参数…"
-            defer { self.isBusy = false; self.activeOperation = nil }
+            defer {
+                self.isBusy = false
+                self.activeOperation = nil
+                if self.isAdapterConnected { self.scheduleReconnectLimitResume() }
+            }
             do {
                 _ = try await self.backend.restoreOriginalState()
                 let state = try await self.backend.readState()
@@ -1321,7 +1325,8 @@ final class ChargeManager: ObservableObject {
                 self.dynamicSessionUpper = nil
                 self.dynamicNeedsNewCapture = true
                 self.automaticUnplugRetryAfter = nil
-                self.modeText = "电池供电 · 原始固件参数已恢复"
+                self.modeText = self.isAdapterConnected
+                    ? "原始固件参数已恢复" : "电池供电 · 原始固件参数已恢复"
                 self.statusMessage = "已恢复启用前的原始固件参数，MauLeaf 停止限充控制。"
                 self.isError = false
             } catch {

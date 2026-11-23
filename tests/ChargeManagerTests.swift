@@ -164,6 +164,7 @@ private enum ChargeManagerTests {
         try await testDynamicHoldSuspendsDuringOneTimeFullCharge()
         try await testUnplugAutomaticallyRestoresAndReplugResumes()
         try await testUnplugWithUnsafeBatteryPreservesRecovery()
+        try await testUnknownPowerDoesNotRestore()
         try await testOfflineBootRestoresManagedSnapshot()
         try await testManagedBootZeroRecovery()
         try await testUnmanagedBootZeroNoWrite()
@@ -557,6 +558,30 @@ private enum ChargeManagerTests {
         try await Task.sleep(nanoseconds: 150_000_000)
         try check(backend.restoreCount == 1,
                   "pending offline restore never retries with unsafe battery telemetry")
+    }
+
+    @MainActor
+    private static func testUnknownPowerDoesNotRestore() async throws {
+        UserDefaults.standard.set(false, forKey: "desiredChargeLimitEnabled")
+        UserDefaults.standard.set(false, forKey: "dynamicHoldEnabled")
+        let backend = FixtureNativeFirmwareBackend()
+        _ = try await backend.applyLimit(upper: 85, lower: 83, confirmed: true)
+        let unknown = MauLeafBatterySnapshot(
+            percent: nil, isCharging: false, isFullyCharged: false,
+            isACConnected: nil, precisePercent: nil
+        )
+        let manager = ChargeManager(
+            backend: backend, autoInstallNativeHelper: false,
+            batteryReader: { unknown }, observePowerSourceChanges: false,
+            dynamicSettleInterval: 0.01
+        )
+        manager.start()
+        try await wait { manager.currentState != nil }
+        manager.simulatePowerSourceNotificationForTesting()
+        try await Task.sleep(nanoseconds: 400_000_000)
+        try check(backend.restoreCount == 0 && backend.state.active
+                  && manager.hasOriginalStateSnapshot,
+                  "unknown AC state must not queue a root SMC restore or falsely claim a disconnect")
     }
 
     @MainActor

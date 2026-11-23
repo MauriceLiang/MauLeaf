@@ -25,7 +25,7 @@ for doc in README.md README.en.md; do
       echo "$doc must show $shot exactly once" >&2; exit 1;
     }
   done
-  if grep -Eq 'docs/screenshots/(zh|en)-(overview|limit-expanded)\\.webp' "$ROOT/$doc"; then
+  if grep -Eq 'docs/screenshots/(zh|en)-(overview|limit-expanded)\.webp' "$ROOT/$doc"; then
     echo "$doc still references obsolete preview screenshots" >&2
     exit 1
   fi

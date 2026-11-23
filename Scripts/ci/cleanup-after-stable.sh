@@ -76,11 +76,7 @@ branch_kept=0
 while IFS=$'\t' read -r name sha; do
   [[ -n "$name" && -n "$sha" ]] || continue
   [[ "$name" != "main" ]] || continue
-  if awk -F 
-done <<< "$branches"
-
-echo "Cleanup completed. Preview releases: $preview_removed; orphan tags: $orphan_removed; merged branches: $branch_removed; preserved non-main branches: $branch_kept."
-\t' -v branch="$name" -v sha="$sha" \
+  if awk -F $'\t' -v branch="$name" -v sha="$sha" \
        '$1 == branch && $2 == sha { found = 1 } END { exit !found }' <<< "$merged_heads"; then
     echo "Removing merged, unchanged branch: $name"
     gh api -X DELETE "repos/$REPO/git/refs/heads/$name" >/dev/null
@@ -88,8 +84,7 @@ echo "Cleanup completed. Preview releases: $preview_removed; orphan tags: $orpha
   elif [[ "$STABLE_TAG" == "v1.0.0" &&
           "$name" == "diagnostics/power-source-transition" &&
           "$sha" == "b914abdd9c437d56f3621a13e7455b19b54d070c" ]]; then
-    # Exception to preserve a clear main-only repository after issue #53
-    # captured unmerged diagnostic context from closed PR #44.
+    # Closed diagnostic PR #44 is preserved in GitHub history and issue #53.
     [[ "$(gh api "repos/$REPO/pulls/44" --jq '.state')" == "closed" ]] || exit 5
     [[ "$(gh api "repos/$REPO/pulls/44" --jq '.merged')" == "false" ]] || exit 5
     [[ "$(gh api "repos/$REPO/pulls/44" --jq '.head.sha')" == "$sha" ]] || exit 5

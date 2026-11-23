@@ -219,6 +219,13 @@ struct FirmwareLimitState: Equatable, Codable {
         activationByte == 0x00 && upper == 0 && lower == 0
     }
 
+    /// Dangerous post-reboot state: firmware claims charge limiting is
+    /// active, but both bounds are zero. This is never valid for control.
+    /// A separate snapshot-bound restore may recover it on verified AC.
+    var isActiveZeroed: Bool {
+        activationByte == 0x02 && upper == 0 && lower == 0
+    }
+
     var isValid: Bool {
         (activationByte == 0x00 || activationByte == 0x02)
             && (5...100).contains(upper)
@@ -419,6 +426,24 @@ struct FirmwareLimitController {
         }
     }
 
+    /// An explicit diagnostic read for the single active-zeroed state.
+    /// Unlike readState(), this is NEVER accepted as a control baseline,
+    /// and may only be returned to a read-only XPC client or used to invoke
+    /// exact snapshot restoration after independent authorization.
+    func readActiveZeroedForRecovery() throws -> FirmwareLimitState {
+        try validateKeyMetadata()
+        let activation = try readRaw(.activation).first ?? 0xFF
+        guard activation == 0x02 else {
+            throw FirmwareLimitCoreError.invalidActivation(activation)
+        }
+        guard let upper = FirmwareLimitPolicy.decodeUInt32LittleEndian(try readRaw(.upper)),
+              let lower = FirmwareLimitPolicy.decodeUInt32LittleEndian(try readRaw(.lower)),
+              upper == 0 && lower == 0 else {
+            throw FirmwareLimitCoreError.invalidStoredBand(upper: -1, lower: -1)
+        }
+        return FirmwareLimitState(activationByte: activation, upper: upper, lower: lower)
+    }
+
     /// Read-only planning. The returned sequence can be reviewed without
     /// changing the SMC or requiring AC power.
     func makePlan(for request: FirmwareLimitRequest) throws -> FirmwareLimitPlan {
@@ -486,8 +511,10 @@ struct FirmwareLimitController {
                   let previousLower = FirmwareLimitPolicy.decodeUInt32LittleEndian(try readRaw(.lower)) else {
                 throw FirmwareLimitCoreError.invalidOriginalSnapshot
             }
-            let zeroedAfterBoot = activation == 0x00
-                && previousUpper == 0 && previousLower == 0
+            // Full zeroing with either valid activation flag may occur
+            // during reboot. It is allowed ONLY here, with an identity-
+            // matched original-state snapshot and restore permit.
+            let zeroedAfterBoot = previousUpper == 0 && previousLower == 0
             guard zeroedAfterBoot || (
                 (5...100).contains(previousUpper)
                 && (5...100).contains(previousLower)
@@ -606,6 +633,17 @@ struct FirmwareLimitController {
     }
 
     private func recover(previous: FirmwareLimitState) -> String {
+        // NEVER write 0/0 back to SMC as a rollback. An inactive 0/0 state
+        // is not a valid firmware configuration; the Helper owns the
+        // already-persisted original snapshot and must restore THAT state.
+        if previous.isInactiveUninitialized {
+            do {
+                try writeAndVerify(.activation, bytes: [0x00])
+                return "inactive zeroed startup state left inactive; restore from saved original-state snapshot"
+            } catch {
+                return "unable to confirm inactive zeroed state; saved original-state snapshot must be retained"
+            }
+        }
         do {
             try writeAndVerify(.activation, bytes: [0x00])
             try writeAndVerify(.upper, bytes: FirmwareLimitPolicy.encodeUInt32LittleEndian(previous.upper))

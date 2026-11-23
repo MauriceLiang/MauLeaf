@@ -280,8 +280,8 @@ private enum FirmwareLimitCoreTests {
             "bfD0=50000000",
             "bfE0=4E000000"
         ], "inactive zero/zero restores upper before lower, preserving inactive activation")
-        expect(try controller(transport).readState() == original,
-               "restoration must pass exact hardware readback")
+        let verified = try controller(transport).readState()
+        expect(verified == original, "restoration must pass exact hardware readback")
 
         let badActive = FakeFirmwareLimitTransport()
         badActive.activation = 0x02

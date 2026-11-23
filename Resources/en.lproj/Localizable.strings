@@ -264,3 +264,16 @@
 "开启后每次退出会移除控制组件；关闭则保留。" = "On: remove the helper and scripts when quitting. Off: keep them installed.";
 "建议卸载前开启，退出并确认清理完成后再删除 App。" = "Before uninstalling, enable this, quit, then delete the app after cleanup succeeds.";
 "关闭后保留供电状态，仅隐藏供电流向图" = "When disabled, keep the power status visible and hide only the flow diagram.";
+"显示供电详情" = "Power details";
+"固件异常 · 待恢复" = "Firmware error · Recovery pending";
+"固件异常" = "Firmware error";
+"已配置 · 电池供电" = "Configured · On battery";
+"已读取原生固件状态。" = "Firmware status refreshed.";
+"等待恢复原始固件配置" = "Waiting to restore original firmware";
+"固件控制异常 · 已阻止新的限充写入" = "Firmware error · New charge-limit writes blocked";
+"重启后读到激活的无效固件上限 0/0；原始快照已保留。请连接充电器后通过关闭限充恢复原始配置。" = "Active invalid firmware limits (0/0) detected after restart. The original snapshot is preserved. Connect power and disable charge limiting to restore the original state.";
+"重启后读到激活的无效固件上限 0/0，且没有可信原始快照；已阻止写入，请保留 Helper 并反馈诊断。" = "Active invalid firmware limits (0/0) detected after restart without a trusted original snapshot. Writes are blocked. Keep the Helper installed and submit a diagnostic report.";
+"固件尚未恢复：已保留后台恢复任务。请连接电源或改善电池状态后重试正常退出；若仍然退出，删除应用前请先确认恢复完成。" = "Firmware not restored. The deferred recovery task remains saved. Connect power or improve battery conditions, then try quitting again. Verify restoration before deleting the app.";
+"无法确认三个固件寄存器已恢复，请勿删除 MauLeaf 或恢复服务。" = "Could not verify restoration of all three firmware registers. Do not delete MauLeaf or its recovery service.";
+"退出前已将限充恢复至原始固件配置并完成校验。现在可以安全关闭应用。" = "The original firmware configuration was restored and verified before quitting. It is now safe to close the app.";
+"应用包中缺少 MauLeaf 原生固件服务文件，请重新安装 MauLeaf。" = "The MauLeaf native firmware service is missing from the app bundle. Reinstall MauLeaf.";

@@ -21,7 +21,7 @@ done
 
 for doc in README.md README.en.md; do
   for shot in "${screenshots[@]}"; do
-    [[ "$(grep -Fc "](docs/screenshots/$shot.webp)" "$ROOT/$doc")" -eq 1 ]] || {
+    [[ "$(grep -Fc "<img src=\"docs/screenshots/$shot.webp\" width=\"300\"" "$ROOT/$doc")" -eq 1 ]] || {
       echo "$doc must show $shot exactly once" >&2; exit 1;
     }
   done

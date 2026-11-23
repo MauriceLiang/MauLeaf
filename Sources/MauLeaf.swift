@@ -1429,6 +1429,9 @@ final class ChargeManager: ObservableObject {
         if isBusy, let activeOperation, activeOperation.affectsLimit {
             return activeOperation.status
         }
+        if let state = currentState, state.isActiveZeroed {
+            return state.hasOriginalStateSnapshot ? "固件异常 · 待恢复" : "固件异常"
+        }
         if let state = currentState, state.isInactiveUninitialized {
             return state.hasOriginalStateSnapshot ? "重启后恢复中" : "固件未就绪"
         }
@@ -1448,6 +1451,9 @@ final class ChargeManager: ObservableObject {
             return "已暂停 · \(limit)%"
         }
         if currentState?.active == true && hasOriginalStateSnapshot {
+            // This is a persisted firmware setting, NOT an assertion that
+            // charge control is currently running while on battery.
+            if !isAdapterConnected { return "已配置 · 电池供电" }
             return "已启用 · \(dynamicHoldEnabled ? limit : (currentState?.upper ?? limit))%"
         }
         if hasOriginalStateSnapshot { return "待恢复" }
@@ -1789,6 +1795,12 @@ final class ChargeManager: ObservableObject {
             modeText = "本次充满进行中 · 原上限 \(oneTime.restoreUpper ?? limit)%"
             statusMessage = status
             isError = false
+        } else if state.isActiveZeroed {
+            modeText = "固件控制异常 · 已阻止新的限充写入"
+            statusMessage = state.hasOriginalStateSnapshot
+                ? "重启后读到激活的无效固件上限 0/0；原始快照已保留。请连接充电器后通过关闭限充恢复原始配置。"
+                : "重启后读到激活的无效固件上限 0/0，且没有可信原始快照；已阻止写入，请保留 Helper 并反馈诊断。"
+            isError = true
         } else if state.isInactiveUninitialized {
             modeText = "固件重启后尚未初始化限充阈值"
             statusMessage = state.hasOriginalStateSnapshot
@@ -1809,7 +1821,10 @@ final class ChargeManager: ObservableObject {
             isError = false
         }
 
-        if !state.writeSupported && !state.restoreSupported {
+        if state.isActiveZeroed {
+            // Do not overwrite a specific safety warning with the generic
+            // "unsupported" message; a trusted snapshot is recoverable.
+        } else if !state.writeSupported && !state.restoreSupported {
             statusMessage = AppText(verbatim: state.writeBlockReason ?? "当前硬件配置未通过原生写入验证。")
             isError = true
         } else if !state.writeSupported && state.restoreSupported {

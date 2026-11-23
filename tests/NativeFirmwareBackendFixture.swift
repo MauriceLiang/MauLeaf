@@ -24,6 +24,7 @@ final class FixtureNativeFirmwareBackend: NativeFirmwareBackend {
     var failNextApply = false
     var failNextRestore = false
     var failNextRead = false
+    var failLegacyZeroReadOnce = false
     var helperAvailable = true
     var reportedHelperVersion: Int?
     var reportedHelperBuildVersion: String?
@@ -35,9 +36,24 @@ final class FixtureNativeFirmwareBackend: NativeFirmwareBackend {
     var offlineRestoreAllowed = true
     var pendingLegacyRestore = false
 
+    /// Simulates a reboot on firmware that resets bfD0/bfE0 to zero
+    /// while the root-owned original snapshot survives.
+    func simulateFirmwareBootReset() {
+        state = FirmwareLimitHelperStateResponse(
+            state: FirmwareLimitState(activationByte: 0, upper: 0, lower: 0),
+            identity: identity, snapshot: originalSnapshot
+        )
+    }
+
     func readState() async throws -> FirmwareLimitHelperStateResponse {
         readCount += 1
         guard helperAvailable else { throw FirmwareLimitHelperClientError.serviceUnavailable }
+        if failLegacyZeroReadOnce {
+            failLegacyZeroReadOnce = false
+            throw FirmwareLimitHelperClientError.remote(
+                "Stored firmware limits are invalid: upper 0%, lower 0%."
+            )
+        }
         if failNextRead {
             failNextRead = false
             throw FixtureBackendError.injected

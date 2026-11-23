@@ -581,44 +581,16 @@ struct ContentView: View {
         .task { manager.start() }
     }
 
-    /// The default card is a compact three-row control surface. The
-    /// optional battery percentage adds a small header without reserving
-    /// empty space when disabled.
+    /// Power flow replaces the oversized battery percent and the redundant
+    /// power-status row. All watts live INSIDE their respective diagram nodes.
     private var batteryCard: some View {
         VStack(alignment: .leading, spacing: 3) {
-            if manager.showBatteryLevel {
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(manager.text("当前电量"))
-                        .font(.caption.weight(.medium))
-                        .foregroundStyle(.secondary)
-
-                    HStack(alignment: .firstTextBaseline, spacing: 2) {
-                        Text(manager.batteryPercent.map { String($0) } ?? "--")
-                            .font(.system(size: 42, weight: .semibold, design: .rounded))
-                            .monospacedDigit()
-                            .foregroundStyle(manager.batteryNumberColor)
-                            .contentTransition(.numericText())
-
-                        if manager.batteryPercent != nil {
-                            Text("%")
-                                .font(.system(size: 24, weight: .medium, design: .rounded))
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-                    .animation(.easeInOut(duration: 0.2), value: manager.batteryPercent)
-                }
-                .padding(.bottom, 3)
-                .transition(.opacity.combined(with: .move(edge: .top)))
+            if manager.showPowerFlow {
+                MauLeafPowerFlowView(flow: manager.powerFlow, language: manager.language)
+                    .padding(.bottom, 8)
+                    .transition(.opacity)
             }
 
-            statusRow(
-                icon: "powerplug",
-                title: "供电状态",
-                status: manager.popoverPowerStatus,
-                detail: manager.popoverPowerDetail,
-                highlighted: manager.isActivelyCharging
-            )
-            statusDivider
             statusRow(
                 icon: "checkmark.shield",
                 title: "限制充电",
@@ -645,7 +617,7 @@ struct ContentView: View {
             )
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .animation(.easeInOut(duration: 0.2), value: manager.showBatteryLevel)
+        .animation(.easeInOut(duration: 0.2), value: manager.showPowerFlow)
     }
 
     /// Power status remains read-only; charge status capsules are buttons.
@@ -856,9 +828,9 @@ struct ContentView: View {
     private var settingsControls: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 8) {
-                settingsLabel("显示当前电量")
+                settingsLabel("显示供电详情")
                 Spacer(minLength: 8)
-                Picker("", selection: $manager.showBatteryLevel) {
+                Picker("", selection: $manager.showPowerFlow) {
                     Text(manager.language == .english ? "Hide" : "关闭").tag(false)
                     Text(manager.language == .english ? "Show" : "开启").tag(true)
                 }
@@ -866,8 +838,8 @@ struct ContentView: View {
                 .labelsHidden()
                 .controlSize(.small)
                 .frame(width: 142)
-                .accessibilityLabel(manager.text("显示当前电量"))
-                .help(manager.text("在顶部卡片中显示当前电量百分比"))
+                .accessibilityLabel(manager.text("显示供电详情"))
+                .help(manager.text("在顶部显示适配器、电池与系统的功率流向"))
             }
             .frame(minHeight: 30)
 
@@ -1062,11 +1034,12 @@ final class ChargeManager: ObservableObject {
     @Published var language = AppLanguage.saved() {
         didSet { UserDefaults.standard.set(language.rawValue, forKey: AppLanguage.preferenceKey) }
     }
-    /// New installs and upgrades default to the compact card. Changing this
-    /// preference does not touch the privileged helper or firmware.
-    @Published var showBatteryLevel: Bool {
-        didSet { UserDefaults.standard.set(showBatteryLevel, forKey: "showBatteryLevel") }
+    /// New flow diagram defaults ON, regardless of legacy battery digits
+    /// preference. This only controls the read-only menu presentation.
+    @Published var showPowerFlow: Bool {
+        didSet { UserDefaults.standard.set(showPowerFlow, forKey: "showPowerFlow") }
     }
+    @Published private(set) var powerFlow = MauLeafPowerFlow(snapshot: nil)
     /// Experimental, explicit opt-in. Independent from the deprecated
     /// Preview 1 observation preference: existing installations are OFF.
     @Published private(set) var dynamicHoldEnabled: Bool {
@@ -1207,7 +1180,7 @@ final class ChargeManager: ObservableObject {
         }
         let saved = UserDefaults.standard.integer(forKey: "chargeLimit")
         limit = (50...95).contains(saved) ? saved : 80
-        showBatteryLevel = UserDefaults.standard.bool(forKey: "showBatteryLevel")
+        showPowerFlow = UserDefaults.standard.object(forKey: "showPowerFlow") as? Bool ?? true
         dynamicHoldEnabled = UserDefaults.standard.bool(forKey: "dynamicHoldEnabled")
         desiredLimitEnabled = UserDefaults.standard.bool(forKey: "desiredChargeLimitEnabled")
     }
@@ -2629,6 +2602,7 @@ final class ChargeManager: ObservableObject {
     private func readSystemBattery(allowDynamicScheduling: Bool = true) {
         let snapshot = batteryReader()
         recordPowerObservation(snapshot)
+        powerFlow = MauLeafPowerFlow(snapshot: snapshot)
         batteryPercent = snapshot.percent
         isAdapterConnected = snapshot.isACConnected == true
         if allowDynamicScheduling {

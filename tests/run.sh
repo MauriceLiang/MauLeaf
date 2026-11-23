@@ -198,7 +198,8 @@ if grep -Fq 'title: "供电状态"' <<< "$POPOVER_SOURCE"; then
     echo "Power source is already shown by the graph and must not be repeated" >&2
     exit 1
 fi
-if grep -Eq '当前电量|font\(\.system\(size: 42' <<< "$POPOVER_SOURCE"; then
+if grep -Fq 'Text(manager.text("当前电量"))' <<< "$POPOVER_SOURCE" \
+   || grep -Fq '.font(.system(size: 42,' <<< "$POPOVER_SOURCE"; then
     echo "The obsolete oversized battery percentage must not return" >&2
     exit 1
 fi

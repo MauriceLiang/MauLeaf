@@ -181,12 +181,41 @@ struct FeedbackLayoutTests {
                 }
             }
 
+            // Both presentations share one status source across all modes.
+            let statusCases: [(MauLeafPowerFlow.Mode, String, String)] = [
+                (.battery, "电池供电", "On Battery"),
+                (.adapter, "适配器供电", "On Adapter"),
+                (.charging, "充电中", "Charging"),
+                (.assisted, "电池辅助供电", "Battery Assist"),
+                (.unavailable, "供电状态未知", "Power Unknown")
+            ]
+            for (mode, chinese, english) in statusCases {
+                let expected = language == .english ? english : chinese
+                guard MauLeafPowerStatusBadge.title(for: mode, language: language) == expected else {
+                    fatalError("Collapsed status differs from full power diagram: \(expected)")
+                }
+                for scheme in [ColorScheme.dark, .light] {
+                    let compactHost = NSHostingView(rootView:
+                        MauLeafPowerStatusRow(mode: mode, language: language)
+                            .frame(width: 328).environment(\.colorScheme, scheme))
+                    compactHost.layoutSubtreeIfNeeded()
+                    let size = compactHost.fittingSize
+                    guard abs(size.width - 328) < 1.5, (24...56).contains(size.height) else {
+                        fputs("FAIL: compact power status overflows in \(language.rawValue), \(scheme), mode=\(mode), size=\(size)\n", stderr)
+                        exit(1)
+                    }
+                }
+            }
+
             manager.showPowerFlow = false
             try await Task.sleep(nanoseconds: 280_000_000)
             let hidden = measure()
             let hiddenCardHeight = measuredCardHeight()
-            guard hidden.0 < normal.0 - 85,
-                  hiddenCardHeight < diagramCardHeight - 85,
+            // A compact status line is intentionally retained: reclaim the
+            // watt-node/ribbon area, not the entire original header height.
+            guard hidden.0 < normal.0 - 50,
+                  hiddenCardHeight > 65,
+                  hiddenCardHeight < diagramCardHeight - 50,
                   !UserDefaults.standard.bool(forKey: "showPowerFlow")
                   && !containsScrollView(panelHost) else {
                 fputs("FAIL: hiding diagram must recover top space without scrolling: visible=\(normal), hidden=\(hidden)\n", stderr)
@@ -234,7 +263,7 @@ struct FeedbackLayoutTests {
                 fputs("FAIL: inline feedback layout: normal=\(normal), busy=\(busy), success=\(success), failure=\(failure); progress=\(limitProgress)\n", stderr)
                 exit(1)
             }
-            print("FeedbackLayoutTests: PASS (\(language.rawValue); single card=\(normal.0)pt, expanded limit=\(limitOpenHeight)pt, expanded settings=\(settingsOpenHeight)pt, status group=\(diagramCardHeight)pt, power flow and inline feedback)")
+            print("FeedbackLayoutTests: PASS (\(language.rawValue); single card=\(normal.0)pt, expanded limit=\(limitOpenHeight)pt, expanded settings=\(settingsOpenHeight)pt, status group=\(diagramCardHeight)pt, compact status badge, power flow and inline feedback)")
         }
         _ = await manager.prepareForTermination()
         UserDefaults.standard.removeObject(forKey: "nativeFirmwareWriteConfirmed")

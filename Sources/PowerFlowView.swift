@@ -4,6 +4,69 @@ import SwiftUI
 // connections of Status Trio (lingyired/status-trio, Apache-2.0).
 // Reimplemented for MauLeaf's read-only power metrics and 360pt popover.
 // No firmware or background sampling changes.
+/// The single source of truth for the status text and tint shared by the
+/// expanded power diagram and the collapsed read-only power-status row.
+struct MauLeafPowerStatusBadge: View {
+    let mode: MauLeafPowerFlow.Mode
+    let language: AppLanguage
+
+    static func title(for mode: MauLeafPowerFlow.Mode, language: AppLanguage) -> String {
+        let english = language == .english
+        switch mode {
+        case .battery: return english ? "On Battery" : "电池供电"
+        case .adapter: return english ? "On Adapter" : "适配器供电"
+        case .charging: return english ? "Charging" : "充电中"
+        case .assisted: return english ? "Battery Assist" : "电池辅助供电"
+        case .unavailable: return english ? "Power Unknown" : "供电状态未知"
+        }
+    }
+
+    static func tint(for mode: MauLeafPowerFlow.Mode) -> Color {
+        switch mode {
+        case .battery, .assisted: return .orange
+        case .adapter, .charging: return .green
+        case .unavailable: return .secondary
+        }
+    }
+
+    var body: some View {
+        HStack(spacing: 5) {
+            Circle()
+                .fill(Self.tint(for: mode))
+                .frame(width: 6, height: 6)
+                .accessibilityHidden(true)
+            Text(Self.title(for: mode, language: language))
+                .font(.system(size: 10, weight: .medium))
+                .lineLimit(1)
+                .minimumScaleFactor(0.82)
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 5)
+        .background(Color.primary.opacity(0.055), in: Capsule())
+        .accessibilityElement(children: .combine)
+    }
+}
+
+/// The display-only fallback is a short line, not an empty reserved chart.
+/// It never introduces additional polling or privileged power operations.
+struct MauLeafPowerStatusRow: View {
+    let mode: MauLeafPowerFlow.Mode
+    let language: AppLanguage
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Text(language == .english ? "Power" : "供电状态")
+                .font(.system(size: 13, weight: .semibold))
+                .lineLimit(1)
+            Spacer(minLength: 6)
+            MauLeafPowerStatusBadge(mode: mode, language: language)
+        }
+        .padding(.horizontal, 2)
+        .padding(.top, 4)
+        .padding(.bottom, 11)
+    }
+}
+
 struct MauLeafPowerFlowView: View {
     @Environment(\.colorScheme) private var colorScheme
 
@@ -60,24 +123,6 @@ struct MauLeafPowerFlowView: View {
         language == .english ? english : chinese
     }
 
-    private var status: String {
-        switch flow.mode {
-        case .battery: return tr("电池供电", "On Battery")
-        case .adapter: return tr("适配器供电", "On Adapter")
-        case .charging: return tr("充电中", "Charging")
-        case .assisted: return tr("电池辅助供电", "Battery Assist")
-        case .unavailable: return tr("供电状态未知", "Power Unknown")
-        }
-    }
-
-    private var statusTint: Color {
-        switch flow.mode {
-        case .battery, .assisted: return .orange
-        case .adapter, .charging: return .green
-        case .unavailable: return .secondary
-        }
-    }
-
     private var sources: [Metric] {
         switch flow.mode {
         case .battery:
@@ -123,16 +168,7 @@ struct MauLeafPowerFlowView: View {
                 Text(tr("供电详情", "Power Flow"))
                     .font(.system(size: 13, weight: .semibold))
                 Spacer(minLength: 6)
-                HStack(spacing: 5) {
-                    Circle().fill(statusTint).frame(width: 6, height: 6)
-                    Text(status)
-                        .font(.system(size: 10, weight: .medium))
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.82)
-                }
-                .padding(.horizontal, 8)
-                .padding(.vertical, 5)
-                .background(Color.primary.opacity(0.055), in: Capsule())
+                MauLeafPowerStatusBadge(mode: flow.mode, language: language)
             }
 
             if flow.mode == .unavailable {
@@ -382,7 +418,9 @@ struct MauLeafPowerFlowView: View {
         let entries = (sources + destinations).map {
             "\($0.label) \(MauLeafPowerFlow.display($0.watts))"
         }
-        return ([tr("供电详情", "Power Flow"), status] + entries).joined(separator: "，")
+        return ([tr("供电详情", "Power Flow"),
+                 MauLeafPowerStatusBadge.title(for: flow.mode, language: language)] + entries)
+            .joined(separator: "，")
     }
 }
 

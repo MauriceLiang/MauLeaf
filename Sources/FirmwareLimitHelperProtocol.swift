@@ -20,7 +20,7 @@ enum FirmwareLimitHelperProtocolVersion {
 
     /// Increment this floor only when a Helper behavior fix is required by
     /// the app. A cosmetic app version must NEVER change it.
-    static let minimumBuild = "1.1.0"
+    static let minimumBuild = "1.2.0"
     /// The new v6 Helper accepts a 100% temporary firmware ceiling.
     /// Unversioned older Helpers are not considered compatible.
     static let acceptsUnversionedV5 = false
@@ -56,7 +56,7 @@ enum FirmwareLimitHelperProtocolVersion {
 /// Version of the privileged binary, distinct from MauLeaf's app version.
 /// A UI-only change does not change this constant.
 enum FirmwareLimitHelperBuildVersion {
-    static let current = "1.1.0"
+    static let current = "1.2.0"
 }
 
 struct FirmwareLimitHelperStateResponse: Codable, Equatable {
@@ -90,7 +90,15 @@ struct FirmwareLimitHelperStateResponse: Codable, Equatable {
         restorePending = durableRecoveryRecorded
             && ((snapshot?.restoreRequested ?? false) || legacyRestorePending)
         if let identity {
-            writeBlockReason = FirmwareLimitWritePermit.targetBlockReason(identity: identity)
+            let identityBlock = FirmwareLimitWritePermit.targetBlockReason(identity: identity)
+            // On a cold reboot bfF0 can report inactive with bfD0/bfE0
+            // both zero. Do not create a new snapshot from those values.
+            // A valid existing snapshot may be used for managed recovery.
+            writeBlockReason = identityBlock ?? (
+                state.isInactiveUninitialized && snapshot == nil
+                    ? "Firmware limits are not initialized after startup; no managed recovery snapshot is present."
+                    : nil
+            )
             writeSupported = writeBlockReason == nil
             if let snapshot {
                 restoreBlockReason = FirmwareLimitWritePermit.restoreBlockReason(
@@ -107,8 +115,8 @@ struct FirmwareLimitHelperStateResponse: Codable, Equatable {
             }
             restoreSupported = restoreBlockReason == nil
         } else {
-            writeSupported = true
-            writeBlockReason = nil
+            writeSupported = state.isValid || (state.isInactiveUninitialized && snapshot != nil)
+            writeBlockReason = writeSupported ? nil : "Firmware limits are not initialized."
             restoreSupported = true
             restoreBlockReason = nil
         }

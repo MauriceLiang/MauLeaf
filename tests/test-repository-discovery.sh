@@ -1,22 +1,34 @@
 #!/usr/bin/env bash
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-for name in zh-overview zh-limit-expanded en-overview en-limit-expanded; do
+# The README showcases the four real v1.0 screenshots, organized by
+# interface language and expanded/collapsed Power Flow modes.
+screenshots=(
+  zh-power-compact
+  zh-power-flow
+  en-power-flow
+  en-power-compact
+)
+for name in "${screenshots[@]}"; do
   asset="$ROOT/docs/screenshots/$name.webp"
   test -s "$asset" || { echo "Missing screenshot: $asset" >&2; exit 1; }
-  # RIFF/WebP file signature. Avoid dependency on ImageMagick or PIL in CI.
+  # RIFF/WebP signature: no ImageMagick or Python dependencies in CI.
   test "$(head -c 4 "$asset")" = "RIFF" || { echo "Not RIFF: $name" >&2; exit 1; }
   test "$(dd if="$asset" bs=1 skip=8 count=4 2>/dev/null)" = "WEBP" || {
     echo "Not WebP: $name" >&2; exit 1;
   }
 done
 
-for pair in 'README.md:zh-overview' 'README.md:zh-limit-expanded' 'README.en.md:en-overview' 'README.en.md:en-limit-expanded'; do
-  doc="${pair%%:*}"
-  shot="${pair##*:}"
-  grep -Fq "docs/screenshots/$shot.webp" "$ROOT/$doc" || {
-    echo "README missing screenshot: $shot" >&2; exit 1;
-  }
+for doc in README.md README.en.md; do
+  for shot in "${screenshots[@]}"; do
+    [[ "$(grep -Fc "<img src=\"docs/screenshots/$shot.webp\" width=\"300\"" "$ROOT/$doc")" -eq 1 ]] || {
+      echo "$doc must show $shot exactly once" >&2; exit 1;
+    }
+  done
+  if grep -Eq 'docs/screenshots/(zh|en)-(overview|limit-expanded)\.webp' "$ROOT/$doc"; then
+    echo "$doc still references obsolete preview screenshots" >&2
+    exit 1
+  fi
 done
 
 for doc in README.md README.en.md; do

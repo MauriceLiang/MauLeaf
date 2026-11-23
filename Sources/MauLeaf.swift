@@ -1856,6 +1856,12 @@ final class ChargeManager: ObservableObject {
         helperNeedsUpgrade = false
         helperTooNew = false
         helperStateUnknown = false
+        // Migration from the former active-only model. Never infer an
+        // intent from an unknown active state without MauLeaf's snapshot.
+        if UserDefaults.standard.object(forKey: "desiredChargeLimitEnabled") == nil,
+           state.active && state.hasOriginalStateSnapshot && !state.restorePending {
+            setDesiredLimitEnabled(true)
+        }
         let fullChargeJustEnded = fullOncePending && !oneTime.pending
         fullOncePending = oneTime.pending
         fullOnceCancelRequested = oneTime.cancelRequested
@@ -2168,6 +2174,9 @@ final class ChargeManager: ObservableObject {
 
     func disableLimit() {
         guard (canDisableLimit || canRetryOriginalRestore) else { return }
+        setDesiredLimitEnabled(false)
+        automaticReconnectApplyTask?.cancel()
+        automaticReconnectApplyTask = nil
         lastAction = nil
         Task { await restoreOriginalFirmwareState() }
     }
@@ -2180,6 +2189,7 @@ final class ChargeManager: ObservableObject {
     func confirmDisableLegacyLimit() {
         showLegacyDisableConfirmation = false
         guard canDisableLegacyLimit else { return }
+        setDesiredLimitEnabled(false)
         Task { await restoreOriginalFirmwareState() }
     }
 
@@ -2327,7 +2337,11 @@ final class ChargeManager: ObservableObject {
         isError = false
         statusMessage = "正在写入原生固件充电上限 \(plan.upper)%…"
         autoApplyFeedback = "正在应用 \(plan.upper)%…"
-        defer { isBusy = false; activeOperation = nil }
+        defer {
+            isBusy = false
+            activeOperation = nil
+            if !isAdapterConnected { scheduleUnpluggedFirmwareRestore() }
+        }
         do {
             let response = try await backend.applyLimit(
                 upper: plan.upper,
@@ -2343,6 +2357,7 @@ final class ChargeManager: ObservableObject {
             restoreReady = response.state.restoreSupported
             fullOncePending = response.oneTimePending
             fullOnceCancelRequested = false
+            setDesiredLimitEnabled(true)
             dynamicSessionUpper = plan.isTemporary ? plan.upper : nil
             dynamicNeedsNewCapture = false
             dynamicRetryAfter = nil
@@ -2424,6 +2439,10 @@ final class ChargeManager: ObservableObject {
         limitDebounce = nil
         dynamicReconcileTask?.cancel()
         dynamicReconcileTask = nil
+        automaticUnplugRestoreTask?.cancel()
+        automaticUnplugRestoreTask = nil
+        automaticReconnectApplyTask?.cancel()
+        automaticReconnectApplyTask = nil
         pendingAction = nil
         lastAction = nil
         showNativeWriteConfirmation = false
@@ -2512,6 +2531,7 @@ final class ChargeManager: ObservableObject {
             backendReady = verified.writeSupported
             restoreReady = verified.restoreSupported
             modeText = "限制充电未启用"
+            setDesiredLimitEnabled(false)
             didVerifyFirmwareOnQuit = true
             statusMessage = "退出前已将限充恢复至原始固件配置并完成校验。现在可以安全关闭应用。"
             isError = false
@@ -2545,6 +2565,10 @@ final class ChargeManager: ObservableObject {
             powerRecheckTask = nil
             dynamicReconcileTask?.cancel()
             dynamicReconcileTask = nil
+            automaticUnplugRestoreTask?.cancel()
+            automaticUnplugRestoreTask = nil
+            automaticReconnectApplyTask?.cancel()
+            automaticReconnectApplyTask = nil
             powerSourceObserver?.stop()
             powerSourceObserver = nil
             return true

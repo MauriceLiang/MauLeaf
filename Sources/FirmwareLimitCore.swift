@@ -211,6 +211,14 @@ struct FirmwareLimitState: Equatable, Codable {
     let lower: Int
 
     var isActive: Bool { activationByte == 0x02 }
+
+    /// The target firmware can report zeroed limit registers after boot
+    /// while bfF0 is inactive. This is safe to *observe* but is not a
+    /// valid original snapshot or evidence that restoration succeeded.
+    var isInactiveUninitialized: Bool {
+        activationByte == 0x00 && upper == 0 && lower == 0
+    }
+
     var isValid: Bool {
         (activationByte == 0x00 || activationByte == 0x02)
             && (5...100).contains(upper)
@@ -475,15 +483,24 @@ struct FirmwareLimitController {
                 throw FirmwareLimitCoreError.invalidActivation(activation)
             }
             guard let previousUpper = FirmwareLimitPolicy.decodeUInt32LittleEndian(try readRaw(.upper)),
-                  let previousLower = FirmwareLimitPolicy.decodeUInt32LittleEndian(try readRaw(.lower)),
-                  (5...100).contains(previousUpper),
-                  (5...100).contains(previousLower) else {
+                  let previousLower = FirmwareLimitPolicy.decodeUInt32LittleEndian(try readRaw(.lower)) else {
+                throw FirmwareLimitCoreError.invalidOriginalSnapshot
+            }
+            let zeroedAfterBoot = activation == 0x00
+                && previousUpper == 0 && previousLower == 0
+            guard zeroedAfterBoot || (
+                (5...100).contains(previousUpper)
+                && (5...100).contains(previousLower)
+            ) else {
                 throw FirmwareLimitCoreError.invalidOriginalSnapshot
             }
             if activation == 0x02 {
                 try writeAndVerify(.activation, bytes: [0x00], preflight: preflight)
             }
-            let upperFirst = original.upper > previousLower
+            // A zero/zero interval has no valid ordering. Rebuild it only
+            // through the existing identity-bound, persisted-snapshot
+            // restore permit; never try to save zeroes as the original state.
+            let upperFirst = zeroedAfterBoot || original.upper > previousLower
             if upperFirst {
                 if previousUpper != original.upper {
                     try writeAndVerify(.upper, bytes: FirmwareLimitPolicy.encodeUInt32LittleEndian(original.upper), preflight: preflight)
@@ -624,13 +641,17 @@ struct FirmwareLimitController {
             throw FirmwareLimitCoreError.invalidActivation(activationBytes.first ?? 0xFF)
         }
         guard let upper = FirmwareLimitPolicy.decodeUInt32LittleEndian(try readRaw(.upper)),
-              let lower = FirmwareLimitPolicy.decodeUInt32LittleEndian(try readRaw(.lower)),
-              (5...100).contains(upper), (5...100).contains(lower), lower < upper else {
-            let upper = FirmwareLimitPolicy.decodeUInt32LittleEndian((try? readRaw(.upper)) ?? []) ?? -1
-            let lower = FirmwareLimitPolicy.decodeUInt32LittleEndian((try? readRaw(.lower)) ?? []) ?? -1
+              let lower = FirmwareLimitPolicy.decodeUInt32LittleEndian(try readRaw(.lower)) else {
+            throw FirmwareLimitCoreError.invalidStoredBand(upper: -1, lower: -1)
+        }
+        let state = FirmwareLimitState(activationByte: activation, upper: upper, lower: lower)
+        // Read-only reporting can represent this one exact transient
+        // post-reboot state. Active zero/zero or any malformed band still
+        // fails closed. Callers must never snapshot it as the original state.
+        guard state.isValid || state.isInactiveUninitialized else {
             throw FirmwareLimitCoreError.invalidStoredBand(upper: upper, lower: lower)
         }
-        return FirmwareLimitState(activationByte: activation, upper: upper, lower: lower)
+        return state
     }
 
     private func readRaw(_ key: FirmwareLimitKey) throws -> [UInt8] {

@@ -161,6 +161,9 @@ private enum ChargeManagerTests {
 
         try await testDynamicHoldAboveTargetAndReconnect()
         try await testDynamicHoldSuspendsDuringOneTimeFullCharge()
+        try await testManagedBootZeroRecovery()
+        try await testUnmanagedBootZeroNoWrite()
+        try await testLegacyHelperZeroReadUpgradesOnce()
         try await testImmediatePowerEventRefresh()
         try await testFirstLaunchDefersAuthorization()
         try await testMissingHelperQuitsWithoutAuthorization()
@@ -348,6 +351,98 @@ private enum ChargeManagerTests {
         UserDefaults.standard.set(false, forKey: "nativeFirmwareWriteConfirmed")
         UserDefaults.standard.removeObject(forKey: "dynamicHoldEnabled")
         UserDefaults.standard.set(80, forKey: "chargeLimit")
+    }
+
+    @MainActor
+    private static func testManagedBootZeroRecovery() async throws {
+        UserDefaults.standard.set(80, forKey: "chargeLimit")
+        UserDefaults.standard.set(false, forKey: "dynamicHoldEnabled")
+        UserDefaults.standard.set(true, forKey: "nativeFirmwareWriteConfirmed")
+        let backend = FixtureNativeFirmwareBackend()
+        _ = try await backend.applyLimit(upper: 80, lower: 78, confirmed: true)
+        backend.simulateFirmwareBootReset()
+
+        let reader = MauLeafBatterySnapshot(
+            percent: 88, isCharging: false, isFullyCharged: false,
+            isACConnected: true, amperageMilliAmps: 0, precisePercent: 88
+        )
+        let manager = ChargeManager(
+            backend: backend, autoInstallNativeHelper: false,
+            batteryReader: { reader }, observePowerSourceChanges: false,
+            dynamicSettleInterval: 0.01, rebootSettleInterval: 0.05
+        )
+        manager.start()
+        try await wait { manager.currentState?.isInactiveUninitialized == true }
+        try check(manager.popoverLimitStatus.source == "重启后恢复中"
+                  && manager.hasOriginalStateSnapshot && backend.applyCount == 1,
+                  "inactive zeroed SMC with snapshot is shown as recoverable, never mistaken for 0 percent limit")
+        try await wait { backend.applyCount == 2 && !manager.isBusy && backend.state.active }
+        try check(backend.state.upper == 80 && backend.state.lower == 78
+                  && manager.limit == 80 && manager.hasOriginalStateSnapshot,
+                  "after a stable charger interval reapply the prior user target and retain original snapshot")
+        let stopped = await manager.prepareForTermination()
+        try check(stopped && !backend.state.active && !manager.hasOriginalStateSnapshot,
+                  "after restart recovery normal exit still restores the exact original state")
+        UserDefaults.standard.set(false, forKey: "nativeFirmwareWriteConfirmed")
+    }
+
+    @MainActor
+    private static func testUnmanagedBootZeroNoWrite() async throws {
+        UserDefaults.standard.set(false, forKey: "dynamicHoldEnabled")
+        UserDefaults.standard.set(true, forKey: "nativeFirmwareWriteConfirmed")
+        let backend = FixtureNativeFirmwareBackend()
+        backend.simulateFirmwareBootReset()
+        let battery = MauLeafBatterySnapshot(
+            percent: 88, isCharging: false, isFullyCharged: false,
+            isACConnected: true, precisePercent: 88
+        )
+        let manager = ChargeManager(
+            backend: backend, autoInstallNativeHelper: false,
+            batteryReader: { battery }, observePowerSourceChanges: false,
+            dynamicSettleInterval: 0.01, rebootSettleInterval: 0.05
+        )
+        manager.start()
+        try await wait { manager.currentState?.isInactiveUninitialized == true }
+        try await Task.sleep(nanoseconds: 180_000_000)
+        try check(manager.popoverLimitStatus.source == "固件未就绪"
+                  && !manager.hasOriginalStateSnapshot
+                  && backend.applyCount == 0 && !manager.canEnableLimit,
+                  "without a valid pre-install snapshot, 0/0 remains read-only and must not auto-write")
+        UserDefaults.standard.set(false, forKey: "nativeFirmwareWriteConfirmed")
+    }
+
+    @MainActor
+    private static func testLegacyHelperZeroReadUpgradesOnce() async throws {
+        UserDefaults.standard.set(80, forKey: "chargeLimit")
+        UserDefaults.standard.set(false, forKey: "dynamicHoldEnabled")
+        UserDefaults.standard.set(true, forKey: "nativeFirmwareWriteConfirmed")
+        let backend = FixtureNativeFirmwareBackend()
+        _ = try await backend.applyLimit(upper: 80, lower: 78, confirmed: true)
+        backend.simulateFirmwareBootReset()
+        backend.failLegacyZeroReadOnce = true
+        var upgrades = 0
+        let battery = MauLeafBatterySnapshot(
+            percent: 88, isCharging: false, isFullyCharged: false,
+            isACConnected: true, precisePercent: 88
+        )
+        let manager = ChargeManager(
+            backend: backend, autoInstallNativeHelper: false,
+            autoUpgradeInstalledHelperOnLaunch: true,
+            helperInstallerForTesting: { upgrades += 1 },
+            helperArtifactsPresent: { true },
+            batteryReader: { battery }, observePowerSourceChanges: false,
+            dynamicSettleInterval: 0.01, rebootSettleInterval: 0.05
+        )
+        manager.start()
+        try await wait { upgrades == 1 && manager.currentState != nil }
+        try await wait { backend.applyCount == 2 && backend.state.active && !manager.isBusy }
+        manager.refresh()
+        try await Task.sleep(nanoseconds: 80_000_000)
+        try check(upgrades == 1 && manager.hasOriginalStateSnapshot,
+                  "old Helper 0/0 read error upgrades once and restores managed limit without deleting snapshot")
+        let stopped = await manager.prepareForTermination()
+        try check(stopped && !backend.state.active, "post-upgrade quit still restores original state")
+        UserDefaults.standard.set(false, forKey: "nativeFirmwareWriteConfirmed")
     }
 
     @MainActor
@@ -562,7 +657,8 @@ private enum ChargeManagerTests {
 
     @MainActor
     private static func testOutdatedBuildWithCompatibleProtocolUpgrades() async throws {
-        try check(FirmwareLimitHelperProtocolVersion.isCompatible(6, build: "1.1.0")
+        try check(FirmwareLimitHelperProtocolVersion.isCompatible(6, build: "1.2.0")
+                  && !FirmwareLimitHelperProtocolVersion.isCompatible(6, build: "1.1.0")
                   && FirmwareLimitHelperProtocolVersion.isCompatible(6, build: "1.2.3")
                   && !FirmwareLimitHelperProtocolVersion.isCompatible(6, build: nil)
                   && !FirmwareLimitHelperProtocolVersion.isCompatible(5, build: "1.0.0")

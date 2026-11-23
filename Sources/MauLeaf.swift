@@ -1141,6 +1141,7 @@ final class ChargeManager: ObservableObject {
     private var dynamicReconcileTask: Task<Void, Never>?
     private var dynamicRetryAfter: Date?
     private let dynamicSettleInterval: TimeInterval
+    private let rebootSettleInterval: TimeInterval
     private var lastDynamicAppliedUpper: Int?
     @Published private(set) var currentState: FirmwareLimitHelperStateResponse?
     private var pendingAction: PendingAction?
@@ -1175,12 +1176,14 @@ final class ChargeManager: ObservableObject {
         hardwarePreflightForTesting: (() -> String?)? = nil,
         batteryReader: @escaping () -> MauLeafBatterySnapshot = { MauLeafFastBatteryReader.read() },
         observePowerSourceChanges: Bool? = nil,
-        dynamicSettleInterval: TimeInterval = 8.0
+        dynamicSettleInterval: TimeInterval = 8.0,
+        rebootSettleInterval: TimeInterval = 15.0
     ) {
         self.backend = backend
         self.autoInstallNativeHelper = autoInstallNativeHelper
         self.batteryReader = batteryReader
         self.dynamicSettleInterval = max(0, dynamicSettleInterval)
+        self.rebootSettleInterval = max(0, rebootSettleInterval)
         // Fixture managers default to no OS observer; the real app enables
         // native events with the existing 20s background polling fallback.
         self.observePowerSourceChanges = observePowerSourceChanges ?? autoInstallNativeHelper
@@ -1283,16 +1286,34 @@ final class ChargeManager: ObservableObject {
     /// The macOS ExternalConnected field was measured to lag actual unplugging
     /// by several seconds on this firmware. Never write on unplug, and never
     /// trust one early "AC" sample as proof that a charger is still connected.
+    /// A reboot may return bfF0 inactive and both thresholds zero while
+    /// retaining the verified original snapshot. Recovery is allowed only
+    /// for a pre-authorized, managed limit; an unknown zero state with no
+    /// snapshot is read-only and must never become the new baseline.
+    private var needsManagedBootReapply: Bool {
+        guard let state = currentState else { return false }
+        return state.isInactiveUninitialized && state.hasOriginalStateSnapshot
+            && !state.restorePending && !fullOncePending
+            && UserDefaults.standard.bool(forKey: "nativeFirmwareWriteConfirmed")
+    }
+
     private func scheduleDynamicHoldReconciliation() {
         dynamicReconcileTask?.cancel()
         dynamicReconcileTask = nil
         guard started, !isPreparingToQuit, !fullOncePending,
-              let state = currentState, state.active && state.hasOriginalStateSnapshot,
+              let state = currentState, state.hasOriginalStateSnapshot,
+              (state.active || needsManagedBootReapply),
               state.writeSupported, isAdapterConnected,
               dynamicLastAC == true else { return }
 
+        let bootReapply = needsManagedBootReapply
         let stableSince = dynamicACStableSince ?? Date()
-        let waitSeconds = max(0, dynamicSettleInterval - Date().timeIntervalSince(stableSince))
+        // Allow the SMC more time to finish its boot-time initialization
+        // before reconfiguring any managed firmware limits.
+        let requiredStableTime = bootReapply
+            ? max(rebootSettleInterval, dynamicSettleInterval)
+            : dynamicSettleInterval
+        let waitSeconds = max(0, requiredStableTime - Date().timeIntervalSince(stableSince))
         dynamicReconcileTask = Task { [weak self] in
             try? await Task.sleep(nanoseconds: UInt64(waitSeconds * 1_000_000_000))
             guard !Task.isCancelled, let self,
@@ -1306,14 +1327,31 @@ final class ChargeManager: ObservableObject {
             guard !Task.isCancelled else { return }
             let b = self.batteryReader()
             guard a.isACConnected == true, b.isACConnected == true,
-                  a.precisePercent != nil, b.precisePercent != nil else { return }
+                  (!self.dynamicHoldEnabled ||
+                   (a.precisePercent != nil && b.precisePercent != nil)) else { return }
             self.readSystemBattery(allowDynamicScheduling: false)
-            guard let current = self.currentState, current.active, current.hasOriginalStateSnapshot,
+            guard let current = self.currentState, current.hasOriginalStateSnapshot,
+                  (current.active || self.needsManagedBootReapply),
                   current.writeSupported, !self.isBusy, self.isAdapterConnected,
                   self.dynamicLastAC == true else { return }
             if let retryAfter = self.dynamicRetryAfter, retryAfter > Date() { return }
+            // A previously zeroed SMC may have become ready on its own.
+            // Re-read the privileged Helper immediately before deciding
+            // whether a restart recovery write is still appropriate.
+            if bootReapply {
+                guard let fresh = try? await self.backend.readState() else { return }
+                guard fresh.isInactiveUninitialized && fresh.hasOriginalStateSnapshot
+                        && !fresh.restorePending && fresh.writeSupported else {
+                    let once = try? await self.backend.oneTimeChargeStatus()
+                    if let once {
+                        self.updateFromNativeState(fresh, oneTime: once,
+                                                   status: "已重新读取固件启动状态。")
+                    }
+                    return
+                }
+            }
             guard let plan = self.computedDynamicPlan(userTarget: self.limit) else { return }
-            guard current.upper != plan.upper || current.lower != plan.lower else { return }
+            guard bootReapply || current.upper != plan.upper || current.lower != plan.lower else { return }
             await self.applyLimit(self.limit)
         }
     }
@@ -1390,6 +1428,9 @@ final class ChargeManager: ObservableObject {
     var popoverLimitStatus: AppText {
         if isBusy, let activeOperation, activeOperation.affectsLimit {
             return activeOperation.status
+        }
+        if let state = currentState, state.isInactiveUninitialized {
+            return state.hasOriginalStateSnapshot ? "重启后恢复中" : "固件未就绪"
         }
         if helperStateUnknown { return "状态未知" }
         if helperNeedsUpgrade {
@@ -1666,8 +1707,27 @@ final class ChargeManager: ObservableObject {
                 modeText = "固件控制状态未知"
                 statusMessage = "无法连接固件控制服务；请保留恢复组件：\(AppText(error: error))"
                 isError = true
+                // Preview 4 Helper could not report inactive 0/0 after boot
+                // and fails before it can advertise its build version.
+                // Replace that known older binary once, using the existing
+                // root-preserving installer. Never classify arbitrary remote
+                // failures as a clean or reinstallable firmware state.
+                if isLegacyInactiveZeroFailure(error)
+                    && autoUpgradeInstalledHelperOnLaunch
+                    && !attemptedStartupHelperUpgrade
+                    && (autoInstallNativeHelper || helperInstallerForTesting != nil)
+                    && helperArtifactsPresent() {
+                    attemptedStartupHelperUpgrade = true
+                    Task { await repairNativeHelperAfterUserAction() }
+                }
             }
         }
+    }
+
+    private func isLegacyInactiveZeroFailure(_ error: Error) -> Bool {
+        guard let failure = error as? FirmwareLimitHelperClientError,
+              case .remote(let message) = failure else { return false }
+        return message.contains("Stored firmware limits are invalid: upper 0%, lower 0%.")
     }
 
     private func updateFromNativeState(
@@ -1710,7 +1770,8 @@ final class ChargeManager: ObservableObject {
             // *confirmed* unplug/replug, avoiding repeated SMC rewrites.
             dynamicSessionUpper = state.upper
         }
-        if started && state.active && state.hasOriginalStateSnapshot && !oneTime.pending {
+        if started && state.hasOriginalStateSnapshot && !oneTime.pending
+            && (state.active || needsManagedBootReapply) {
             scheduleDynamicHoldReconciliation()
         }
 
@@ -1727,6 +1788,12 @@ final class ChargeManager: ObservableObject {
         } else if oneTime.pending {
             modeText = "本次充满进行中 · 原上限 \(oneTime.restoreUpper ?? limit)%"
             statusMessage = status
+            isError = false
+        } else if state.isInactiveUninitialized {
+            modeText = "固件重启后尚未初始化限充阈值"
+            statusMessage = state.hasOriginalStateSnapshot
+                ? "已保留原始固件快照；待连接电源稳定后恢复原先的限充设置。"
+                : "固件限充值暂不可用，尚无可验证的恢复快照；不会自动写入。"
             isError = false
         } else if state.active && state.hasOriginalStateSnapshot {
             modeText = "限制充电已启用 · 上限 \(state.upper)%"
@@ -2398,7 +2465,8 @@ final class ChargeManager: ObservableObject {
             // With the same charger session, only a genuine policy divergence
             // (e.g. falling below original target) needs another SMC write.
             // Scheduling is debounced; a matching SMC interval is a no-op.
-            if snapshot.isACConnected == true, currentState?.active == true {
+            if snapshot.isACConnected == true,
+               currentState?.active == true || needsManagedBootReapply {
                 scheduleDynamicHoldReconciliation()
             }
         }

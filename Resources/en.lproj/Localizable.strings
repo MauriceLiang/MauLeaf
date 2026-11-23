@@ -247,3 +247,9 @@
 "本次充满期间不可修改动态保电" = "Dynamic Hold cannot be changed during one-time full charge";
 "本次充满期间动态保电已暂停，完成后自动恢复。" = "Dynamic Hold is paused during one-time full charge and resumes afterward.";
 "本次充满期间不可修改动态保电设置。" = "Dynamic Hold settings cannot be changed during one-time full charge.";
+"重启后恢复中" = "Restoring after restart";
+"固件未就绪" = "Firmware not ready";
+"固件重启后尚未初始化限充阈值" = "Firmware limits not initialized after restart";
+"已保留原始固件快照；待连接电源稳定后恢复原先的限充设置。" = "Original firmware snapshot preserved. Previous charge limit will be resumed after AC stabilizes.";
+"固件限充值暂不可用，尚无可验证的恢复快照；不会自动写入。" = "Firmware limits are not initialized and no verified recovery snapshot exists. No automatic write will be performed.";
+"已重新读取固件启动状态。" = "Firmware startup state refreshed.";

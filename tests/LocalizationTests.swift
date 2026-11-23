@@ -109,11 +109,12 @@ struct LocalizationTests {
               && translations["在顶部卡片中显示当前电量百分比"] == "Show the battery percentage in the overview card"
               && chinese["显示当前电量"] == "显示当前电量",
               "optional battery setting is fully localized")
-        for key in ["供电刷新间隔", "仅菜单面板打开时刷新功率，拔插电事件仍即时更新",
+        for key in ["退出时移除组件", "开启后每次退出会移除控制组件；关闭则保留。",
+                    "建议卸载前开启，退出并确认清理完成后再删除 App。",
                     "高于目标时保持电量；关闭后在已测试机型上可能出现拔电识别延迟",
                     "超限时保持电量；关闭后拔电识别可能延迟（已测试机型）。"] {
             check(chinese[key] == key && translations[key] != nil && translations[key] != key,
-                  "refresh setting and Dynamic Hold warning localize in both languages: \(key)")
+                  "quit policy and Dynamic Hold warning localize in both languages: \(key)")
         }
         check(translations["目标 %@%% · 临时上限 %@%%"] != nil
               && translations["动态保电已应用：目标 %@%%，临时上限 %@%%。"] != nil,

@@ -46,7 +46,7 @@ if [[ "$(uname -s)" == Darwin ]]; then
     swiftc -parse-as-library -D MAULEAF_TESTING \
         -framework SwiftUI -framework AppKit -framework Combine -framework IOKit \
         "$ROOT/Sources/MauLeaf.swift" "$ROOT/Sources/AppLocalization.swift" \
-        "$ROOT/Sources/BatteryStatusReader.swift" "$ROOT/Sources/PowerFlowModel.swift" "$ROOT/Sources/PowerFlowView.swift" "$ROOT/Sources/FastBatteryReader.swift" "$ROOT/Sources/PowerSourceObserver.swift" "$ROOT/Sources/AboveLimitPowerPolicy.swift" "$ROOT/Sources/DynamicHoldPolicy.swift" "$ROOT/Sources/FirmwareLimitCore.swift" \
+        "$ROOT/Sources/BatteryStatusReader.swift" "$ROOT/Sources/PowerFlowModel.swift" "$ROOT/Sources/PowerFlowView.swift" "$ROOT/Sources/FastBatteryReader.swift" "$ROOT/Sources/LivePowerReader.swift" "$ROOT/Sources/PowerSourceObserver.swift" "$ROOT/Sources/AboveLimitPowerPolicy.swift" "$ROOT/Sources/DynamicHoldPolicy.swift" "$ROOT/Sources/FirmwareLimitCore.swift" \
         "$ROOT/Sources/FirmwareLimitReconciliation.swift" "$ROOT/Sources/SystemFirmwareReader.swift" "$ROOT/Sources/FirmwareLimitRuntime.swift" \
         "$ROOT/Sources/FirmwareLimitHelperProtocol.swift" \
         "$ROOT/Sources/FirmwareLimitHelperClient.swift" \
@@ -68,7 +68,7 @@ PLIST
     swiftc -parse-as-library -D MAULEAF_TESTING -D MAULEAF_LAYOUT_TESTING \
         -framework SwiftUI -framework AppKit -framework Combine -framework IOKit \
         "$ROOT/Sources/MauLeaf.swift" "$ROOT/Sources/AppLocalization.swift" \
-        "$ROOT/Sources/BatteryStatusReader.swift" "$ROOT/Sources/PowerFlowModel.swift" "$ROOT/Sources/PowerFlowView.swift" "$ROOT/Sources/FastBatteryReader.swift" "$ROOT/Sources/PowerSourceObserver.swift" "$ROOT/Sources/AboveLimitPowerPolicy.swift" "$ROOT/Sources/DynamicHoldPolicy.swift" "$ROOT/Sources/FirmwareLimitCore.swift" \
+        "$ROOT/Sources/BatteryStatusReader.swift" "$ROOT/Sources/PowerFlowModel.swift" "$ROOT/Sources/PowerFlowView.swift" "$ROOT/Sources/FastBatteryReader.swift" "$ROOT/Sources/LivePowerReader.swift" "$ROOT/Sources/PowerSourceObserver.swift" "$ROOT/Sources/AboveLimitPowerPolicy.swift" "$ROOT/Sources/DynamicHoldPolicy.swift" "$ROOT/Sources/FirmwareLimitCore.swift" \
         "$ROOT/Sources/FirmwareLimitReconciliation.swift" "$ROOT/Sources/SystemFirmwareReader.swift" "$ROOT/Sources/FirmwareLimitRuntime.swift" \
         "$ROOT/Sources/FirmwareLimitHelperProtocol.swift" \
         "$ROOT/Sources/FirmwareLimitHelperClient.swift" \
@@ -79,7 +79,7 @@ fi
 
 swiftc -frontend -parse \
     "$ROOT/Sources/MauLeaf.swift" "$ROOT/Sources/AppLocalization.swift" \
-    "$ROOT/Sources/BatteryStatusReader.swift" "$ROOT/Sources/PowerFlowModel.swift" "$ROOT/Sources/PowerFlowView.swift" "$ROOT/Sources/FastBatteryReader.swift" "$ROOT/Sources/PowerSourceObserver.swift" "$ROOT/Sources/AboveLimitPowerPolicy.swift" "$ROOT/Sources/DynamicHoldPolicy.swift" "$ROOT/Sources/FirmwareLimitCore.swift" "$ROOT/Sources/FirmwareLimitReconciliation.swift" \
+    "$ROOT/Sources/BatteryStatusReader.swift" "$ROOT/Sources/PowerFlowModel.swift" "$ROOT/Sources/PowerFlowView.swift" "$ROOT/Sources/FastBatteryReader.swift" "$ROOT/Sources/LivePowerReader.swift" "$ROOT/Sources/PowerSourceObserver.swift" "$ROOT/Sources/AboveLimitPowerPolicy.swift" "$ROOT/Sources/DynamicHoldPolicy.swift" "$ROOT/Sources/FirmwareLimitCore.swift" "$ROOT/Sources/FirmwareLimitReconciliation.swift" \
     "$ROOT/Sources/SystemFirmwareReader.swift" "$ROOT/Sources/FirmwareLimitRuntime.swift" "$ROOT/Sources/FirmwareLimitSMCTransport.swift" \
     "$ROOT/Sources/FirmwareLimitHelperProtocol.swift" "$ROOT/Sources/FirmwareLimitHelperClient.swift" \
     "$ROOT/Sources/FirmwareLimitHelperService.swift" "$ROOT/Sources/FirmwareLimitHelperMain.swift"
@@ -181,18 +181,23 @@ for required in 'MauLeafPowerFlowView(flow: manager.powerFlow' 'manager.popoverL
     fi
 done
 
-# All three preferences must share the native segmented style. Never
-# restore the redundant limit/full-charge switches or the mixed settings UI.
+# All four preferences share the compact segmented style. Power refresh is
+# automatic, and exit cleanup is a persisted preference rather than a prompt.
 if grep -Eq 'oneTimeToggleRow|private var limitAction|Toggle\(isOn:' <<< "$POPOVER_SOURCE"; then
     echo "The compact popover must not contain old switches or lower charge actions" >&2
     exit 1
 fi
 grep -Fq 'Picker("", selection: $manager.showPowerFlow)' <<< "$POPOVER_SOURCE"
 grep -Fq 'Picker("", selection: $manager.language)' <<< "$POPOVER_SOURCE"
+grep -Fq 'Picker("", selection: $manager.removeComponentsOnQuit)' <<< "$POPOVER_SOURCE"
+if grep -Eq 'powerFlowRefreshSeconds|供电刷新间隔' <<< "$POPOVER_SOURCE"; then
+    echo "Manual power refresh controls must not return" >&2
+    exit 1
+fi
 grep -Fq 'set: { manager.setDynamicHoldEnabled($0) }' <<< "$POPOVER_SOURCE"
 grep -Fq '.disabled(manager.isDynamicHoldSwitchLocked)' <<< "$POPOVER_SOURCE"
-[[ "$(grep -Fc '.pickerStyle(.segmented)' <<< "$POPOVER_SOURCE")" -eq 3 ]]
-[[ "$(grep -Fc '.frame(width: 142)' <<< "$POPOVER_SOURCE")" -eq 3 ]]
+[[ "$(grep -Fc '.pickerStyle(.segmented)' <<< "$POPOVER_SOURCE")" -eq 4 ]]
+[[ "$(grep -Fc '.frame(width: 142)' <<< "$POPOVER_SOURCE")" -eq 4 ]]
 grep -Fq 'if manager.showPowerFlow' <<< "$POPOVER_SOURCE"
 if grep -Fq 'title: "供电状态"' <<< "$POPOVER_SOURCE"; then
     echo "Power source is already shown by the graph and must not be repeated" >&2
@@ -248,6 +253,19 @@ bash -n "$ROOT/build.command"
 bash -n "$ROOT/Scripts/install-native-firmware-helper.sh"
 bash -n "$ROOT/Scripts/uninstall-native-firmware-helper.sh"
 # Normal quit restores first; Keep retains launchd registration, Remove needs administrator authorization.
+# Normal quit must never ask the component policy every time.
+grep -Fq 'let policy = manager.quitComponentPolicy' "$ROOT/Sources/MauLeaf.swift"
+grep -Fq 'removeComponentsOnQuit ? .remove : .keep' "$ROOT/Sources/MauLeaf.swift"
+if grep -Fq 'question.runModal()' "$ROOT/Sources/MauLeaf.swift"; then
+    echo "Normal quit must use the stored policy without a modal chooser" >&2
+    exit 1
+fi
+grep -Fq 'static let powerFlowRefreshInterval: TimeInterval = 2' "$ROOT/Sources/MauLeaf.swift"
+grep -Fq 'request[42] == 9 || request[42] == 5' "$ROOT/Sources/LivePowerReader.swift"
+if grep -Eq 'request\[42\] = 6|kSMCWriteKey' "$ROOT/Sources/LivePowerReader.swift"; then
+    echo "Live power sampling must never write SMC" >&2
+    exit 1
+fi
 grep -Fq -- '--keep-components' "$ROOT/Scripts/uninstall-native-firmware-helper.sh"
 grep -Fq -- '--remove-components' "$ROOT/Scripts/uninstall-native-firmware-helper.sh"
 grep -Fq 'MODE="keep"' "$ROOT/Scripts/uninstall-native-firmware-helper.sh"

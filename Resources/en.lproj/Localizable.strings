@@ -256,9 +256,10 @@
 "原始固件参数已恢复" = "Original firmware restored";
 "正在恢复原始参数" = "Restoring original firmware";
 "等待断电恢复" = "Waiting to restore after unplug";
-"供电刷新间隔" = "Power refresh";
-"仅菜单面板打开时刷新功率，拔插电事件仍即时更新" = "Watt readings refresh while the panel is open; plug/unplug events still update immediately";
 "高于目标时保持电量；关闭后在已测试机型上可能出现拔电识别延迟" = "Hold charge above target; unplug detection may lag when disabled on the tested Mac";
 "超限时保持电量；关闭后拔电识别可能延迟（已测试机型）。" = "Hold charge above target; disabling may delay unplug detection on the tested Mac.";
 "目标 %@%% · 临时上限 %@%%" = "Target %@%% · Temporary ceiling %@%%";
 "动态保电已应用：目标 %@%%，临时上限 %@%%。" = "Dynamic Hold applied: target %@%%, temporary ceiling %@%%.";
+"退出时移除组件" = "Remove components on quit";
+"开启后每次退出会移除控制组件；关闭则保留。" = "On: remove the helper and scripts when quitting. Off: keep them installed.";
+"建议卸载前开启，退出并确认清理完成后再删除 App。" = "Before uninstalling, enable this, quit, then delete the app after cleanup succeeds.";

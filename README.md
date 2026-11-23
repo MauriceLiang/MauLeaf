@@ -1,3 +1,5 @@
+> **重启后固件状态恢复（Preview 5）**：如果启动时固件报告关闭状态 `bfF0=0`、上下限 `0/0`，MauLeaf 会将其识别为待就绪状态，不再直接提示 Helper 损坏。存在可信原始快照的已授权限充可在电源稳定后尝试恢复原先目标；无快照绝不自动写入，所有异常活动寄存器仍严格阻断。见 [更新说明](docs/releases/v0.9.1-preview.5.md)。
+
 [简体中文](README.md) | [English](README.en.md)
 
 <p align="center">

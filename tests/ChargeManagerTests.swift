@@ -11,6 +11,7 @@ private enum ChargeManagerTests {
         UserDefaults.standard.removeObject(forKey: "dynamicHoldEnabled")
         UserDefaults.standard.removeObject(forKey: "showPowerFlow")
         UserDefaults.standard.removeObject(forKey: "powerFlowRefreshSeconds")
+        UserDefaults.standard.removeObject(forKey: "removeComponentsOnQuit")
         UserDefaults.standard.removeObject(forKey: "desiredChargeLimitEnabled")
         let manager = ChargeManager(backend: backend, autoInstallNativeHelper: false)
         manager.start()
@@ -38,19 +39,23 @@ private enum ChargeManagerTests {
         manager.showPowerFlow = true
         try check(UserDefaults.standard.bool(forKey: "showPowerFlow"),
                   "the top power-flow visualization can be re-enabled")
-        try check(manager.powerFlowRefreshSeconds == 5,
-                  "visible-panel watt telemetry defaults to five seconds")
-        try check(ChargeManager.powerFlowRefreshChoices == [2, 5, 10, 20, 30, 60],
-                  "user can select all supported refresh intervals")
-        manager.powerFlowRefreshSeconds = 10
-        try check(UserDefaults.standard.integer(forKey: "powerFlowRefreshSeconds") == 10,
-                  "power refresh preference persists")
-        let reloadedFlowInterval = ChargeManager(
+        try check(ChargeManager.powerFlowRefreshInterval == 2,
+                  "power flow uses Status Trio-style automatic two-second sampling")
+        try check(!manager.removeComponentsOnQuit && manager.quitComponentPolicy == .keep,
+                  "existing installations retain the helper by default without an exit prompt")
+        manager.removeComponentsOnQuit = true
+        try check(UserDefaults.standard.bool(forKey: "removeComponentsOnQuit")
+                    && manager.quitComponentPolicy == .remove,
+                  "turning on cleanup selects remove for each future quit")
+        let reloadedQuitPolicy = ChargeManager(
             backend: FixtureNativeFirmwareBackend(), autoInstallNativeHelper: false
         )
-        try check(reloadedFlowInterval.powerFlowRefreshSeconds == 10,
-                  "power refresh preference survives manager recreation")
-        manager.powerFlowRefreshSeconds = 5
+        try check(reloadedQuitPolicy.removeComponentsOnQuit
+                    && reloadedQuitPolicy.quitComponentPolicy == .remove,
+                  "quit cleanup setting persists across app relaunch")
+        manager.removeComponentsOnQuit = false
+        try check(manager.quitComponentPolicy == .keep,
+                  "turning cleanup off preserves components again")
         try check(manager.limit == 80 && manager.modeText.source == "限制充电未启用"
                   && manager.popoverLimitStatus.source == "未启用"
                   && manager.popoverFullChargeStatus.source == "未开启"
@@ -218,54 +223,61 @@ private enum ChargeManagerTests {
         UserDefaults.standard.removeObject(forKey: "desiredChargeLimitEnabled")
         UserDefaults.standard.removeObject(forKey: "showPowerFlow")
         UserDefaults.standard.removeObject(forKey: "powerFlowRefreshSeconds")
+        UserDefaults.standard.removeObject(forKey: "removeComponentsOnQuit")
         print("ChargeManagerTests: PASS (deferred first-use install, password-free Keep, safe read-only launch, recovery guards, existing restore and legacy coverage)")
+    }
+
+    private final class PowerReadCounter {
+        private let lock = NSLock()
+        private var value = 0
+        func increment() {
+            lock.lock()
+            value += 1
+            lock.unlock()
+        }
+        var count: Int {
+            lock.lock()
+            defer { lock.unlock() }
+            return value
+        }
     }
 
     @MainActor
     private static func testVisiblePanelPowerTimer() async throws {
-        UserDefaults.standard.set(2, forKey: "powerFlowRefreshSeconds")
-        var reads = 0
+        let reads = PowerReadCounter()
+        let sample = MauLeafBatterySnapshot(
+            percent: 80, isCharging: false, isFullyCharged: false,
+            isACConnected: true, batteryPowerWatts: 0, adapterInputWatts: 8
+        )
         let manager = ChargeManager(
             backend: FixtureNativeFirmwareBackend(),
             autoInstallNativeHelper: false,
-            batteryReader: {
-                reads += 1
-                return MauLeafBatterySnapshot(
-                    percent: 80, isCharging: false, isFullyCharged: false,
-                    isACConnected: true, batteryPowerWatts: 0,
-                    adapterInputWatts: 8
-                )
+            batteryReader: { sample },
+            powerFlowReader: {
+                reads.increment()
+                return MauLeafPowerFlow(snapshot: sample)
             }
         )
         manager.start()
         try check(!manager.isPowerFlowTimerActiveForTesting,
-                  "watt timer is inactive before the panel opens")
+                  "no power polling while the panel is closed")
         manager.setPanelVisible(true)
         try check(manager.isPowerFlowTimerActiveForTesting,
-                  "watt timer runs only while panel is visible")
-        let beforeTick = reads
-        try await Task.sleep(nanoseconds: 2_300_000_000)
-        try check(reads > beforeTick,
-                  "selected two-second interval triggers real read-only telemetry samples")
+                  "opening panel starts automatic two-second power polling")
+        try await wait { reads.count > 0 }
+        let beforeTick = reads.count
+        try await Task.sleep(nanoseconds: 2_400_000_000)
+        try check(reads.count > beforeTick,
+                  "auto two-second refresh reads power sensors on the worker")
         manager.showPowerFlow = false
         try check(!manager.isPowerFlowTimerActiveForTesting,
-                  "hiding diagram stops watt sampling")
+                  "hiding the diagram stops power polling")
         manager.showPowerFlow = true
         try check(manager.isPowerFlowTimerActiveForTesting,
-                  "re-enabling diagram resumes watt sampling while the panel is open")
-        manager.powerFlowRefreshSeconds = 10
-        try check(manager.isPowerFlowTimerActiveForTesting,
-                  "changing the interval restarts active timer without reinstalling Helper")
+                  "enabling the diagram restarts power polling")
         manager.setPanelVisible(false)
         try check(!manager.isPowerFlowTimerActiveForTesting,
-                  "closing panel stops watt sampling while 20s safety poll remains")
-        UserDefaults.standard.set(999, forKey: "powerFlowRefreshSeconds")
-        let invalidManager = ChargeManager(
-            backend: FixtureNativeFirmwareBackend(), autoInstallNativeHelper: false
-        )
-        try check(invalidManager.powerFlowRefreshSeconds == 5,
-                  "unknown or corrupted interval falls back to the default")
-        UserDefaults.standard.removeObject(forKey: "powerFlowRefreshSeconds")
+                  "closing panel stops watts but retains independent firmware safety polling")
     }
 
     @MainActor

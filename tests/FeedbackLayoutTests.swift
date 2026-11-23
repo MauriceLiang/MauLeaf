@@ -211,9 +211,11 @@ struct FeedbackLayoutTests {
             try await Task.sleep(nanoseconds: 280_000_000)
             let hidden = measure()
             let hiddenCardHeight = measuredCardHeight()
-            guard hidden.0 < normal.0 - 85,
+            // A compact status line is intentionally retained: reclaim the
+            // watt-node/ribbon area, not the entire original header height.
+            guard hidden.0 < normal.0 - 50,
                   hiddenCardHeight > 65,
-                  hiddenCardHeight < diagramCardHeight - 85,
+                  hiddenCardHeight < diagramCardHeight - 50,
                   !UserDefaults.standard.bool(forKey: "showPowerFlow")
                   && !containsScrollView(panelHost) else {
                 fputs("FAIL: hiding diagram must recover top space without scrolling: visible=\(normal), hidden=\(hidden)\n", stderr)

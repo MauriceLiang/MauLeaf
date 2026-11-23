@@ -11,16 +11,28 @@ struct MauLeafBatterySnapshot: Equatable {
     /// Unrounded battery state of charge from raw AppleSmartBattery capacity.
     /// Optional: an unknown value must not authorize an automatic SMC write.
     let precisePercent: Double?
+    /// Read-only battery power, positive when charging and negative when
+    /// discharging; measured at pack terminals, not adapter wall input.
+    let batteryPowerWatts: Double?
+    /// SystemPowerIn from AppleSmartBattery.PowerTelemetryData (mW -> W).
+    /// NEVER populated from AdapterDetails.Watts, which is a rated maximum.
+    let adapterInputWatts: Double?
+    /// Telemetry SystemLoad in watts; may lag a connection-state transition.
+    let systemLoadWatts: Double?
 
     init(percent: Int?, isCharging: Bool, isFullyCharged: Bool,
          isACConnected: Bool?, amperageMilliAmps: Int? = nil,
-         precisePercent: Double? = nil) {
+         precisePercent: Double? = nil, batteryPowerWatts: Double? = nil,
+         adapterInputWatts: Double? = nil, systemLoadWatts: Double? = nil) {
         self.percent = percent
         self.isCharging = isCharging
         self.isFullyCharged = isFullyCharged
         self.isACConnected = isACConnected
         self.amperageMilliAmps = amperageMilliAmps
         self.precisePercent = precisePercent
+        self.batteryPowerWatts = batteryPowerWatts
+        self.adapterInputWatts = adapterInputWatts
+        self.systemLoadWatts = systemLoadWatts
     }
 }
 
@@ -78,6 +90,28 @@ enum MauLeafBatteryStatusReader {
             precise = nil
         }
         let charging = boolean(battery["IsCharging"]) ?? false
+        // Sensor units: current mA × voltage mV / 1,000,000 = W.
+        // Some battery drivers only expose Amperage, others expose
+        // InstantAmperage. Neither is a wall-adapter power measurement.
+        let amperage = integer(battery["Amperage"])
+            ?? integer(battery["InstantAmperage"])
+        let voltage = integer(battery["Voltage"])
+        let batteryWatts: Double?
+        if let amperage, let voltage, (6_000...30_000).contains(voltage),
+           (-30_000...30_000).contains(amperage) {
+            batteryWatts = Double(amperage) * Double(voltage) / 1_000_000
+        } else {
+            batteryWatts = nil
+        }
+        let telemetry = battery["PowerTelemetryData"] as? [String: Any]
+        func telemetryWatts(_ key: String) -> Double? {
+            guard let raw = integer(telemetry?[key]), (0...250_000).contains(raw) else {
+                return nil
+            }
+            return Double(raw) / 1_000
+        }
+        let powerIn = telemetryWatts("SystemPowerIn")
+        let systemLoad = telemetryWatts("SystemLoad")
         let fullyCharged = boolean(battery["FullyCharged"]) ?? (percent == 100)
         let external = boolean(battery["ExternalConnected"])
         return MauLeafBatterySnapshot(
@@ -85,8 +119,11 @@ enum MauLeafBatteryStatusReader {
             isCharging: charging,
             isFullyCharged: fullyCharged,
             isACConnected: external,
-            amperageMilliAmps: integer(battery["Amperage"]),
-            precisePercent: precise
+            amperageMilliAmps: amperage,
+            precisePercent: precise,
+            batteryPowerWatts: batteryWatts,
+            adapterInputWatts: external == true ? powerIn : nil,
+            systemLoadWatts: systemLoad
         )
     }
 

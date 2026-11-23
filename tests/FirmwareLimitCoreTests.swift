@@ -77,6 +77,7 @@ private enum FirmwareLimitCoreTests {
         try testNoOp()
         try testDeactivate()
         try testExactOriginalStateRestore()
+        try testInactiveZeroBandAfterReboot()
         try testOriginalStateSnapshot()
         try testSafetyPermit()
         try testRestorePermitAcrossOSUpgrade()
@@ -258,6 +259,44 @@ private enum FirmwareLimitCoreTests {
         let recovered = try controller(partiallyWritten).restore(original, permit: permit())
         expect(recovered == original,
                "restore can recover from an invalid intermediate threshold pair after a partial write")
+    }
+
+    private static func testInactiveZeroBandAfterReboot() throws {
+        let transport = FakeFirmwareLimitTransport()
+        transport.activation = 0x00
+        transport.upper = 0
+        transport.lower = 0
+
+        let state = try controller(transport).readState()
+        expect(state.isInactiveUninitialized && !state.isValid && !state.isActive,
+               "inactive zero/zero is observable after reboot but cannot be a trusted original state")
+        expect(transport.writes.isEmpty, "startup state reads never write SMC")
+
+        let original = FirmwareLimitState(activationByte: 0x00, upper: 80, lower: 78)
+        let recovered = try controller(transport).restore(original, permit: permit())
+        expect(recovered == original && transport.upper == 80 && transport.lower == 78,
+               "identity-authorized exact snapshot restoration works from zero/zero")
+        expect(transport.writes == [
+            "bfD0=50000000",
+            "bfE0=4E000000"
+        ], "inactive zero/zero restores upper before lower, preserving inactive activation")
+        expect(try controller(transport).readState() == original,
+               "restoration must pass exact hardware readback")
+
+        let badActive = FakeFirmwareLimitTransport()
+        badActive.activation = 0x02
+        badActive.upper = 0
+        badActive.lower = 0
+        expectThrows({ _ = try controller(badActive).readState() },
+                     "active zero/zero stays invalid and fails closed")
+        expect(badActive.writes.isEmpty, "active invalid state never causes an automatic write")
+
+        let badPartial = FakeFirmwareLimitTransport()
+        badPartial.upper = 0
+        badPartial.lower = 78
+        expectThrows({ _ = try controller(badPartial).readState() },
+                     "partly zeroed bands remain invalid and cannot be normalized")
+        expect(badPartial.writes.isEmpty, "partial zero state remains read-only")
     }
 
     private static func testOriginalStateSnapshot() throws {

@@ -525,8 +525,8 @@ private enum ChargeManagerTests {
         try await Task.sleep(nanoseconds: 400_000_000)
         try check(backend.applyCount == 2 && !backend.state.active,
                   "manual disable never causes a surprise re-enable on replug")
-        try check(await manager.prepareForTermination(),
-                  "an already restored and manually disabled app can quit")
+        let stopped = await manager.prepareForTermination()
+        try check(stopped, "an already restored and manually disabled app can quit")
         UserDefaults.standard.removeObject(forKey: "desiredChargeLimitEnabled")
         UserDefaults.standard.set(false, forKey: "nativeFirmwareWriteConfirmed")
     }
@@ -580,8 +580,8 @@ private enum ChargeManagerTests {
         try check(!backend.state.active && !manager.hasOriginalStateSnapshot
                   && UserDefaults.standard.bool(forKey: "desiredChargeLimitEnabled"),
                   "battery-only login first restores managed firmware before any reactivation")
-        try check(await manager.prepareForTermination(),
-                  "safe app quit clears the replug intent")
+        let stopped = await manager.prepareForTermination()
+        try check(stopped, "safe app quit clears the replug intent")
         try check(!UserDefaults.standard.bool(forKey: "desiredChargeLimitEnabled"),
                   "verified quit never leaves a latent auto-enable intention")
     }

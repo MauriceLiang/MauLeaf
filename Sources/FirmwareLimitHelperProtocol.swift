@@ -20,7 +20,7 @@ enum FirmwareLimitHelperProtocolVersion {
 
     /// Increment this floor only when a Helper behavior fix is required by
     /// the app. A cosmetic app version must NEVER change it.
-    static let minimumBuild = "1.2.0"
+    static let minimumBuild = "1.3.0"
     /// The new v6 Helper accepts a 100% temporary firmware ceiling.
     /// Unversioned older Helpers are not considered compatible.
     static let acceptsUnversionedV5 = false
@@ -56,7 +56,7 @@ enum FirmwareLimitHelperProtocolVersion {
 /// Version of the privileged binary, distinct from MauLeaf's app version.
 /// A UI-only change does not change this constant.
 enum FirmwareLimitHelperBuildVersion {
-    static let current = "1.2.0"
+    static let current = "1.3.0"
 }
 
 struct FirmwareLimitHelperStateResponse: Codable, Equatable {
@@ -77,6 +77,12 @@ struct FirmwareLimitHelperStateResponse: Codable, Equatable {
     /// zeroed thresholds after boot. This is not a valid saved limit.
     var isInactiveUninitialized: Bool {
         activationByte == 0x00 && upper == 0 && lower == 0
+    }
+
+    /// Active zero bounds are an abnormal, read-only firmware diagnosis.
+    /// The only permitted mutation is identity-checked snapshot recovery.
+    var isActiveZeroed: Bool {
+        activationByte == 0x02 && upper == 0 && lower == 0
     }
 
     init(
@@ -101,9 +107,11 @@ struct FirmwareLimitHelperStateResponse: Codable, Equatable {
             // both zero. Do not create a new snapshot from those values.
             // A valid existing snapshot may be used for managed recovery.
             writeBlockReason = identityBlock ?? (
-                state.isInactiveUninitialized && snapshot == nil
-                    ? "Firmware limits are not initialized after startup; no managed recovery snapshot is present."
-                    : nil
+                state.isActiveZeroed
+                    ? "Active firmware limit has zeroed thresholds; new writes are blocked. Restore the verified original-state snapshot."
+                    : state.isInactiveUninitialized && snapshot == nil
+                        ? "Firmware limits are not initialized after startup; no managed recovery snapshot is present."
+                        : nil
             )
             writeSupported = writeBlockReason == nil
             if let snapshot {
@@ -120,11 +128,12 @@ struct FirmwareLimitHelperStateResponse: Codable, Equatable {
                 )
             }
             restoreSupported = restoreBlockReason == nil
+                && (!state.isActiveZeroed || (snapshot?.isValid == true))
         } else {
             writeSupported = state.isValid || (state.isInactiveUninitialized && snapshot != nil)
-            writeBlockReason = writeSupported ? nil : "Firmware limits are not initialized."
-            restoreSupported = true
-            restoreBlockReason = nil
+            writeBlockReason = writeSupported ? nil : "Firmware limits are not initialized or are invalid."
+            restoreSupported = !state.isActiveZeroed || (snapshot?.isValid == true)
+            restoreBlockReason = restoreSupported ? nil : "No verified original-state snapshot for active zeroed firmware."
         }
     }
 

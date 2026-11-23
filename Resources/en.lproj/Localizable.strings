@@ -253,3 +253,10 @@
 "已保留原始固件快照；待连接电源稳定后恢复原先的限充设置。" = "Original firmware snapshot preserved. Previous charge limit will be resumed after AC stabilizes.";
 "固件限充值暂不可用，尚无可验证的恢复快照；不会自动写入。" = "Firmware limits are not initialized and no verified recovery snapshot exists. No automatic write will be performed.";
 "已重新读取固件启动状态。" = "Firmware startup state refreshed.";
+"已检测到电源断开，正在恢复原始固件参数…" = "Charger disconnected; restoring the original firmware parameters…";
+"已恢复启用前的原始固件参数，MauLeaf 停止限充控制。" = "Original firmware settings restored and verified. MauLeaf has stopped controlling charging.";
+"拔电后尚未完成固件恢复；原始快照及后台恢复任务已保留：%@" = "Firmware restoration after unplug is incomplete. The original snapshot and background recovery task remain saved: %@";
+"电池供电 · 原始固件参数已恢复" = "On battery · Original firmware restored";
+"原始固件参数已恢复" = "Original firmware restored";
+"正在恢复原始参数" = "Restoring original firmware";
+"等待断电恢复" = "Waiting to restore after unplug";

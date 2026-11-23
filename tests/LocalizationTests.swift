@@ -109,6 +109,15 @@ struct LocalizationTests {
               && translations["在顶部卡片中显示当前电量百分比"] == "Show the battery percentage in the overview card"
               && chinese["显示当前电量"] == "显示当前电量",
               "optional battery setting is fully localized")
+        for key in ["供电刷新间隔", "仅菜单面板打开时刷新功率，拔插电事件仍即时更新",
+                    "高于目标时保持电量；关闭后在已测试机型上可能出现拔电识别延迟",
+                    "超限时保持电量；关闭后拔电识别可能延迟（已测试机型）。"] {
+            check(chinese[key] == key && translations[key] != nil && translations[key] != key,
+                  "refresh setting and Dynamic Hold warning localize in both languages: \(key)")
+        }
+        check(translations["目标 %@%% · 临时上限 %@%%"] != nil
+              && translations["动态保电已应用：目标 %@%%，临时上限 %@%%。"] != nil,
+              "Dynamic Hold retains concise localized numeric ceilings")
         check(translations["退出 MauLeaf"] == "Quit MauLeaf"
               && translations["供电状态"] == "Power"
               && translations["限制充电"] == "Charge limit"

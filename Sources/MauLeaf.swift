@@ -844,6 +844,25 @@ struct ContentView: View {
             .frame(minHeight: 30)
 
             HStack(spacing: 8) {
+                settingsLabel("供电刷新间隔")
+                Spacer(minLength: 8)
+                Picker("", selection: $manager.powerFlowRefreshSeconds) {
+                    ForEach(ChargeManager.powerFlowRefreshChoices, id: \.self) { seconds in
+                        Text(manager.language == .english ? "\(seconds) s" : "\(seconds) 秒")
+                            .tag(seconds)
+                    }
+                }
+                .pickerStyle(.menu)
+                .labelsHidden()
+                .controlSize(.small)
+                .frame(width: 142)
+                .disabled(!manager.showPowerFlow)
+                .accessibilityLabel(manager.text("供电刷新间隔"))
+                .help(manager.text("仅菜单面板打开时刷新功率，拔插电事件仍即时更新"))
+            }
+            .frame(minHeight: 30)
+
+            HStack(spacing: 8) {
                 settingsLabel("界面语言")
                 Spacer(minLength: 8)
                 Picker("", selection: $manager.language) {
@@ -877,10 +896,10 @@ struct ContentView: View {
                 .accessibilityLabel(manager.text("动态保电"))
                 .help(manager.text(manager.isDynamicHoldSwitchLocked
                     ? "本次充满期间不可修改动态保电"
-                    : "高于目标时尝试保持当前电量；实验功能，供电效果尚待验证"))
+                    : "高于目标时保持电量；关闭后在已测试机型上可能出现拔电识别延迟"))
             }
             .frame(minHeight: 30)
-            Text(manager.text("电量高于目标时，尝试临时提高固件上限以减少主动放电；仅支持已验证设备。"))
+            Text(manager.text("超限时保持电量；关闭后拔电识别可能延迟（已测试机型）。"))
                 .font(.caption2)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -1025,6 +1044,8 @@ enum ChargeOperation: Equatable {
 
 @MainActor
 final class ChargeManager: ObservableObject {
+    static let powerFlowRefreshChoices = [2, 5, 10, 20, 30, 60]
+
     @Published var batteryPercent: Int?
     @Published var batteryStateText = "正在读取电池状态…"
     @Published var isAdapterConnected = false
@@ -1037,7 +1058,21 @@ final class ChargeManager: ObservableObject {
     /// New flow diagram defaults ON, regardless of legacy battery digits
     /// preference. This only controls the read-only menu presentation.
     @Published var showPowerFlow: Bool {
-        didSet { UserDefaults.standard.set(showPowerFlow, forKey: "showPowerFlow") }
+        didSet {
+            guard showPowerFlow != oldValue else { return }
+            UserDefaults.standard.set(showPowerFlow, forKey: "showPowerFlow")
+            restartPowerFlowTimer()
+            if showPowerFlow && panelVisible { refreshPowerFlowOnly() }
+        }
+    }
+    /// Read-only watt telemetry only. The firmware safety fallback remains 20 s.
+    @Published var powerFlowRefreshSeconds: Int {
+        didSet {
+            guard powerFlowRefreshSeconds != oldValue else { return }
+            UserDefaults.standard.set(powerFlowRefreshSeconds, forKey: "powerFlowRefreshSeconds")
+            restartPowerFlowTimer()
+            if showPowerFlow && panelVisible { refreshPowerFlowOnly() }
+        }
     }
     @Published private(set) var powerFlow = MauLeafPowerFlow(snapshot: nil)
     /// Experimental, explicit opt-in. Independent from the deprecated
@@ -1103,7 +1138,9 @@ final class ChargeManager: ObservableObject {
     private let helperArtifactsPresent: () -> Bool
     private let hardwareWriteBlockReason: String?
     private var started = false
+    private var panelVisible = false
     private var refreshTimer: Timer?
+    private var powerFlowTimer: Timer?
     private var limitDebounce: Task<Void, Never>?
     private var latestBatteryObservation: MauLeafBatterySnapshot?
     private var consecutiveDischargeReadings = 0
@@ -1181,6 +1218,9 @@ final class ChargeManager: ObservableObject {
         let saved = UserDefaults.standard.integer(forKey: "chargeLimit")
         limit = (50...95).contains(saved) ? saved : 80
         showPowerFlow = UserDefaults.standard.object(forKey: "showPowerFlow") as? Bool ?? true
+        let savedFlowInterval = UserDefaults.standard.integer(forKey: "powerFlowRefreshSeconds")
+        powerFlowRefreshSeconds = Self.powerFlowRefreshChoices.contains(savedFlowInterval)
+            ? savedFlowInterval : 5
         dynamicHoldEnabled = UserDefaults.standard.bool(forKey: "dynamicHoldEnabled")
         desiredLimitEnabled = UserDefaults.standard.bool(forKey: "desiredChargeLimitEnabled")
     }
@@ -1245,7 +1285,7 @@ final class ChargeManager: ObservableObject {
         }
         if !isAdapterConnected { return "电池供电；停止自动固件调整" }
         if state.upper > limit {
-            return "目标 \(limit)% · 临时上限 \(state.upper)%（供电效果待验证）"
+            return "目标 \(limit)% · 临时上限 \(state.upper)%"
         }
         return "目标 \(limit)% · 当前使用原始上限"
     }
@@ -1707,7 +1747,9 @@ final class ChargeManager: ObservableObject {
         refreshTimer = Timer.scheduledTimer(withTimeInterval: 20, repeats: true) { [weak self] _ in
             Task { @MainActor in
                 guard let self, !self.isBusy else { return }
-                self.readSystemBattery()
+                // Keep the 20 s safety/Helper fallback; the visible watt
+                // diagram has its own user-selected sampling timer.
+                self.readSystemBattery(updateDisplayedPowerFlow: false)
                 await self.refreshNativeState()
             }
         }
@@ -1738,8 +1780,32 @@ final class ChargeManager: ObservableObject {
     #endif
 
     func setPanelVisible(_ visible: Bool) {
+        panelVisible = visible
+        restartPowerFlowTimer()
         if visible { refresh() }
     }
+
+    /// Sampling watts never updates charge-control state or calls the Helper.
+    /// No UI polling continues after the compact menu panel closes.
+    private func refreshPowerFlowOnly() {
+        guard started, panelVisible, showPowerFlow, !isPreparingToQuit else { return }
+        powerFlow = MauLeafPowerFlow(snapshot: batteryReader())
+    }
+
+    private func restartPowerFlowTimer() {
+        powerFlowTimer?.invalidate()
+        powerFlowTimer = nil
+        guard started, panelVisible, showPowerFlow, !isPreparingToQuit else { return }
+        powerFlowTimer = Timer.scheduledTimer(
+            withTimeInterval: TimeInterval(powerFlowRefreshSeconds), repeats: true
+        ) { [weak self] _ in
+            Task { @MainActor in self?.refreshPowerFlowOnly() }
+        }
+    }
+
+    #if MAULEAF_TESTING
+    var isPowerFlowTimerActiveForTesting: Bool { powerFlowTimer?.isValid == true }
+    #endif
 
     func refresh() {
         guard !isPreparingToQuit else { return }
@@ -2350,7 +2416,7 @@ final class ChargeManager: ObservableObject {
             autoApplyFeedback = "已写入并读回 \(plan.upper)%"
             NSLog("MauLeaf firmware limit apply: %@", response.message)
             statusMessage = plan.isTemporary
-                ? "动态保电已应用：目标 \(value)%，临时上限 \(plan.upper)%；实际供电仍需验证。"
+                ? "动态保电已应用：目标 \(value)%，临时上限 \(plan.upper)%。"
                 : "充电上限已设为 \(response.state.upper)%，固件写入已验证。"
             isError = false
         } catch {
@@ -2421,6 +2487,8 @@ final class ChargeManager: ObservableObject {
     func prepareForTermination() async -> Bool {
         guard !isPreparingToQuit else { return false }
         isPreparingToQuit = true
+        powerFlowTimer?.invalidate()
+        powerFlowTimer = nil
         didVerifyFirmwareOnQuit = false
         limitDebounce?.cancel()
         limitDebounce = nil
@@ -2548,6 +2616,9 @@ final class ChargeManager: ObservableObject {
             isBusy = false
             refreshTimer?.invalidate()
             refreshTimer = nil
+            powerFlowTimer?.invalidate()
+            powerFlowTimer = nil
+            panelVisible = false
             powerRecheckTask?.cancel()
             powerRecheckTask = nil
             dynamicReconcileTask?.cancel()
@@ -2594,15 +2665,21 @@ final class ChargeManager: ObservableObject {
     private func cancelTermination(_ message: AppText) -> Bool {
         isBusy = false
         isPreparingToQuit = false
+        restartPowerFlowTimer()
         isError = true
         statusMessage = message
         return false
     }
 
-    private func readSystemBattery(allowDynamicScheduling: Bool = true) {
+    private func readSystemBattery(
+        allowDynamicScheduling: Bool = true,
+        updateDisplayedPowerFlow: Bool = true
+    ) {
         let snapshot = batteryReader()
         recordPowerObservation(snapshot)
-        powerFlow = MauLeafPowerFlow(snapshot: snapshot)
+        if updateDisplayedPowerFlow {
+            powerFlow = MauLeafPowerFlow(snapshot: snapshot)
+        }
         batteryPercent = snapshot.percent
         isAdapterConnected = snapshot.isACConnected == true
         if allowDynamicScheduling {

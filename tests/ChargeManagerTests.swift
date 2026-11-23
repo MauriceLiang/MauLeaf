@@ -9,6 +9,7 @@ private enum ChargeManagerTests {
         UserDefaults.standard.set(80, forKey: "chargeLimit")
         UserDefaults.standard.removeObject(forKey: "showBatteryLevel")
         UserDefaults.standard.removeObject(forKey: "dynamicHoldEnabled")
+        UserDefaults.standard.removeObject(forKey: "desiredChargeLimitEnabled")
         let manager = ChargeManager(backend: backend, autoInstallNativeHelper: false)
         manager.start()
         try await wait { manager.backendReady && manager.currentState != nil }
@@ -161,6 +162,10 @@ private enum ChargeManagerTests {
 
         try await testDynamicHoldAboveTargetAndReconnect()
         try await testDynamicHoldSuspendsDuringOneTimeFullCharge()
+        try await testUnplugAutomaticallyRestoresAndReplugResumes()
+        try await testUnplugWithUnsafeBatteryPreservesRecovery()
+        try await testUnknownPowerDoesNotRestore()
+        try await testOfflineBootRestoresManagedSnapshot()
         try await testManagedBootZeroRecovery()
         try await testUnmanagedBootZeroNoWrite()
         try await testLegacyHelperZeroReadUpgradesOnce()
@@ -193,6 +198,7 @@ private enum ChargeManagerTests {
 
         UserDefaults.standard.removeObject(forKey: "nativeFirmwareWriteConfirmed")
         UserDefaults.standard.removeObject(forKey: "dynamicHoldEnabled")
+        UserDefaults.standard.removeObject(forKey: "desiredChargeLimitEnabled")
         print("ChargeManagerTests: PASS (deferred first-use install, password-free Keep, safe read-only launch, recovery guards, existing restore and legacy coverage)")
     }
 
@@ -446,6 +452,166 @@ private enum ChargeManagerTests {
     }
 
     @MainActor
+    private static func testUnplugAutomaticallyRestoresAndReplugResumes() async throws {
+        UserDefaults.standard.set(80, forKey: "chargeLimit")
+        UserDefaults.standard.set(false, forKey: "dynamicHoldEnabled")
+        UserDefaults.standard.set(false, forKey: "desiredChargeLimitEnabled")
+        UserDefaults.standard.set(true, forKey: "nativeFirmwareWriteConfirmed")
+        let backend = FixtureNativeFirmwareBackend()
+        var reading = MauLeafBatterySnapshot(
+            percent: 89, isCharging: false, isFullyCharged: false,
+            isACConnected: true, amperageMilliAmps: 0, precisePercent: 89.0
+        )
+        let manager = ChargeManager(
+            backend: backend, autoInstallNativeHelper: false,
+            batteryReader: { reading }, observePowerSourceChanges: false,
+            dynamicSettleInterval: 0.05
+        )
+        manager.start()
+        try await wait { manager.backendReady && manager.currentState != nil }
+        manager.toggleLimitFromCard()
+        try await wait { backend.applyCount == 1 && !manager.isBusy }
+        try check(backend.state.active && backend.state.upper == 80
+                  && UserDefaults.standard.bool(forKey: "desiredChargeLimitEnabled"),
+                  "successful manual enable records intent independently from SMC state")
+
+        backend.acConnected = false
+        reading = MauLeafBatterySnapshot(
+            percent: 87, isCharging: false, isFullyCharged: false,
+            isACConnected: false, amperageMilliAmps: -350, precisePercent: 87.0
+        )
+        manager.simulatePowerSourceNotificationForTesting()
+        try await wait {
+            backend.restoreCount == 1 && !manager.isBusy
+                && !manager.hasOriginalStateSnapshot
+        }
+        try check(!backend.state.active && backend.state.upper == 80
+                  && backend.state.lower == 78 && !backend.pending
+                  && manager.popoverLimitStatus.source == "未启用"
+                  && UserDefaults.standard.bool(forKey: "desiredChargeLimitEnabled"),
+                  "confirmed unplug restores the exact original firmware and suspends control without losing consent")
+        manager.simulatePowerSourceNotificationForTesting()
+        try await Task.sleep(nanoseconds: 80_000_000)
+        try check(backend.restoreCount == 1 && backend.applyCount == 1,
+                  "continuous battery operation causes no repeated firmware writes")
+
+        backend.acConnected = true
+        reading = MauLeafBatterySnapshot(
+            percent: 84, isCharging: true, isFullyCharged: false,
+            isACConnected: true, amperageMilliAmps: 400, precisePercent: 84.0
+        )
+        manager.simulatePowerSourceNotificationForTesting()
+        try await wait { backend.applyCount == 2 && !manager.isBusy }
+        try check(backend.state.active && backend.state.upper == 80
+                  && backend.state.lower == 78 && manager.hasOriginalStateSnapshot,
+                  "stable replug creates a fresh snapshot and resumes only the previously enabled limit")
+
+        manager.toggleLimitFromCard()
+        try await wait { backend.restoreCount == 2 && !manager.isBusy }
+        try check(!UserDefaults.standard.bool(forKey: "desiredChargeLimitEnabled"),
+                  "explicit manual disable clears the persisted resume intent")
+
+        backend.acConnected = false
+        reading = MauLeafBatterySnapshot(
+            percent: 82, isCharging: false, isFullyCharged: false,
+            isACConnected: false, precisePercent: 82
+        )
+        manager.simulatePowerSourceNotificationForTesting()
+        backend.acConnected = true
+        reading = MauLeafBatterySnapshot(
+            percent: 81, isCharging: false, isFullyCharged: false,
+            isACConnected: true, precisePercent: 81
+        )
+        manager.simulatePowerSourceNotificationForTesting()
+        try await Task.sleep(nanoseconds: 400_000_000)
+        try check(backend.applyCount == 2 && !backend.state.active,
+                  "manual disable never causes a surprise re-enable on replug")
+        let stopped = await manager.prepareForTermination()
+        try check(stopped, "an already restored and manually disabled app can quit")
+        UserDefaults.standard.removeObject(forKey: "desiredChargeLimitEnabled")
+        UserDefaults.standard.set(false, forKey: "nativeFirmwareWriteConfirmed")
+    }
+
+    @MainActor
+    private static func testUnplugWithUnsafeBatteryPreservesRecovery() async throws {
+        UserDefaults.standard.set(false, forKey: "desiredChargeLimitEnabled")
+        UserDefaults.standard.set(false, forKey: "dynamicHoldEnabled")
+        let backend = FixtureNativeFirmwareBackend()
+        _ = try await backend.applyLimit(upper: 80, lower: 78, confirmed: true)
+        backend.acConnected = false
+        backend.offlineRestoreAllowed = false
+        let battery = MauLeafBatterySnapshot(
+            percent: 18, isCharging: false, isFullyCharged: false,
+            isACConnected: false, precisePercent: 18
+        )
+        let manager = ChargeManager(
+            backend: backend, autoInstallNativeHelper: false,
+            batteryReader: { battery }, observePowerSourceChanges: false,
+            dynamicSettleInterval: 0.01
+        )
+        manager.start()
+        try await wait { backend.restoreCount == 1 && !manager.isBusy }
+        try await wait { manager.restorePending }
+        try check(backend.state.active && manager.hasOriginalStateSnapshot
+                  && manager.popoverLimitStatus.source == "等待断电恢复",
+                  "unsafe offline restore retains the root snapshot and a durable recovery request")
+        try await Task.sleep(nanoseconds: 150_000_000)
+        try check(backend.restoreCount == 1,
+                  "pending offline restore never retries with unsafe battery telemetry")
+    }
+
+    @MainActor
+    private static func testUnknownPowerDoesNotRestore() async throws {
+        UserDefaults.standard.set(false, forKey: "desiredChargeLimitEnabled")
+        UserDefaults.standard.set(false, forKey: "dynamicHoldEnabled")
+        let backend = FixtureNativeFirmwareBackend()
+        _ = try await backend.applyLimit(upper: 85, lower: 83, confirmed: true)
+        let unknown = MauLeafBatterySnapshot(
+            percent: nil, isCharging: false, isFullyCharged: false,
+            isACConnected: nil, precisePercent: nil
+        )
+        let manager = ChargeManager(
+            backend: backend, autoInstallNativeHelper: false,
+            batteryReader: { unknown }, observePowerSourceChanges: false,
+            dynamicSettleInterval: 0.01
+        )
+        manager.start()
+        try await wait { manager.currentState != nil }
+        manager.simulatePowerSourceNotificationForTesting()
+        try await Task.sleep(nanoseconds: 400_000_000)
+        try check(backend.restoreCount == 0 && backend.state.active
+                  && manager.hasOriginalStateSnapshot,
+                  "unknown AC state must not queue a root SMC restore or falsely claim a disconnect")
+    }
+
+    @MainActor
+    private static func testOfflineBootRestoresManagedSnapshot() async throws {
+        UserDefaults.standard.removeObject(forKey: "desiredChargeLimitEnabled")
+        UserDefaults.standard.set(false, forKey: "dynamicHoldEnabled")
+        let backend = FixtureNativeFirmwareBackend()
+        _ = try await backend.applyLimit(upper: 85, lower: 83, confirmed: true)
+        backend.acConnected = false
+        let battery = MauLeafBatterySnapshot(
+            percent: 80, isCharging: false, isFullyCharged: false,
+            isACConnected: false, precisePercent: 80
+        )
+        let manager = ChargeManager(
+            backend: backend, autoInstallNativeHelper: false,
+            batteryReader: { battery }, observePowerSourceChanges: false,
+            dynamicSettleInterval: 0.01
+        )
+        manager.start()
+        try await wait { backend.restoreCount == 1 && !manager.isBusy }
+        try check(!backend.state.active && !manager.hasOriginalStateSnapshot
+                  && UserDefaults.standard.bool(forKey: "desiredChargeLimitEnabled"),
+                  "battery-only login first restores managed firmware before any reactivation")
+        let stopped = await manager.prepareForTermination()
+        try check(stopped, "safe app quit clears the replug intent")
+        try check(!UserDefaults.standard.bool(forKey: "desiredChargeLimitEnabled"),
+                  "verified quit never leaves a latent auto-enable intention")
+    }
+
+    @MainActor
     private static func testImmediatePowerEventRefresh() async throws {
         let backend = FixtureNativeFirmwareBackend()
         var battery = MauLeafBatterySnapshot(
@@ -657,9 +823,9 @@ private enum ChargeManagerTests {
 
     @MainActor
     private static func testOutdatedBuildWithCompatibleProtocolUpgrades() async throws {
-        try check(FirmwareLimitHelperProtocolVersion.isCompatible(6, build: "1.2.0")
-                  && !FirmwareLimitHelperProtocolVersion.isCompatible(6, build: "1.1.0")
-                  && FirmwareLimitHelperProtocolVersion.isCompatible(6, build: "1.2.3")
+        try check(FirmwareLimitHelperProtocolVersion.isCompatible(6, build: "1.3.0")
+                  && !FirmwareLimitHelperProtocolVersion.isCompatible(6, build: "1.2.0")
+                  && FirmwareLimitHelperProtocolVersion.isCompatible(6, build: "1.3.3")
                   && !FirmwareLimitHelperProtocolVersion.isCompatible(6, build: nil)
                   && !FirmwareLimitHelperProtocolVersion.isCompatible(5, build: "1.0.0")
                   && !FirmwareLimitHelperProtocolVersion.isCompatible(6, build: "0.9.9")

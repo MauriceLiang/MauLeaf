@@ -950,7 +950,17 @@ struct OperationFeedbackView: View {
     @State private var errorTitle: AppText = "操作未完成"
 
     private var errorVisible: Bool {
-        !manager.isBusy && manager.isError && dismissedError != manager.statusMessage
+        !manager.isBusy && manager.isError && !isRoutineFirmwareReadiness
+            && dismissedError != manager.statusMessage
+    }
+
+    // The charge-control status pill already communicates readiness.
+    // Do not duplicate it with a persistent warning card.
+    private var isRoutineFirmwareReadiness: Bool {
+        guard firmwareNotReady else { return false }
+        let message = manager.statusMessage.source
+        return message == "请保持接电，尝试强制重置。若仍未就绪，请重启 Mac。未写入固件。"
+            || message == "任务已清除，固件仍未就绪。请保持接电，必要时重启 Mac。"
     }
 
     private var genericBusy: Bool {

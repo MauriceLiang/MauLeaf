@@ -1,6 +1,7 @@
 import Foundation
 
 protocol NativeFirmwareBackend {
+    func readHelperInfo() async throws -> FirmwareLimitHelperInfoResponse
     func readState() async throws -> FirmwareLimitHelperStateResponse
     func applyLimit(upper: Int, lower: Int, confirmed: Bool) async throws -> FirmwareLimitHelperOperationResponse
     func beginOneTimeCharge(upper: Int, lower: Int, confirmed: Bool) async throws -> FirmwareLimitHelperOperationResponse
@@ -29,6 +30,10 @@ enum FirmwareLimitHelperClientError: Error, LocalizedError {
 
 final class FirmwareLimitHelperClient: NativeFirmwareBackend {
     private let serviceName = "com.local.chargecap.firmware-helper"
+
+    func readHelperInfo() async throws -> FirmwareLimitHelperInfoResponse {
+        try await request { proxy, reply in proxy.readHelperInfo(withReply: reply) }
+    }
 
     func readState() async throws -> FirmwareLimitHelperStateResponse {
         try await request { proxy, reply in proxy.readState(withReply: reply) }

@@ -66,7 +66,7 @@ final class FirmwareLimitHelperClient: NativeFirmwareBackend {
     }
 
     func enqueueQuitRecovery(removeComponents: Bool) async throws -> FirmwareLimitQuitRecoveryResponse {
-        try await request { proxy, reply in
+        try await request(timeout: 3) { proxy, reply in
             proxy.enqueueQuitRecovery(removeComponents: removeComponents, withReply: reply)
         }
     }
@@ -76,6 +76,7 @@ final class FirmwareLimitHelperClient: NativeFirmwareBackend {
     }
 
     private func request<Response: Decodable>(
+        timeout: TimeInterval = 20,
         _ start: @escaping (
             FirmwareLimitHelperProtocol,
             @escaping (NSData?, NSString?) -> Void
@@ -93,7 +94,7 @@ final class FirmwareLimitHelperClient: NativeFirmwareBackend {
                 delivery.deliver(.failure(FirmwareLimitHelperClientError.serviceUnavailable))
             }
             connection.resume()
-            DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + 20) {
+            DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + timeout) {
                 delivery.deliver(.failure(FirmwareLimitHelperClientError.timedOut))
                 connectionBox.connection.invalidate()
             }

@@ -414,10 +414,6 @@ final class FirmwareLimitHelperService: NSObject, FirmwareLimitHelperProtocol {
 
     private func processQuitRecoveryLocked() throws {
         let remove = try readQuitRecoveryPolicy()
-        if remove {
-            try Data("pending".utf8).write(to: deferredUninstallURL, options: .atomic)
-            try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: deferredUninstallURL.path)
-        }
         let restored = try restoreOriginalStateLocked()
         guard !restored.state.active, !restored.state.hasOriginalStateSnapshot,
               !restored.state.hasReconnectBaseline, !restored.oneTimePending,
@@ -427,6 +423,12 @@ final class FirmwareLimitHelperService: NSObject, FirmwareLimitHelperProtocol {
               !FileManager.default.fileExists(atPath: restoreRequestURL.path),
               !FileManager.default.fileExists(atPath: reconnectBaselineURL.path) else {
             throw FirmwareLimitCoreError.transportFailure("Quit recovery remains unverified.")
+        }
+        if remove {
+            // Only request final removal after restoration, so the marker
+            // cannot suppress recovery of an existing reconnect baseline.
+            try Data("pending".utf8).write(to: deferredUninstallURL, options: .atomic)
+            try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: deferredUninstallURL.path)
         }
         try FileManager.default.removeItem(at: quitRecoveryURL)
         removeBackgroundRecoveryMarkerIfIdle()

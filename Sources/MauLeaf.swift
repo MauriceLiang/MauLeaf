@@ -2192,10 +2192,7 @@ final class ChargeManager: ObservableObject {
             guard FirmwareLimitHelperProtocolVersion.isCompatible(
                 state.helperVersion, build: state.helperBuildVersion
             ) else {
-                throw NativeControlError.helperUpgradeFailed(
-                    found: state.helperVersion,
-                    required: FirmwareLimitHelperProtocolVersion.current
-                )
+                throw NativeControlError.helperUpgradeFailed
             }
             let once = try await backend.oneTimeChargeStatus()
             updateFromNativeState(state, oneTime: once, status: success)

@@ -585,6 +585,28 @@ private enum FirmwareLimitHelperServiceTests {
                      reconnectTransport.upper == 0 && reconnectTransport.lower == 0,
                      "AC reconnect completes exact zero restoration")
 
+        // Old boot records must not replace a newly observed zero baseline.
+        reconnectTransport.upper = 85
+        reconnectTransport.lower = 83
+        reconnectService().applyLimit(upper: 80, lower: 78, confirmed: true) { _, error in reconnectError = error }
+        precondition(reconnectError == nil)
+        reconnectAC = false
+        reconnectService().suspendLimitForReconnect { _, error in reconnectError = error }
+        precondition(reconnectError == nil)
+        reconnectTransport.upper = 0
+        reconnectTransport.lower = 0
+        reconnectAC = true
+        bootID = "test-boot-B"
+        reconnectService().readState { data, error in reconnectData = data; reconnectError = error }
+        let freshZero = try JSONDecoder().decode(FirmwareLimitHelperStateResponse.self, from: reconnectData! as Data)
+        precondition(reconnectError == nil && !freshZero.hasReconnectBaseline && freshZero.writeSupported)
+        reconnectService().applyLimit(upper: 80, lower: 78, confirmed: true) { _, error in reconnectError = error }
+        precondition(reconnectError == nil)
+        reconnectService().restoreOriginalState { _, error in reconnectError = error }
+        precondition(reconnectError == nil && reconnectTransport.activation == 0 &&
+                     reconnectTransport.upper == 0 && reconnectTransport.lower == 0,
+                     "a stale reconnect archive cannot replace the measured new boot baseline")
+
         print("FirmwareLimitHelperServiceTests: PASS (snapshot, offline legacy restore, deferred retry, boot zero recovery, uninstall verification)")
     }
 }

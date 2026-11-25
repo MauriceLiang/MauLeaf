@@ -256,6 +256,7 @@
 "原始固件参数已恢复" = "Original firmware restored";
 "正在恢复原始参数" = "Restoring original firmware";
 "等待断电恢复" = "Waiting to restore after unplug";
+"等待接电恢复" = "Awaiting AC";
 "高于目标时保持电量；关闭后在已测试机型上可能出现拔电识别延迟" = "Hold charge above target; unplug detection may lag when disabled on the tested Mac";
 "超限时保持电量；关闭后拔电识别可能延迟（已测试机型）。" = "Hold above target. Off may delay unplug detection.";
 "目标 %@%% · 临时上限 %@%%" = "Target %@%% · Temporary ceiling %@%%";

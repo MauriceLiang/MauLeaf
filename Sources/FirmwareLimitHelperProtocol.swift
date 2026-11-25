@@ -35,11 +35,10 @@ enum FirmwareLimitHelperProtocolVersion {
     }
 
     static func canUpgradeFrom(_ installed: Int, build: String? = nil) -> Bool {
-        if installed < supported.lowerBound { return true }
-        if installed > supported.upperBound { return false }
+        if !supported.contains(installed) { return true }
         guard let build else { return !acceptsUnversionedV5 }
         guard let actual = versionParts(build), let minimum = versionParts(minimumBuild) else {
-            return false // Invalid metadata requires manual investigation.
+            return true // Replacement still requires verified safe removal.
         }
         return actual.lexicographicallyPrecedes(minimum)
     }
@@ -153,7 +152,7 @@ struct FirmwareLimitHelperStateResponse: Codable, Equatable {
         lower = try container.decode(Int.self, forKey: .lower)
         // Older read-only helpers returned only the four state fields. Treat
         // them as legacy so the subsequent XPC version probe can trigger upgrade.
-        writeSupported = try container.decodeIfPresent(Bool.self, forKey: .writeSupported) ?? true
+        writeSupported = try container.decodeIfPresent(Bool.self, forKey: .writeSupported) ?? false
         writeBlockReason = try container.decodeIfPresent(String.self, forKey: .writeBlockReason)
         hasOriginalStateSnapshot = try container.decodeIfPresent(Bool.self, forKey: .hasOriginalStateSnapshot) ?? false
         restorePending = try container.decodeIfPresent(Bool.self, forKey: .restorePending) ?? false

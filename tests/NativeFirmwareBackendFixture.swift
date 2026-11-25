@@ -206,6 +206,20 @@ final class FixtureNativeFirmwareBackend: NativeFirmwareBackend {
             pending = false
             throw FixtureBackendError.injected
         }
+        // Match the real Helper's AC-only exact zero restore: offline
+        // deactivation succeeds, the root snapshot remains pending.
+        if !acConnected, var snapshot = originalSnapshot,
+           snapshot.state.isInactiveUninitialized,
+           !state.isInactiveUninitialized {
+            snapshot.restoreRequested = true
+            originalSnapshot = snapshot
+            state = FirmwareLimitHelperStateResponse(
+                state: FirmwareLimitState(activationByte: 0x00, upper: state.upper, lower: state.lower),
+                identity: identity, snapshot: snapshot
+            )
+            pending = false
+            throw FirmwareLimitCoreError.externalPowerRequired
+        }
         if falselyReportRestoreSuccess {
             falselyReportRestoreSuccess = false
             let fabricated = FirmwareLimitHelperStateResponse(

@@ -298,3 +298,9 @@
 "原生控制服务版本未知" = "Native control helper version unknown";
 "无法验证当前 Helper 版本；保留所有恢复数据，正在卸载旧版并重新安装内置 Helper。" = "The installed Helper version could not be verified. Recovery data is preserved while the old service is removed and the bundled Helper is installed.";
 "重装后的 Helper 仍与应用要求的版本不一致，请检查应用包或重新下载 MauLeaf。" = "The reinstalled Helper still does not match this app. Verify the app bundle or download MauLeaf again.";
+
+"等待恢复限充" = "Waiting to resume limit";
+
+"重新检测固件" = "Recheck firmware";
+
+"固件限充阈值尚未初始化。保持电源连接，点击固件未就绪重新检测；若持续异常，请正常重启 Mac 后重试。未写入固件。" = "Firmware charge thresholds are not initialized. Keep the charger connected and click Firmware not ready to recheck. If the problem persists, restart your Mac normally and try again. No firmware was written.";

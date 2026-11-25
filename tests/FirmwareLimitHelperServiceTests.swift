@@ -527,6 +527,9 @@ private enum FirmwareLimitHelperServiceTests {
         reconnectTransport.lower = 83
         var reconnectAC = true
         var bootID = "test-boot-A"
+        let quitFinalizer = reconnectDir.appendingPathComponent("complete-deferred-uninstall.sh")
+        try Data("#!/bin/bash\nexit 0\n".utf8).write(to: quitFinalizer)
+        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: quitFinalizer.path)
         func reconnectService() -> FirmwareLimitHelperService {
             FirmwareLimitHelperService(
                 transport: reconnectTransport, identityProvider: { identity },
@@ -541,6 +544,7 @@ private enum FirmwareLimitHelperServiceTests {
                 backgroundRecoveryURL: reconnectDir.appendingPathComponent("background-recovery.pending"),
                 legacyRestoreURL: reconnectDir.appendingPathComponent("legacy-restore.json"),
                 deferredUninstallURL: reconnectDir.appendingPathComponent("deferred-uninstall.pending"),
+                deferredUninstallScriptURL: quitFinalizer,
                 bootSessionProvider: { bootID }, monitorEnabled: false
             )
         }
@@ -639,6 +643,27 @@ private enum FirmwareLimitHelperServiceTests {
         precondition(reconnectTransport.activation == 0 && reconnectTransport.upper == 0 &&
                      reconnectTransport.lower == 0 && !FileManager.default.fileExists(atPath: quitMarker.path))
         try restartedQuitService.verifyReadyForDeferredRemoval()
+
+        // Remove mode acknowledges first, then queues final deletion only
+        // after verified restoration; no fake test actually removes files.
+        let removalService = reconnectService()
+        removalService.applyLimit(upper: 80, lower: 78, confirmed: true) { _, error in reconnectError = error }
+        precondition(reconnectError == nil && reconnectTransport.activation == 2)
+        removalService.enqueueQuitRecovery(removeComponents: true) { data, error in
+            quitData = data; reconnectError = error
+        }
+        let removalAcknowledgment = try JSONDecoder().decode(FirmwareLimitQuitRecoveryResponse.self, from: quitData! as Data)
+        let removalMarker = reconnectDir.appendingPathComponent("deferred-uninstall.pending")
+        precondition(reconnectError == nil && removalAcknowledgment.accepted && removalAcknowledgment.removeComponents)
+        precondition(reconnectTransport.activation == 2 && !FileManager.default.fileExists(atPath: removalMarker.path))
+        removalService.runOneTimeMonitorTickForTesting()
+        precondition(reconnectTransport.activation == 0 && reconnectTransport.upper == 0 &&
+                     reconnectTransport.lower == 0 && FileManager.default.fileExists(atPath: removalMarker.path) &&
+                     !FileManager.default.fileExists(atPath: quitMarker.path))
+        try removalService.verifyReadyForDeferredRemoval()
+        removalService.applyLimit(upper: 85, lower: 83, confirmed: true) { _, error in reconnectError = error }
+        precondition(reconnectError != nil && reconnectTransport.activation == 0,
+                     "new limits cannot race deferred component removal")
 
         print("FirmwareLimitHelperServiceTests: PASS (snapshot, offline legacy restore, deferred retry, boot zero recovery, uninstall verification)")
     }

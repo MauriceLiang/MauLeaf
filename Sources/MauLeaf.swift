@@ -2177,7 +2177,11 @@ final class ChargeManager: ObservableObject {
         isError = false
         statusMessage = progress
         do {
-            try await installNativeHelper()
+            if let helperInstallerForTesting {
+                try await helperInstallerForTesting()
+            } else {
+                try await installNativeHelper()
+            }
 
             let info = try await backend.readHelperInfo()
             guard FirmwareLimitHelperProtocolVersion.isCompatible(info) else {

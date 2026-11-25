@@ -96,8 +96,8 @@ If you use a fixed charging limit in MauLeaf (for example, **85%**), **we recomm
 
 | Remove components on quit | Behavior on every normal quit | Administrator password |
 | --- | --- | --- |
-| Off (default) | Restore and verify original firmware; retain the Helper and launchd registration for the next launch | Normally not required |
-| On | Restore and verify original firmware; then remove the installed Helper, LaunchDaemon and scripts; the app remains until moved to Trash | Required when removing privileged components |
+| Off (default) | Restore and verify original firmware in the background; retain the Helper and launchd registration | Normally not required |
+| On | Restore and verify in the background, then remove the Helper, LaunchDaemon and scripts; verify cleanup before deleting the app | Not required with the matching installed Helper |
 
 On battery power alone, full restoration is allowed only when the validated identity and all additional checks pass (including independent power-source checks, battery at least 30%, and a valid original snapshot). **Failed restoration blocks component removal and retains recovery data.** Force Quit, crashes, and dragging the App to Trash directly cannot guarantee firmware restoration.
 

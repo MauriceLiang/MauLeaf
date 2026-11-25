@@ -3,6 +3,7 @@ import Foundation
 /// Narrow XPC surface for the native firmware controller. All SMC writes are
 /// performed by the root helper after target, power-source, and consent checks.
 @objc protocol FirmwareLimitHelperProtocol {
+    func readHelperInfo(withReply reply: @escaping (NSData?, NSString?) -> Void)
     func readState(withReply reply: @escaping (NSData?, NSString?) -> Void)
     func makePlan(upper: Int, lower: Int, withReply reply: @escaping (NSData?, NSString?) -> Void)
     func applyLimit(upper: Int, lower: Int, confirmed: Bool, withReply reply: @escaping (NSData?, NSString?) -> Void)
@@ -12,51 +13,45 @@ import Foundation
     func oneTimeChargeStatus(withReply reply: @escaping (NSData?, NSString?) -> Void)
 }
 
-/// Compatibility is intentionally independent of the visible app version.
-/// A UI-only release never requires reinstalling the privileged Helper.
-enum FirmwareLimitHelperProtocolVersion {
-    static let current = 6
-    static let supported: ClosedRange<Int> = 6...6
+/// The app checks this lightweight handshake before asking the Helper to
+/// inspect AppleSMC. It remains available even when firmware registers or a
+/// persisted snapshot are invalid.
+struct FirmwareLimitHelperInfoResponse: Codable, Equatable {
+    let protocolVersion: Int
+    let buildVersion: String
 
-    /// Increment this floor only when a Helper behavior fix is required by
-    /// the app. A cosmetic app version must NEVER change it.
-    static let minimumBuild = "1.3.0"
-    /// The new v6 Helper accepts a 100% temporary firmware ceiling.
-    /// Unversioned older Helpers are not considered compatible.
-    static let acceptsUnversionedV5 = false
-
-    static func isCompatible(_ installed: Int, build: String? = nil) -> Bool {
-        guard supported.contains(installed) else { return false }
-        guard let build else { return acceptsUnversionedV5 }
-        guard let actual = versionParts(build), let minimum = versionParts(minimumBuild) else {
-            return false
-        }
-        return actual.lexicographicallyPrecedes(minimum) == false
-    }
-
-    static func canUpgradeFrom(_ installed: Int, build: String? = nil) -> Bool {
-        if installed < supported.lowerBound { return true }
-        if installed > supported.upperBound { return false }
-        guard let build else { return !acceptsUnversionedV5 }
-        guard let actual = versionParts(build), let minimum = versionParts(minimumBuild) else {
-            return false // Invalid metadata requires manual investigation.
-        }
-        return actual.lexicographicallyPrecedes(minimum)
-    }
-
-    private static func versionParts(_ value: String) -> [Int]? {
-        let items = value.split(separator: ".", omittingEmptySubsequences: false)
-        guard items.count == 3 else { return nil }
-        let values = items.compactMap { Int($0) }
-        guard values.count == 3, values.allSatisfy({ $0 >= 0 }) else { return nil }
-        return values
+    static var current: FirmwareLimitHelperInfoResponse {
+        FirmwareLimitHelperInfoResponse(
+            protocolVersion: FirmwareLimitHelperProtocolVersion.current,
+            buildVersion: FirmwareLimitHelperBuildVersion.current
+        )
     }
 }
 
-/// Version of the privileged binary, distinct from MauLeaf's app version.
-/// A UI-only change does not change this constant.
+/// A Helper is compatible only when it is exactly the version bundled with
+/// this app. Any mismatch, including a newer Helper, uses the same
+/// service-only uninstall and reinstall path.
+enum FirmwareLimitHelperProtocolVersion {
+    static let current = 7
+    static let requiredBuild = "1.4.0"
+
+    static func isCompatible(_ installed: Int, build: String?) -> Bool {
+        installed == current && build == requiredBuild
+    }
+
+    static func isCompatible(_ info: FirmwareLimitHelperInfoResponse) -> Bool {
+        isCompatible(info.protocolVersion, build: info.buildVersion)
+    }
+
+    static func canUpgradeFrom(_ installed: Int, build: String? = nil) -> Bool {
+        !isCompatible(installed, build: build)
+    }
+}
+
+/// Increment this build whenever the privileged Helper implementation or
+/// its externally observable behavior changes.
 enum FirmwareLimitHelperBuildVersion {
-    static let current = "1.3.0"
+    static let current = "1.4.0"
 }
 
 struct FirmwareLimitHelperStateResponse: Codable, Equatable {
@@ -153,11 +148,11 @@ struct FirmwareLimitHelperStateResponse: Codable, Equatable {
         lower = try container.decode(Int.self, forKey: .lower)
         // Older read-only helpers returned only the four state fields. Treat
         // them as legacy so the subsequent XPC version probe can trigger upgrade.
-        writeSupported = try container.decodeIfPresent(Bool.self, forKey: .writeSupported) ?? true
+        writeSupported = try container.decode(Bool.self, forKey: .writeSupported)
         writeBlockReason = try container.decodeIfPresent(String.self, forKey: .writeBlockReason)
-        hasOriginalStateSnapshot = try container.decodeIfPresent(Bool.self, forKey: .hasOriginalStateSnapshot) ?? false
-        restorePending = try container.decodeIfPresent(Bool.self, forKey: .restorePending) ?? false
-        restoreSupported = try container.decodeIfPresent(Bool.self, forKey: .restoreSupported) ?? writeSupported
+        hasOriginalStateSnapshot = try container.decode(Bool.self, forKey: .hasOriginalStateSnapshot)
+        restorePending = try container.decode(Bool.self, forKey: .restorePending)
+        restoreSupported = try container.decode(Bool.self, forKey: .restoreSupported)
         restoreBlockReason = try container.decodeIfPresent(String.self, forKey: .restoreBlockReason)
     }
 }

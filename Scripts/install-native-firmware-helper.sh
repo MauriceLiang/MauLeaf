@@ -137,7 +137,7 @@ rollback() {
         /bin/launchctl bootstrap system "$PLIST_TARGET" >/dev/null 2>&1 || true
       fi
     else
-      /bin/rm -f "$TARGET" "$PLIST_TARGET"
+      /bin/rm -f "$TARGET" "$PLIST_TARGET" "$FINALIZER"
     fi
   elif [[ "$rc" -ne 0 && "$had_previous" == true && "$was_running" == true ]]; then
     /bin/launchctl bootstrap system "$PLIST_TARGET" >/dev/null 2>&1 || true

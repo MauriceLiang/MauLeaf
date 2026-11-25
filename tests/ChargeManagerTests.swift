@@ -932,6 +932,14 @@ private enum ChargeManagerTests {
         manager.refresh()
         try await Task.sleep(nanoseconds: 100_000_000)
         try check(installs == 1, "periodic refresh never re-installs a compatible helper")
+
+        // A later external replacement with another incompatible Helper
+        // must still use the same automatic service-only reinstall path.
+        backend.reportedHelperVersion = FirmwareLimitHelperProtocolVersion.current - 1
+        manager.refresh()
+        try await wait { installs == 2 && manager.backendReady && !manager.isBusy }
+        try check(backend.applyCount == 0 && backend.restoreCount == 0,
+                  "a later Helper version mismatch is also replaced without touching firmware state")
     }
 
     @MainActor

@@ -35,7 +35,7 @@ enum FirmwareLimitHelperProtocolVersion {
     static let current = 7
     static let requiredBuild = "1.4.0"
 
-    static func isCompatible(_ installed: Int, build: String?) -> Bool {
+    static func isCompatible(_ installed: Int, build: String? = nil) -> Bool {
         installed == current && build == requiredBuild
     }
 

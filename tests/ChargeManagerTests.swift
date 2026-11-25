@@ -184,6 +184,7 @@ private enum ChargeManagerTests {
         try await testDynamicHoldAboveTargetAndReconnect()
         try await testDynamicHoldSuspendsDuringOneTimeFullCharge()
         try await testUnplugAutomaticallyRestoresAndReplugResumes()
+        try await testUnplugZeroBaselineShowsWaitingWithoutWarning()
         try await testUnplugWithUnsafeBatteryPreservesRecovery()
         try await testUnknownPowerDoesNotRestore()
         try await testOfflineBootRestoresManagedSnapshot()
@@ -204,6 +205,7 @@ private enum ChargeManagerTests {
         try await testNewerHelperIsReplacedByBundledVersion()
         try await testOutdatedActiveHelperCanBeRepairedWithoutFirmwareWrite()
         try await testInstallFailureDoesNotWriteFirmware()
+        try await testFastQuitHandoff()
         try await testAutomaticQuitRestore()
         try await testQuitDuringOneTimeFullCharge()
         try await testUnpluggedManualDisableRestoresImmediately()
@@ -474,6 +476,7 @@ private enum ChargeManagerTests {
 
     @MainActor
     private static func testUnmanagedBootZeroNoWrite() async throws {
+        UserDefaults.standard.set(false, forKey: "desiredChargeLimitEnabled")
         UserDefaults.standard.set(false, forKey: "dynamicHoldEnabled")
         UserDefaults.standard.set(true, forKey: "nativeFirmwareWriteConfirmed")
         let backend = FixtureNativeFirmwareBackend()
@@ -490,15 +493,19 @@ private enum ChargeManagerTests {
         manager.start()
         try await wait { manager.currentState?.isInactiveUninitialized == true }
         try await Task.sleep(nanoseconds: 180_000_000)
-        try check(manager.popoverLimitStatus.source == "固件未就绪"
+        try check(manager.popoverLimitStatus.source == "未启用"
                   && !manager.hasOriginalStateSnapshot
-                  && backend.applyCount == 0 && !manager.canEnableLimit
+                  && backend.applyCount == 0 && manager.canEnableLimit
                   && manager.canToggleLimitFromCard,
-                  "without a valid pre-install snapshot, 0/0 remains read-only but offers recheck")
-        let reads = backend.readCount
+                  "inactive 0/0 is ready but never writes on launch without intent")
         manager.toggleLimitFromCard()
-        try await wait { backend.readCount > reads }
-        try check(backend.applyCount == 0, "rechecking uninitialized firmware never writes SMC")
+        try await wait { backend.applyCount == 1 && !manager.isBusy }
+        try check(backend.state.active && manager.hasOriginalStateSnapshot,
+                  "explicit enable creates a zero baseline and applies the requested limit")
+        manager.toggleLimitFromCard()
+        try await wait { backend.restoreCount == 1 && !manager.isBusy }
+        try check(backend.state.isInactiveUninitialized && !manager.hasOriginalStateSnapshot,
+                  "disable restores original inactive zero band")
         UserDefaults.standard.set(false, forKey: "nativeFirmwareWriteConfirmed")
     }
 
@@ -525,7 +532,7 @@ private enum ChargeManagerTests {
         manager.confirmForceReset()
         try await wait { backend.restoreCount == 1 && !manager.isBusy }
         try check(!backend.pending && !manager.fullOncePending && !backend.state.active
-                  && backend.applyCount == 0 && !manager.backendReady
+                  && backend.applyCount == 0 && manager.backendReady
                   && !UserDefaults.standard.bool(forKey: "desiredChargeLimitEnabled"),
                   "reset clears stale tasks without inventing a zero-state baseline or re-enabling the limit")
         UserDefaults.standard.removeObject(forKey: "desiredChargeLimitEnabled")
@@ -656,6 +663,51 @@ private enum ChargeManagerTests {
         try check(stopped, "an already restored and manually disabled app can quit")
         UserDefaults.standard.removeObject(forKey: "desiredChargeLimitEnabled")
         UserDefaults.standard.set(false, forKey: "nativeFirmwareWriteConfirmed")
+    }
+
+    @MainActor
+    private static func testUnplugZeroBaselineShowsWaitingWithoutWarning() async throws {
+        UserDefaults.standard.set(false, forKey: "desiredChargeLimitEnabled")
+        UserDefaults.standard.set(false, forKey: "dynamicHoldEnabled")
+        UserDefaults.standard.set(true, forKey: "nativeFirmwareWriteConfirmed")
+        let backend = FixtureNativeFirmwareBackend()
+        backend.simulateFirmwareBootReset()
+        var battery = MauLeafBatterySnapshot(
+            percent: 88, isCharging: false, isFullyCharged: false,
+            isACConnected: true, precisePercent: 88
+        )
+        let manager = ChargeManager(
+            backend: backend, autoInstallNativeHelper: false,
+            batteryReader: { battery }, observePowerSourceChanges: false,
+            dynamicSettleInterval: 0.01
+        )
+        manager.start()
+        try await wait { manager.canEnableLimit }
+        manager.toggleLimitFromCard()
+        try await wait { backend.state.active && !manager.isBusy }
+        backend.acConnected = false
+        battery = MauLeafBatterySnapshot(
+            percent: 87, isCharging: false, isFullyCharged: false,
+            isACConnected: false, precisePercent: 87
+        )
+        manager.simulatePowerSourceNotificationForTesting()
+        try await wait { backend.restoreCount == 1 && manager.restorePending && !manager.isBusy }
+        try await Task.sleep(nanoseconds: 120_000_000)
+        try check(!backend.state.active && manager.hasOriginalStateSnapshot
+                  && !manager.isError && manager.popoverLimitStatus.source == "等待接电恢复",
+                  "verified inactive pending zero restore uses the status pill without duplicate error feedback")
+        backend.acConnected = true
+        _ = try await backend.restoreOriginalState()
+        battery = MauLeafBatterySnapshot(
+            percent: 75, isCharging: true, isFullyCharged: false,
+            isACConnected: true, precisePercent: 75
+        )
+        manager.simulatePowerSourceNotificationForTesting()
+        try await wait { backend.applyCount == 2 && backend.state.active && !manager.isBusy }
+        manager.toggleLimitFromCard()
+        try await wait { !manager.hasOriginalStateSnapshot && !manager.isBusy }
+        UserDefaults.standard.set(false, forKey: "nativeFirmwareWriteConfirmed")
+        UserDefaults.standard.removeObject(forKey: "desiredChargeLimitEnabled")
     }
 
     @MainActor
@@ -981,7 +1033,7 @@ private enum ChargeManagerTests {
 
     @MainActor
     private static func testOutdatedBuildWithCompatibleProtocolUpgrades() async throws {
-        try check(FirmwareLimitHelperProtocolVersion.isCompatible(8, build: "1.5.1")
+        try check(FirmwareLimitHelperProtocolVersion.isCompatible(9, build: "1.7.0")
                   && !FirmwareLimitHelperProtocolVersion.isCompatible(8, build: "1.4.9")
                   && !FirmwareLimitHelperProtocolVersion.isCompatible(8, build: "1.5.2")
                   && !FirmwareLimitHelperProtocolVersion.isCompatible(8, build: nil)
@@ -1105,6 +1157,26 @@ private enum ChargeManagerTests {
         try check(backend.state.active && manager.hasOriginalStateSnapshot,
                   "test fixture enabled a limit while retaining the pre-MauLeaf snapshot")
         return manager
+    }
+
+    @MainActor
+    private static func testFastQuitHandoff() async throws {
+        let backend = FixtureNativeFirmwareBackend()
+        let manager = try await activatedManager(backend: backend)
+        manager.removeComponentsOnQuit = true
+        backend.failQuitHandoff = true
+        let rejected = await manager.handoffQuitRecovery()
+        try check(!rejected && manager.isError && !manager.isPreparingToQuit &&
+                  backend.state.active && backend.restoreCount == 0,
+                  "failed durable handoff never claims recovery or silently quits")
+        backend.failQuitHandoff = false
+        let accepted = await manager.handoffQuitRecovery()
+        try check(accepted && manager.isPreparingToQuit && !manager.didVerifyFirmwareOnQuit &&
+                  backend.quitHandoffCount == 2 && backend.quitHandoffRemove &&
+                  backend.restoreCount == 0 && backend.state.active &&
+                  !UserDefaults.standard.bool(forKey: "desiredChargeLimitEnabled"),
+                  "successful quit only acknowledges background ownership, never waits for restoration")
+        UserDefaults.standard.set(false, forKey: "removeComponentsOnQuit")
     }
 
     @MainActor

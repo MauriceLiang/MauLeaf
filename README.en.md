@@ -22,7 +22,7 @@
 **MauLeaf** is a free, open-source **macOS battery charge limiter and battery care app for Apple Silicon MacBook**. Built with SwiftUI + AppKit and a native AppleSMC controller, it focuses on **charging limits** and **one-time full charge**. It lives in the menu bar as a green leaf, with no separate window or batt dependency. **Firmware writes currently support only one verified M1 Pro hardware profile**, as detailed below.
 
 > [!NOTE]
-> **MauLeaf v1.0.0** includes native charge limits, one-time full charge, Dynamic Hold, live power flow, compact power status when the diagram is hidden, and a persistent quit cleanup setting. This stable release promotes the validated Preview 11 code without changing the firmware controller. [Stable release notes](docs/releases/v1.0.0.md).
+> **MauLeaf v1.1.0** — App 1.1.0 / Helper 1.7.0 / XPC v9. Fixes inactive zero-band initialization and unplug recovery, with durable background recovery and fast quit. [Stable release notes](docs/releases/v1.1.0.md).
 
 > [!CAUTION]
 > **A stable release does not imply universal hardware support.** New firmware charging-limit writes are restricted to **MacBookPro18,1 (M1 Pro) + macOS 15 + mBoot-20457.41.3 + arm64**. macOS 26/27, Intel, and unverified devices cannot activate new limits. Battery viewing may still work on other devices. Actual charge-stop and resume percentages have not yet completed full physical validation; successful register read-back is not proof of real charging behavior.
@@ -55,9 +55,9 @@
 
 ### Helper version compatibility and uninstall
 
-MauLeaf's privileged Helper has a build version and XPC protocol independent of the app release. Each launch checks protocol compatibility read-only. Compatible Helpers are reused without another administrator password after a UI-only update. Only an **installed incompatible older Helper** triggers a one-time user-authorized upgrade attempt. First installation remains opt-in. Previous restoration snapshots and pending jobs are preserved. Unknown newer protocols are never silently downgraded.
+MauLeaf's privileged Helper has a build version and XPC protocol independent of the app release. Each launch checks protocol compatibility read-only. Compatible Helpers are reused without another administrator password after a UI-only update. An **installed incompatible Helper** triggers a user-authorized replacement attempt. First installation remains opt-in. Previous restoration snapshots and pending jobs are preserved. Exact bundled Helper version matching preserves recovery records during replacement.
 
-The **Remove components on quit** setting defaults to Off. Normal quit always restores and verifies the original firmware; Off retains the Helper for reuse, while On removes the Helper, LaunchDaemon, and scripts after verified recovery. No repeated normal-quit chooser appears. Enable removal before uninstalling. Any unsafe or unknown recovery state still blocks removal and preserves recovery data.
+The **Remove components on quit** setting defaults to Off. Normal quit hands a durable recovery job to the Helper, then exits without waiting. Off retains the installed components; On removes them in the background after verified recovery. No repeated normal-quit chooser appears. Enable removal before uninstalling. Any unsafe or unknown recovery state still blocks removal and preserves recovery data.
 
 ## Download and install
 
@@ -77,7 +77,7 @@ The current package is **ad-hoc code-signed, without Apple Developer ID signing 
 | One-time full charge | Start or cancel from the top card, available only while MauLeaf is managing an active limit |
 | Dynamic Hold | Optional charge-holding policy when above the target; turning it off may delay unplug recognition on the tested Mac |
 | Settings | Power details, Chinese/English interface, Dynamic Hold, and Remove components on quit |
-| Quit | Automatically follow the saved cleanup preference; always restore and verify the original firmware first |
+| Quit | Hand off durable recovery using the saved cleanup preference, then exit |
 
 Before first activation, the privileged Helper snapshots the original bfF0, bfD0 and bfE0 values with device identity in a root-owned recovery file. Later limit changes or one-time full charge never overwrite the snapshot. Disabling a limit restores all original values with read-back verification; unknown states or failed restores are never reported as safe.
 
@@ -96,10 +96,10 @@ If you use a fixed charging limit in MauLeaf (for example, **85%**), **we recomm
 
 | Remove components on quit | Behavior on every normal quit | Administrator password |
 | --- | --- | --- |
-| Off (default) | Restore and verify original firmware; retain the Helper and launchd registration for the next launch | Normally not required |
-| On | Restore and verify original firmware; then remove the installed Helper, LaunchDaemon and scripts; the app remains until moved to Trash | Required when removing privileged components |
+| Off (default) | Restore and verify original firmware in the background; retain the Helper and launchd registration | Normally not required |
+| On | Restore and verify in the background, then remove the Helper, LaunchDaemon and scripts; verify cleanup before deleting the app | Not required with the matching installed Helper |
 
-On battery power alone, full restoration is allowed only when the validated identity and all additional checks pass (including independent power-source checks, battery at least 30%, and a valid original snapshot). **Failed restoration blocks normal removal and retains recovery data.** Force Quit, crashes, and dragging the App to Trash directly cannot guarantee firmware restoration.
+On battery power alone, full restoration is allowed only when the validated identity and all additional checks pass (including independent power-source checks, battery at least 30%, and a valid original snapshot). **Failed restoration blocks component removal and retains recovery data.** Force Quit, crashes, and dragging the App to Trash directly cannot guarantee firmware restoration.
 
 **Recommended uninstall:** Enable **Remove components on quit** in Settings, quit normally and confirm successful cleanup, then move MauLeaf.app to Trash. If you previously kept components and need manual recovery, run the bundled uninstaller *while MauLeaf.app still exists*:
 

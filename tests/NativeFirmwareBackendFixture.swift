@@ -22,6 +22,9 @@ final class FixtureNativeFirmwareBackend: NativeFirmwareBackend {
     var beginCount = 0
     var cancelCount = 0
     var restoreCount = 0
+    var quitHandoffCount = 0
+    var quitHandoffRemove = false
+    var failQuitHandoff = false
     var failNextApply = false
     var failNextRestore = false
     var failNextRead = false
@@ -206,6 +209,20 @@ final class FixtureNativeFirmwareBackend: NativeFirmwareBackend {
             pending = false
             throw FixtureBackendError.injected
         }
+        // Match the real Helper's AC-only exact zero restore: offline
+        // deactivation succeeds, the root snapshot remains pending.
+        if !acConnected, var snapshot = originalSnapshot,
+           snapshot.state.isInactiveUninitialized,
+           !state.isInactiveUninitialized {
+            snapshot.restoreRequested = true
+            originalSnapshot = snapshot
+            state = FirmwareLimitHelperStateResponse(
+                state: FirmwareLimitState(activationByte: 0x00, upper: state.upper, lower: state.lower),
+                identity: identity, snapshot: snapshot
+            )
+            pending = false
+            throw FirmwareLimitCoreError.externalPowerRequired
+        }
         if falselyReportRestoreSuccess {
             falselyReportRestoreSuccess = false
             let fabricated = FirmwareLimitHelperStateResponse(
@@ -244,6 +261,13 @@ final class FixtureNativeFirmwareBackend: NativeFirmwareBackend {
             oneTimePending: false,
             message: "Fake original firmware state restored and verified."
         )
+    }
+
+    func enqueueQuitRecovery(removeComponents: Bool) async throws -> FirmwareLimitQuitRecoveryResponse {
+        quitHandoffCount += 1
+        quitHandoffRemove = removeComponents
+        guard !failQuitHandoff else { throw FixtureBackendError.injected }
+        return FirmwareLimitQuitRecoveryResponse(accepted: true, removeComponents: removeComponents)
     }
 
     func oneTimeChargeStatus() async throws -> FirmwareLimitHelperOneTimeStatusResponse {

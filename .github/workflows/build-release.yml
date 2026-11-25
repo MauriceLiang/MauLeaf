@@ -257,6 +257,19 @@ jobs:
             printf '\n\nTarget platform: Apple Silicon (arm64) only.\n' >> artifacts/RELEASE_NOTES.md
           fi
           grep -qi 'Apple Silicon' artifacts/RELEASE_NOTES.md
+          # Generate version metadata directly from the tagged release sources.
+          APP_VERSION="$(tr -d '[:space:]' < VERSION)"
+          HELPER_VERSION="$(sed -nE 's/^[[:space:]]*static let current = "([0-9]+\.[0-9]+\.[0-9]+)"$/\1/p' Sources/FirmwareLimitHelperProtocol.swift)"
+          HELPER_PROTOCOL="$(sed -nE 's/^[[:space:]]*static let current = ([0-9]+)$/\1/p' Sources/FirmwareLimitHelperProtocol.swift)"
+          [[ "$APP_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ && "$HELPER_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ && "$HELPER_PROTOCOL" =~ ^[0-9]+$ ]] || exit 1
+          [[ "$RELEASE_LABEL" == "$APP_VERSION" || "$RELEASE_LABEL" == "$APP_VERSION"-preview.* ]] || exit 1
+          {
+            printf '## Version information / 版本信息\n\n'
+            printf -- '- App / 应用版本: **%s**\n- Helper / 后台服务版本: **%s**\n- XPC protocol / 通信协议: **v%s**\n\n' "$APP_VERSION" "$HELPER_VERSION" "$HELPER_PROTOCOL"
+            cat artifacts/RELEASE_NOTES.md
+          } > artifacts/RELEASE_NOTES.with-versions.md
+          mv artifacts/RELEASE_NOTES.with-versions.md artifacts/RELEASE_NOTES.md
+          printf 'Release version: %s; Helper: %s; XPC protocol: v%s\n' "$APP_VERSION" "$HELPER_VERSION" "$HELPER_PROTOCOL"
           test -s "artifacts/MauLeaf-${RELEASE_LABEL}-macos-arm64.dmg"
           if find artifacts -maxdepth 1 -type f | grep -Eq 'x86_64|INTEL'; then
             echo "Intel artifacts are not part of Preview 5." >&2

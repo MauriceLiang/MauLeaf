@@ -187,13 +187,7 @@ private final class MauLeafMenuController: NSObject {
     func prepareForTermination() async -> Bool {
         // Normal quit follows the saved setting without interrupting the user.
         // An emergency alert is still required if firmware restoration fails.
-        let policy = manager.quitComponentPolicy
-        let restored = await manager.prepareForTermination()
-        var completed = false
-        if restored {
-            completed = await manager.finishQuitComponentCleanup(policy)
-        }
-        guard !completed else { return true }
+        guard !(await manager.handoffQuitRecovery()) else { return true }
 
         positionPanel()
         panel.makeKeyAndOrderFront(nil)
@@ -206,12 +200,8 @@ private final class MauLeafMenuController: NSObject {
         // and helper for recovery; never imply Finder deletion is safe.
         let alert = NSAlert()
         alert.alertStyle = .warning
-        alert.messageText = manager.didVerifyFirmwareOnQuit
-            ? manager.text("固件已恢复，但后台组件未处理完成")
-            : manager.text("无法验证充电限制恢复")
-        alert.informativeText = manager.didVerifyFirmwareOnQuit
-            ? manager.text("原始固件已恢复，但 Helper 停止或脚本清理失败。建议返回应用重试；如果仍然退出，请勿直接删除 App，以免留下系统后台组件。")
-            : manager.text("原始固件配置尚未确认恢复。建议返回应用，连接电源或排查原因后重试退出。如果选择「仍然退出」，后台 Helper 和恢复快照会保留以尝试修复；此时不能直接将 MauLeaf.app 扔进废纸篓，否则可能留下后台服务或限充状态。")
+        alert.messageText = manager.text("无法验证充电限制恢复")
+        alert.informativeText = manager.text("未能确认后台服务已接收恢复任务。请返回应用重试；若选择仍然退出，请勿直接删除 App 或 Helper。")
         alert.addButton(withTitle: manager.text("仍然退出"))
         alert.addButton(withTitle: manager.text("返回应用"))
         return alert.runModal() == .alertFirstButtonReturn
@@ -512,10 +502,15 @@ struct ContentView: View {
                 NSApp.terminate(nil)
             } label: {
                 HStack(spacing: 10) {
-                    Image(systemName: "power")
-                        .font(.system(size: 16, weight: .medium))
-                        .frame(width: 20)
-                    Text(manager.text("退出 MauLeaf"))
+                    Group {
+                        if manager.isPreparingToQuit {
+                            ProgressView().controlSize(.small)
+                        } else {
+                            Image(systemName: "power").font(.system(size: 16, weight: .medium))
+                        }
+                    }
+                    .frame(width: 20)
+                    Text(manager.text(manager.isPreparingToQuit ? "正在退出…" : "退出 MauLeaf"))
                         .font(.subheadline.weight(.medium))
                     Spacer()
                 }
@@ -524,7 +519,7 @@ struct ContentView: View {
             }
             .buttonStyle(.plain)
             .disabled(manager.isPreparingToQuit)
-            .help(manager.text("正常退出会先关闭限制充电并验证恢复。若无法安全恢复，将取消退出。"))
+            .help(manager.text("退出时将恢复任务交给后台服务，应用无需等待恢复完成。"))
         }
         .padding(.horizontal, 17)
         .padding(.top, 22)
@@ -950,7 +945,7 @@ struct OperationFeedbackView: View {
     @State private var errorTitle: AppText = "操作未完成"
 
     private var errorVisible: Bool {
-        !manager.isBusy && manager.isError && !isRoutineFirmwareReadiness
+        !manager.isPreparingToQuit && !manager.isBusy && manager.isError && !isRoutineFirmwareReadiness
             && dismissedError != manager.statusMessage
     }
 
@@ -964,7 +959,7 @@ struct OperationFeedbackView: View {
     }
 
     private var genericBusy: Bool {
-        manager.isBusy && manager.activeOperation == nil
+        !manager.isPreparingToQuit && manager.isBusy && manager.activeOperation == nil
     }
 
     private var firmwareNotReady: Bool {
@@ -1398,6 +1393,20 @@ final class ChargeManager: ObservableObject {
                 self.automaticUnplugRetryAfter = Date().addingTimeInterval(8)
                 self.isBusy = false
                 await self.refreshNativeState()
+                // A deferred restore is a normal suspension state only after
+                // a fresh, verified read confirms the limit is inactive and
+                // the Helper has durably recorded the remaining recovery.
+                // Keep real errors visible if activation or recovery is unknown.
+                if !self.helperStateUnknown, self.helperVersionVerified,
+                   let state = self.currentState, state.activationByte == 0x00,
+                   !state.active, state.hasOriginalStateSnapshot,
+                   state.restorePending, state.restoreSupported, !self.fullOncePending {
+                    self.dynamicSessionUpper = nil
+                    self.dynamicNeedsNewCapture = true
+                    self.automaticUnplugRetryAfter = nil
+                    self.isError = false
+                    return
+                }
                 self.statusMessage = "拔电后尚未完成固件恢复；原始快照及后台恢复任务已保留：\(AppText(error: error))"
                 self.isError = true
             }
@@ -1457,7 +1466,7 @@ final class ChargeManager: ObservableObject {
     /// A reboot may return bfF0 inactive and both thresholds zero while
     /// retaining the verified original snapshot. Recovery is allowed only
     /// for a pre-authorized, managed limit; an unknown zero state with no
-    /// snapshot is read-only and must never become the new baseline.
+    /// snapshot is eligible for a new baseline only on the verified target.
     private var needsManagedBootReapply: Bool {
         guard let state = currentState else { return false }
         return state.isInactiveUninitialized && state.hasOriginalStateSnapshot
@@ -1608,6 +1617,10 @@ final class ChargeManager: ObservableObject {
             return activeOperation.status
         }
         if !isAdapterConnected && currentState?.hasOriginalStateSnapshot == true {
+            if restorePending, currentState?.activationByte == 0x00,
+               currentState?.active == false, !helperStateUnknown {
+                return "等待接电恢复"
+            }
             return restorePending ? "等待断电恢复" : "正在恢复原始参数"
         }
         if let state = currentState, state.isActiveZeroed {
@@ -1616,6 +1629,7 @@ final class ChargeManager: ObservableObject {
         if let state = currentState, state.isInactiveUninitialized {
             if state.hasOriginalStateSnapshot { return "重启后恢复中" }
             if state.hasReconnectBaseline && state.writeSupported { return "等待恢复限充" }
+            if state.writeSupported { return "未启用" }
             return "固件未就绪"
         }
         if helperStateUnknown { return "状态未知" }
@@ -1820,7 +1834,9 @@ final class ChargeManager: ObservableObject {
     /// On AC plug/unplug, update battery UI immediately (without waiting
     /// for the 20-second timer). A couple of bounded follow-up reads absorb
     /// transient lag while macOS updates AppleSmartBattery registry fields.
-    /// No privileged Helper calls are made for these telemetry events.
+    /// On AC reconnect with pending recovery, also read the Helper's
+    /// authoritative state so a completed restore can resume the opted-in
+    /// limit without waiting for the periodic 20-second fallback.
     private func handlePowerSourceChange() {
         guard started, !isPreparingToQuit else { return }
         readSystemBattery()
@@ -1829,9 +1845,15 @@ final class ChargeManager: ObservableObject {
             try? await Task.sleep(nanoseconds: 350_000_000)
             guard !Task.isCancelled, let self, !self.isPreparingToQuit else { return }
             self.readSystemBattery()
+            if self.isAdapterConnected, self.restorePending, !self.isBusy {
+                await self.refreshNativeState()
+            }
             try? await Task.sleep(nanoseconds: 850_000_000)
             guard !Task.isCancelled, !self.isPreparingToQuit else { return }
             self.readSystemBattery()
+            if self.isAdapterConnected, self.restorePending, !self.isBusy {
+                await self.refreshNativeState()
+            }
         }
     }
 
@@ -2091,12 +2113,15 @@ final class ChargeManager: ObservableObject {
                 : "重启后读到激活的无效固件上限 0/0，且没有可信原始快照；已阻止写入，请保留 Helper 并反馈诊断。"
             isError = true
         } else if state.isInactiveUninitialized {
-            modeText = "固件重启后尚未初始化限充阈值"
+            modeText = "限制充电未启用"
             if state.hasOriginalStateSnapshot || (state.hasReconnectBaseline && state.writeSupported) {
                 statusMessage = "已保留原始固件快照；待连接电源稳定后恢复原先的限充设置。"
                 isError = false
+            } else if state.writeSupported {
+                statusMessage = status
+                isError = false
             } else {
-                statusMessage = "请保持接电，尝试强制重置。若仍未就绪，请重启 Mac。未写入固件。"
+                statusMessage = "当前系统或硬件配置不允许写入新的充电上限。"
                 isError = true
             }
         } else if state.active && state.hasOriginalStateSnapshot {
@@ -2679,6 +2704,75 @@ final class ChargeManager: ObservableObject {
     /// A normal application quit is a firmware recovery transaction, not
     /// merely a UI shutdown. A failed or unverifiable restore cancels quitting.
     /// The privileged helper retains the original snapshot for retry.
+    /// Production quit path. Wait only for a durable handoff acknowledgment,
+    /// never for SMC restoration or deferred component removal.
+    func handoffQuitRecovery() async -> Bool {
+        guard !isPreparingToQuit else { return false }
+        isPreparingToQuit = true
+        didVerifyFirmwareOnQuit = false
+        limitDebounce?.cancel()
+        limitDebounce = nil
+        dynamicReconcileTask?.cancel()
+        automaticReconnectApplyTask?.cancel()
+        automaticUnplugRestoreTask?.cancel()
+        powerRecheckTask?.cancel()
+        pendingAction = nil
+        lastAction = nil
+        showNativeWriteConfirmation = false
+        showLegacyDisableConfirmation = false
+        showForceResetConfirmation = false
+        powerFlowTimer?.invalidate()
+        powerFlowTimer = nil
+        powerFlowGeneration &+= 1
+
+        do {
+            // An active app operation may be completing a Helper install or
+            // registering a new request. Don't race it with termination.
+            let deadline = Date().addingTimeInterval(5)
+            while isBusy {
+                guard Date() < deadline else {
+                    return cancelTermination("原生固件操作仍在进行；无法确认恢复状态。")
+                }
+                try await Task.sleep(nanoseconds: 50_000_000)
+            }
+            isBusy = true
+            isError = false
+            if helperArtifactsPresent() || currentState != nil {
+                let remove = quitComponentPolicy == .remove
+                let acknowledgment = try await backend.enqueueQuitRecovery(removeComponents: remove)
+                guard acknowledgment.accepted, !remove || acknowledgment.removeComponents else {
+                    return cancelTermination("未能确认后台服务已接收恢复任务。")
+                }
+            }
+            setDesiredLimitEnabled(false)
+            stopLocalMonitoringForQuit()
+            isBusy = false
+            return true
+        } catch {
+            return cancelTermination("退出时无法确认后台恢复任务：\(AppText(error: error))")
+        }
+    }
+
+    private func stopLocalMonitoringForQuit() {
+        refreshTimer?.invalidate()
+        refreshTimer = nil
+        powerFlowTimer?.invalidate()
+        powerFlowTimer = nil
+        powerFlowGeneration &+= 1
+        panelVisible = false
+        powerRecheckTask?.cancel()
+        powerRecheckTask = nil
+        dynamicReconcileTask?.cancel()
+        dynamicReconcileTask = nil
+        automaticUnplugRestoreTask?.cancel()
+        automaticUnplugRestoreTask = nil
+        automaticReconnectApplyTask?.cancel()
+        automaticReconnectApplyTask = nil
+        powerSourceObserver?.stop()
+        powerSourceObserver = nil
+    }
+
+    /// Synchronous verification path retained for explicit recovery checks.
     func prepareForTermination() async -> Bool {
         guard !isPreparingToQuit else { return false }
         isPreparingToQuit = true

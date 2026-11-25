@@ -489,8 +489,7 @@ private enum FirmwareLimitHelperServiceTests {
                      && !FileManager.default.fileExists(atPath: bootSnapshotURL.path),
                      "battery-only active 0/0 recovers exactly under the strict offline permit")
 
-        // Without any snapshot, 0/0 must not be captured as the previous
-        // firmware configuration or authorize a new privileged write.
+        // A measured inactive zero baseline can be captured on the verified target.
         bootTransport.activation = 0
         bootTransport.upper = 0
         bootTransport.lower = 0
@@ -503,15 +502,21 @@ private enum FirmwareLimitHelperServiceTests {
         )
         precondition(noSnapshotState.isInactiveUninitialized
                      && !noSnapshotState.hasOriginalStateSnapshot
-                     && !noSnapshotState.writeSupported,
-                     "unmanaged boot zero/zero remains read-only and blocks new activation")
+                     && noSnapshotState.writeSupported && bootTransport.writes.count == beforeRejected,
+                     "inactive zero is ready for explicit initialization without writing on read")
         var noSnapshotError: NSString?
         noSnapshotService.applyLimit(upper: 80, lower: 78, confirmed: true) {
             _, error in noSnapshotError = error
         }
-        precondition(noSnapshotError != nil && bootTransport.writes.count == beforeRejected
-                     && !FileManager.default.fileExists(atPath: bootSnapshotURL.path),
-                     "unmanaged zero/zero neither writes SMC nor creates an invalid original snapshot")
+        precondition(noSnapshotError == nil && bootTransport.activation == 2
+                     && bootTransport.upper == 80 && bootTransport.lower == 78)
+        let zeroSnapshot = try JSONDecoder().decode(FirmwareLimitOriginalStateSnapshot.self,
+            from: Data(contentsOf: bootSnapshotURL))
+        precondition(zeroSnapshot.state.isInactiveUninitialized && zeroSnapshot.isValid)
+        noSnapshotService.restoreOriginalState { _, error in noSnapshotError = error }
+        precondition(noSnapshotError == nil && bootTransport.activation == 0
+                     && bootTransport.upper == 0 && bootTransport.lower == 0
+                     && !FileManager.default.fileExists(atPath: bootSnapshotURL.path))
 
         // A verified unplug restore retains an inactive baseline only in
         // the same boot. It never treats 0/0 as a real original configuration.
@@ -522,6 +527,9 @@ private enum FirmwareLimitHelperServiceTests {
         reconnectTransport.lower = 83
         var reconnectAC = true
         var bootID = "test-boot-A"
+        let quitFinalizer = reconnectDir.appendingPathComponent("complete-deferred-uninstall.sh")
+        try Data("#!/bin/bash\nexit 0\n".utf8).write(to: quitFinalizer)
+        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: quitFinalizer.path)
         func reconnectService() -> FirmwareLimitHelperService {
             FirmwareLimitHelperService(
                 transport: reconnectTransport, identityProvider: { identity },
@@ -536,6 +544,7 @@ private enum FirmwareLimitHelperServiceTests {
                 backgroundRecoveryURL: reconnectDir.appendingPathComponent("background-recovery.pending"),
                 legacyRestoreURL: reconnectDir.appendingPathComponent("legacy-restore.json"),
                 deferredUninstallURL: reconnectDir.appendingPathComponent("deferred-uninstall.pending"),
+                deferredUninstallScriptURL: quitFinalizer,
                 bootSessionProvider: { bootID }, monitorEnabled: false
             )
         }
@@ -556,11 +565,6 @@ private enum FirmwareLimitHelperServiceTests {
         precondition(reconnectError == nil && reconnectState.hasReconnectBaseline &&
                      !reconnectState.hasOriginalStateSnapshot && reconnectState.writeSupported &&
                      reconnectTransport.writes.count == writesBeforeReconnectRead)
-        bootID = "test-boot-B"
-        reconnectService().applyLimit(upper: 80, lower: 78, confirmed: true) { _, error in reconnectError = error }
-        precondition(reconnectError != nil && reconnectTransport.writes.count == writesBeforeReconnectRead,
-                     "a prior boot baseline cannot authorize writes")
-        bootID = "test-boot-A"
         reconnectService().applyLimit(upper: 80, lower: 78, confirmed: true) { _, error in reconnectError = error }
         precondition(reconnectError == nil && reconnectTransport.activation == 2 && reconnectTransport.upper == 80)
         reconnectService().restoreOriginalState { _, error in reconnectError = error }
@@ -568,6 +572,98 @@ private enum FirmwareLimitHelperServiceTests {
                      reconnectTransport.upper == 85 && reconnectTransport.lower == 83,
                      "resumed limiting restores the real prior 85/83 baseline, never 0/0")
         precondition(!FileManager.default.fileExists(atPath: reconnectDir.appendingPathComponent("reconnect-baseline.json").path))
+        reconnectTransport.upper = 0
+        reconnectTransport.lower = 0
+        reconnectService().applyLimit(upper: 80, lower: 78, confirmed: true) { _, error in reconnectError = error }
+        precondition(reconnectError == nil)
+        reconnectAC = false
+        let beforeOffline = reconnectTransport.writes.count
+        reconnectService().suspendLimitForReconnect { _, error in reconnectError = error }
+        precondition(reconnectError != nil && reconnectTransport.activation == 0 &&
+                     reconnectTransport.upper == 80 && reconnectTransport.lower == 78 &&
+                     Array(reconnectTransport.writes.dropFirst(beforeOffline)) == ["bfF0=00"],
+                     "offline zero baseline recovery deactivates only, deferring zero writes")
+        reconnectAC = true
+        reconnectService().restoreOriginalState { _, error in reconnectError = error }
+        precondition(reconnectError == nil && reconnectTransport.activation == 0 &&
+                     reconnectTransport.upper == 0 && reconnectTransport.lower == 0,
+                     "AC reconnect completes exact zero restoration")
+
+        // Old boot records must not replace a newly observed zero baseline.
+        reconnectTransport.upper = 85
+        reconnectTransport.lower = 83
+        reconnectService().applyLimit(upper: 80, lower: 78, confirmed: true) { _, error in reconnectError = error }
+        precondition(reconnectError == nil)
+        reconnectAC = false
+        reconnectService().suspendLimitForReconnect { _, error in reconnectError = error }
+        precondition(reconnectError == nil)
+        reconnectTransport.upper = 0
+        reconnectTransport.lower = 0
+        reconnectAC = true
+        bootID = "test-boot-B"
+        reconnectService().readState { data, error in reconnectData = data; reconnectError = error }
+        let freshZero = try JSONDecoder().decode(FirmwareLimitHelperStateResponse.self, from: reconnectData! as Data)
+        precondition(reconnectError == nil && !freshZero.hasReconnectBaseline && freshZero.writeSupported)
+        reconnectService().applyLimit(upper: 80, lower: 78, confirmed: true) { _, error in reconnectError = error }
+        precondition(reconnectError == nil)
+        reconnectService().restoreOriginalState { _, error in reconnectError = error }
+        precondition(reconnectError == nil && reconnectTransport.activation == 0 &&
+                     reconnectTransport.upper == 0 && reconnectTransport.lower == 0,
+                     "a stale reconnect archive cannot replace the measured new boot baseline")
+
+        // The app can exit after the durable acknowledgment. Restarting
+        // the Helper must recover without the app or its XPC connection.
+        reconnectTransport.upper = 0
+        reconnectTransport.lower = 0
+        let quitService = reconnectService()
+        quitService.applyLimit(upper: 80, lower: 78, confirmed: true) { _, error in reconnectError = error }
+        precondition(reconnectError == nil && reconnectTransport.activation == 2)
+        var quitData: NSData?
+        let writesBeforeQuit = reconnectTransport.writes.count
+        quitService.enqueueQuitRecovery(removeComponents: false) { data, error in
+            quitData = data; reconnectError = error
+        }
+        precondition(reconnectError == nil && quitData != nil)
+        let acknowledgment = try JSONDecoder().decode(FirmwareLimitQuitRecoveryResponse.self, from: quitData! as Data)
+        precondition(acknowledgment.accepted && !acknowledgment.removeComponents)
+        let quitMarker = reconnectDir.appendingPathComponent("quit-recovery.pending")
+        precondition(FileManager.default.fileExists(atPath: quitMarker.path)
+                     && reconnectTransport.writes.count == writesBeforeQuit
+                     && reconnectTransport.activation == 2)
+        let restartedQuitService = reconnectService()
+        precondition(restartedQuitService.hasPendingBackgroundRecovery)
+        restartedQuitService.applyLimit(upper: 85, lower: 83, confirmed: true) { _, error in reconnectError = error }
+        precondition(reconnectError != nil && reconnectTransport.writes.count == writesBeforeQuit)
+        reconnectAC = false
+        restartedQuitService.runOneTimeMonitorTickForTesting()
+        precondition(reconnectTransport.activation == 0 && reconnectTransport.upper == 80 &&
+                     FileManager.default.fileExists(atPath: quitMarker.path))
+        reconnectAC = true
+        restartedQuitService.runOneTimeMonitorTickForTesting()
+        precondition(reconnectTransport.activation == 0 && reconnectTransport.upper == 0 &&
+                     reconnectTransport.lower == 0 && !FileManager.default.fileExists(atPath: quitMarker.path))
+        try restartedQuitService.verifyReadyForDeferredRemoval()
+
+        // Remove mode acknowledges first, then queues final deletion only
+        // after verified restoration; no fake test actually removes files.
+        let removalService = reconnectService()
+        removalService.applyLimit(upper: 80, lower: 78, confirmed: true) { _, error in reconnectError = error }
+        precondition(reconnectError == nil && reconnectTransport.activation == 2)
+        removalService.enqueueQuitRecovery(removeComponents: true) { data, error in
+            quitData = data; reconnectError = error
+        }
+        let removalAcknowledgment = try JSONDecoder().decode(FirmwareLimitQuitRecoveryResponse.self, from: quitData! as Data)
+        let removalMarker = reconnectDir.appendingPathComponent("deferred-uninstall.pending")
+        precondition(reconnectError == nil && removalAcknowledgment.accepted && removalAcknowledgment.removeComponents)
+        precondition(reconnectTransport.activation == 2 && !FileManager.default.fileExists(atPath: removalMarker.path))
+        removalService.runOneTimeMonitorTickForTesting()
+        precondition(reconnectTransport.activation == 0 && reconnectTransport.upper == 0 &&
+                     reconnectTransport.lower == 0 && FileManager.default.fileExists(atPath: removalMarker.path) &&
+                     !FileManager.default.fileExists(atPath: quitMarker.path))
+        try removalService.verifyReadyForDeferredRemoval()
+        removalService.applyLimit(upper: 85, lower: 83, confirmed: true) { _, error in reconnectError = error }
+        precondition(reconnectError != nil && reconnectTransport.activation == 0,
+                     "new limits cannot race deferred component removal")
 
         print("FirmwareLimitHelperServiceTests: PASS (snapshot, offline legacy restore, deferred retry, boot zero recovery, uninstall verification)")
     }

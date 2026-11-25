@@ -29,6 +29,7 @@ final class FirmwareLimitHelperService: NSObject, FirmwareLimitHelperProtocol {
     private let bootSessionProvider: () -> String?
     private let restoreRequestURL: URL
     private let backgroundRecoveryURL: URL
+    private let quitRecoveryURL: URL
     private let legacyRestoreURL: URL
     private let deferredUninstallURL: URL
     private let deferredUninstallScriptURL: URL
@@ -80,6 +81,7 @@ final class FirmwareLimitHelperService: NSObject, FirmwareLimitHelperProtocol {
         self.bootSessionProvider = bootSessionProvider
         self.restoreRequestURL = restoreRequestURL
         self.backgroundRecoveryURL = backgroundRecoveryURL
+        self.quitRecoveryURL = backgroundRecoveryURL.deletingLastPathComponent().appendingPathComponent(backgroundRecoveryURL.lastPathComponent == "background-recovery.pending" ? "quit-recovery.pending" : backgroundRecoveryURL.lastPathComponent + ".quit")
         self.legacyRestoreURL = legacyRestoreURL
         self.deferredUninstallURL = deferredUninstallURL
         self.deferredUninstallScriptURL = deferredUninstallScriptURL
@@ -119,6 +121,9 @@ final class FirmwareLimitHelperService: NSObject, FirmwareLimitHelperProtocol {
         if legacyRestoreRequest != nil || FileManager.default.fileExists(atPath: deferredUninstallURL.path) {
             try? persistBackgroundRecoveryMarker()
         }
+        if FileManager.default.fileExists(atPath: quitRecoveryURL.path) {
+            try? persistBackgroundRecoveryMarker()
+        }
         if hasPendingBackgroundRecovery {
             startMonitoring()
         }
@@ -137,6 +142,7 @@ final class FirmwareLimitHelperService: NSObject, FirmwareLimitHelperProtocol {
             || originalStateSnapshot?.restoreRequested == true
             || legacyRestoreRequest != nil
             || FileManager.default.fileExists(atPath: deferredUninstallURL.path)
+            || FileManager.default.fileExists(atPath: quitRecoveryURL.path)
     }
 
     /// Version discovery is independent of SMC reads and recovery-file validity.
@@ -199,7 +205,9 @@ final class FirmwareLimitHelperService: NSObject, FirmwareLimitHelperProtocol {
                 let previous = try controller.readState()
                 let snapshot = try ensureOriginalStateSnapshot(beforeEnablingFrom: previous)
                 do {
-                    let state = try controller.configure(request, permit: permit)
+                    let state = try controller.configure(request, permit: permit, preflight: { [self] in
+                        _ = try writePermit(confirmed: confirmed)
+                    })
                     return FirmwareLimitHelperOperationResponse(
                         state: stateResponse(state),
                         oneTimePending: false,
@@ -207,8 +215,14 @@ final class FirmwareLimitHelperService: NSObject, FirmwareLimitHelperProtocol {
                     )
                 } catch {
                     do {
+                        try deferZeroRestoreOnBattery(snapshot)
                         let restorePermit = try writeRestorePermit(for: snapshot)
-                        _ = try controller.restore(snapshot.state, permit: restorePermit)
+                        _ = try controller.restore(snapshot.state, permit: restorePermit, preflight: { [self] in
+                            if snapshot.state.isInactiveUninitialized && !isOnACPower() {
+                                throw FirmwareLimitCoreError.externalPowerRequired
+                            }
+                            _ = try writeRestorePermit(for: snapshot)
+                        })
                         try removePersistedOriginalStateSnapshot()
                     } catch {
                         var pending = snapshot
@@ -332,7 +346,8 @@ final class FirmwareLimitHelperService: NSObject, FirmwareLimitHelperProtocol {
             let response = try withHardwareWatchdog {
                 guard isAdministrator(), batteryObservation().externalConnected == false,
                       pmsetReportsBatteryPower(), !isChargingNow(),
-                      !FileManager.default.fileExists(atPath: deferredUninstallURL.path) else {
+                      !FileManager.default.fileExists(atPath: deferredUninstallURL.path),
+                      !FileManager.default.fileExists(atPath: quitRecoveryURL.path) else {
                     throw FirmwareLimitCoreError.transportFailure("Cannot verify a battery-only disconnect; no reconnect baseline was created.")
                 }
                 return try restoreOriginalStateLocked(retainReconnectBaseline: true)
@@ -352,6 +367,73 @@ final class FirmwareLimitHelperService: NSObject, FirmwareLimitHelperProtocol {
         } catch {
             reply(nil, error.localizedDescription as NSString)
         }
+    }
+
+    /// Fast handoff: acknowledge only the durable root-owned job, not the
+    /// completion of restoration. No SMC calls occur in this method.
+    func enqueueQuitRecovery(removeComponents: Bool, withReply reply: @escaping (NSData?, NSString?) -> Void) {
+        do {
+            let response = try withHardwareWatchdog {
+                guard isAdministrator() else { throw FirmwareLimitCoreError.administratorRequired }
+                guard originalSnapshotLoadError == nil, legacyRestoreLoadError == nil else {
+                    throw FirmwareLimitCoreError.invalidOriginalSnapshot
+                }
+                let files = FileManager.default
+                let existing = files.fileExists(atPath: quitRecoveryURL.path)
+                let previousRemove = existing ? try readQuitRecoveryPolicy() : false
+                let remove = removeComponents || previousRemove || files.fileExists(atPath: deferredUninstallURL.path)
+                if remove {
+                    guard files.isExecutableFile(atPath: deferredUninstallScriptURL.path) else {
+                        throw FirmwareLimitCoreError.transportFailure("Deferred removal script is unavailable.")
+                    }
+                }
+                // KeepAlive is established before accepting ownership; the
+                // job is written atomically and survives client disconnect.
+                try persistBackgroundRecoveryMarker()
+                try Data((remove ? "remove" : "keep").utf8).write(to: quitRecoveryURL, options: .atomic)
+                try files.setAttributes([.posixPermissions: 0o600], ofItemAtPath: quitRecoveryURL.path)
+                startMonitoring()
+                return FirmwareLimitQuitRecoveryResponse(accepted: true, removeComponents: remove)
+            }
+            reply(try JSONEncoder().encode(response) as NSData, nil)
+            if monitorEnabled {
+                DispatchQueue.global(qos: .utility).async { [weak self] in self?.monitorOneTimeCharge() }
+            }
+        } catch {
+            reply(nil, error.localizedDescription as NSString)
+        }
+    }
+
+    private func readQuitRecoveryPolicy() throws -> Bool {
+        let value = try String(contentsOf: quitRecoveryURL, encoding: .utf8)
+        guard value == "keep" || value == "remove" else {
+            throw FirmwareLimitCoreError.transportFailure("Invalid quit recovery job; retained for inspection.")
+        }
+        return value == "remove"
+    }
+
+    private func processQuitRecoveryLocked() throws {
+        let remove = try readQuitRecoveryPolicy()
+        let restored = try restoreOriginalStateLocked()
+        guard !restored.state.active, !restored.state.hasOriginalStateSnapshot,
+              !restored.state.hasReconnectBaseline, !restored.oneTimePending,
+              !FileManager.default.fileExists(atPath: originalStateURL.path),
+              !FileManager.default.fileExists(atPath: jobURL.path),
+              !FileManager.default.fileExists(atPath: legacyRestoreURL.path),
+              !FileManager.default.fileExists(atPath: restoreRequestURL.path),
+              !FileManager.default.fileExists(atPath: reconnectBaselineURL.path) else {
+            throw FirmwareLimitCoreError.transportFailure("Quit recovery remains unverified.")
+        }
+        if remove {
+            // Only request final removal after restoration, so the marker
+            // cannot suppress recovery of an existing reconnect baseline.
+            try Data("pending".utf8).write(to: deferredUninstallURL, options: .atomic)
+            try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: deferredUninstallURL.path)
+        }
+        try FileManager.default.removeItem(at: quitRecoveryURL)
+        removeBackgroundRecoveryMarkerIfIdle()
+        triggerDeferredUninstallIfReady()
+        stopMonitoringIfIdle()
     }
 
     /// Used by the bundled uninstaller after the app has stopped. It performs
@@ -378,7 +460,8 @@ final class FirmwareLimitHelperService: NSObject, FirmwareLimitHelperProtocol {
               !FileManager.default.fileExists(atPath: legacyRestoreURL.path),
               !FileManager.default.fileExists(atPath: restoreRequestURL.path),
               !FileManager.default.fileExists(atPath: jobURL.path),
-              !FileManager.default.fileExists(atPath: reconnectBaselineURL.path) else {
+              !FileManager.default.fileExists(atPath: reconnectBaselineURL.path),
+              !FileManager.default.fileExists(atPath: quitRecoveryURL.path) else {
             throw FirmwareLimitCoreError.transportFailure(
                 "Pending or unverified firmware recovery data still exists."
             )
@@ -411,7 +494,11 @@ final class FirmwareLimitHelperService: NSObject, FirmwareLimitHelperProtocol {
     }
 
     private func writePermit(confirmed: Bool) throws -> FirmwareLimitWritePermit {
-        try FirmwareLimitWritePermit.authorize(
+        guard !FileManager.default.fileExists(atPath: quitRecoveryURL.path),
+              !FileManager.default.fileExists(atPath: deferredUninstallURL.path) else {
+            throw FirmwareLimitCoreError.transportFailure("Background quit recovery is pending.")
+        }
+        return try FirmwareLimitWritePermit.authorize(
             identity: identityProvider(),
             context: FirmwareLimitWriteContext(
                 isAdministrator: isAdministrator(),
@@ -434,7 +521,9 @@ final class FirmwareLimitHelperService: NSObject, FirmwareLimitHelperProtocol {
             legacyRestorePending: legacyPending,
             durableRecoveryRecorded: FileManager.default.fileExists(
                 atPath: backgroundRecoveryURL.path
-            )
+            ),
+            quitRecoveryPending: FileManager.default.fileExists(atPath: quitRecoveryURL.path)
+                || FileManager.default.fileExists(atPath: deferredUninstallURL.path)
         )
     }
 
@@ -473,6 +562,12 @@ final class FirmwareLimitHelperService: NSObject, FirmwareLimitHelperProtocol {
                   let baseline = verifiedReconnectBaseline(),
                   !FileManager.default.fileExists(atPath: deferredUninstallURL.path) {
             snapshot = baseline
+        } else if previous.isInactiveUninitialized {
+            // AC initialization and exact inactive zero restoration have
+            // been verified on the allowlisted device. Capture actual zeros.
+            snapshot = try FirmwareLimitOriginalStateSnapshot(
+                deviceIdentity: identityProvider(), state: previous
+            )
         } else {
             throw FirmwareLimitCoreError.invalidStoredBand(upper: previous.upper, lower: previous.lower)
         }
@@ -521,7 +616,7 @@ final class FirmwareLimitHelperService: NSObject, FirmwareLimitHelperProtocol {
             startMonitoring()
             try clearFullChargeJobForRestore()
 
-            let current = try readStateForDisplay()
+            let current = try? readStateForDisplay()
             // Even active zeroed thresholds may be restored from a verified
             // original snapshot on battery power. Offline permit validation
             // still requires exact hardware identity, both power sources
@@ -530,8 +625,9 @@ final class FirmwareLimitHelperService: NSObject, FirmwareLimitHelperProtocol {
             if current == requested.state {
                 // All keys already match: verification requires no write
                 // permit or external power, even below the 30% write floor.
-                restored = current
+                restored = requested.state
             } else {
+                try deferZeroRestoreOnBattery(requested)
                 let permit = try writeRestorePermit(for: requested)
                 restored = try controller.restore(
                     requested.state,
@@ -539,6 +635,9 @@ final class FirmwareLimitHelperService: NSObject, FirmwareLimitHelperProtocol {
                     preflight: { [self] in
                         // Re-evaluate model, snapshot and power before
                         // every SMC write attempt, including retries.
+                        if requested.state.isInactiveUninitialized && !isOnACPower() {
+                            throw FirmwareLimitCoreError.externalPowerRequired
+                        }
                         _ = try writeRestorePermit(for: requested)
                     }
                 )
@@ -677,6 +776,19 @@ final class FirmwareLimitHelperService: NSObject, FirmwareLimitHelperProtocol {
         )
     }
 
+    // Zero threshold writes were proven only on AC. On battery, safely
+    // clear the activation flag under the existing strict offline permit,
+    // retaining the durable snapshot until exact AC restoration succeeds.
+    private func deferZeroRestoreOnBattery(_ snapshot: FirmwareLimitOriginalStateSnapshot) throws {
+        guard snapshot.state.isInactiveUninitialized, !isOnACPower() else { return }
+        let permit = try writeRestorePermit(for: snapshot)
+        try controller.deactivateForZeroRestore(permit: permit, preflight: { [self] in
+            guard !isOnACPower() else { throw FirmwareLimitCoreError.externalPowerRequired }
+            _ = try writeRestorePermit(for: snapshot)
+        })
+        throw FirmwareLimitCoreError.externalPowerRequired
+    }
+
     private func writeRestorePermit(
         for snapshot: FirmwareLimitOriginalStateSnapshot
     ) throws -> FirmwareLimitWritePermit {
@@ -808,6 +920,11 @@ final class FirmwareLimitHelperService: NSObject, FirmwareLimitHelperProtocol {
     }
 
     private func monitorOneTimeChargeLocked() {
+        if FileManager.default.fileExists(atPath: quitRecoveryURL.path) {
+            do { try processQuitRecoveryLocked() }
+            catch { NSLog("MauLeaf quit recovery will retry: %@", error.localizedDescription) }
+            return
+        }
         stateLock.lock()
         let snapshot = originalStateSnapshot
         let job = pendingJob
@@ -815,16 +932,20 @@ final class FirmwareLimitHelperService: NSObject, FirmwareLimitHelperProtocol {
 
         if let snapshot, snapshot.restoreRequested {
             do {
-                let current = try readStateForDisplay()
+                let current = try? readStateForDisplay()
                 // A snapshot-bound offline recovery is permitted even
                 // after an active 0/0 boot read, but never without the
                 // already-validated offline restore preflight.
                 if current != snapshot.state {
+                    try deferZeroRestoreOnBattery(snapshot)
                     let permit = try writeRestorePermit(for: snapshot)
                     _ = try controller.restore(
                         snapshot.state,
                         permit: permit,
                         preflight: { [self] in
+                            if snapshot.state.isInactiveUninitialized && !isOnACPower() {
+                                throw FirmwareLimitCoreError.externalPowerRequired
+                            }
                             _ = try writeRestorePermit(for: snapshot)
                         }
                     )
@@ -910,7 +1031,9 @@ final class FirmwareLimitHelperService: NSObject, FirmwareLimitHelperProtocol {
             guard isOnACPower(), let request = job.restoreRequest else { return }
             do {
                 let permit = try writePermit(confirmed: true)
-                _ = try controller.configure(request, permit: permit)
+                _ = try controller.configure(request, permit: permit, preflight: { [self] in
+                    _ = try writePermit(confirmed: true)
+                })
                 setPendingJob(nil)
                 removePersistedJob()
                 stopMonitoringIfIdle()
@@ -967,6 +1090,7 @@ final class FirmwareLimitHelperService: NSObject, FirmwareLimitHelperProtocol {
         // long-lived launchd helper may spawn deferred self-removal.
         guard monitorEnabled, isAdministrator(),
               FileManager.default.fileExists(atPath: deferredUninstallURL.path),
+              !FileManager.default.fileExists(atPath: quitRecoveryURL.path),
               FileManager.default.isExecutableFile(atPath: deferredUninstallScriptURL.path) else {
             return
         }
@@ -1032,6 +1156,7 @@ final class FirmwareLimitHelperService: NSObject, FirmwareLimitHelperProtocol {
             && originalStateSnapshot?.restoreRequested != true
             && legacyRestoreRequest == nil
             && !FileManager.default.fileExists(atPath: deferredUninstallURL.path)
+            && !FileManager.default.fileExists(atPath: quitRecoveryURL.path)
         stateLock.unlock()
         guard idle, FileManager.default.fileExists(atPath: backgroundRecoveryURL.path) else { return }
         try? FileManager.default.removeItem(at: backgroundRecoveryURL)
@@ -1042,13 +1167,14 @@ final class FirmwareLimitHelperService: NSObject, FirmwareLimitHelperProtocol {
         stateLock.lock()
         guard (pendingJob != nil || originalStateSnapshot?.restoreRequested == true
                || legacyRestoreRequest != nil
-               || FileManager.default.fileExists(atPath: deferredUninstallURL.path)),
+               || FileManager.default.fileExists(atPath: deferredUninstallURL.path)
+               || FileManager.default.fileExists(atPath: quitRecoveryURL.path)),
               monitorTimer == nil else {
             stateLock.unlock()
             return
         }
         let timer = DispatchSource.makeTimerSource(queue: DispatchQueue.global(qos: .utility))
-        timer.schedule(deadline: .now() + 20, repeating: 20)
+        timer.schedule(deadline: .now() + (FileManager.default.fileExists(atPath: quitRecoveryURL.path) ? 0.2 : 20), repeating: 20)
         timer.setEventHandler { [weak self] in self?.monitorOneTimeCharge() }
         monitorTimer = timer
         stateLock.unlock()
@@ -1061,6 +1187,7 @@ final class FirmwareLimitHelperService: NSObject, FirmwareLimitHelperProtocol {
               originalStateSnapshot?.restoreRequested != true,
               legacyRestoreRequest == nil,
               !FileManager.default.fileExists(atPath: deferredUninstallURL.path),
+              !FileManager.default.fileExists(atPath: quitRecoveryURL.path),
               let timer = monitorTimer else {
             stateLock.unlock()
             return

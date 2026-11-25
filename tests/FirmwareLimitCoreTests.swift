@@ -269,7 +269,7 @@ private enum FirmwareLimitCoreTests {
 
         let state = try controller(transport).readState()
         expect(state.isInactiveUninitialized && !state.isValid && !state.isActive,
-               "inactive zero/zero is observable after reboot but cannot be a trusted original state")
+               "inactive zero/zero is distinct from a configured valid charge band")
         expect(transport.writes.isEmpty, "startup state reads never write SMC")
 
         let original = FirmwareLimitState(activationByte: 0x00, upper: 80, lower: 78)
@@ -282,6 +282,18 @@ private enum FirmwareLimitCoreTests {
         ], "inactive zero/zero restores upper before lower, preserving inactive activation")
         let verified = try controller(transport).readState()
         expect(verified == original, "restoration must pass exact hardware readback")
+        transport.writes.removeAll()
+        let zero = FirmwareLimitState(activationByte: 0, upper: 0, lower: 0)
+        let restoredZero = try controller(transport).restore(zero, permit: permit())
+        expect(restoredZero == zero && transport.writes == ["bfE0=00000000", "bfD0=00000000"],
+               "zero baseline restoration writes lower first, then upper, without activation")
+        let partial = FakeFirmwareLimitTransport()
+        partial.activation = 0
+        partial.upper = 80
+        partial.lower = 0
+        let partialRestored = try controller(partial).restore(zero, permit: permit())
+        expect(partialRestored == zero,
+               "interrupted initialization can recover to the recorded zero baseline")
 
         let badActive = FakeFirmwareLimitTransport()
         badActive.activation = 0x02

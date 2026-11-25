@@ -8,6 +8,7 @@ protocol NativeFirmwareBackend {
     func cancelOneTimeCharge() async throws -> FirmwareLimitHelperOperationResponse
     func suspendLimitForReconnect() async throws -> FirmwareLimitHelperOperationResponse
     func restoreOriginalState() async throws -> FirmwareLimitHelperOperationResponse
+    func enqueueQuitRecovery(removeComponents: Bool) async throws -> FirmwareLimitQuitRecoveryResponse
     func oneTimeChargeStatus() async throws -> FirmwareLimitHelperOneTimeStatusResponse
 }
 
@@ -64,11 +65,18 @@ final class FirmwareLimitHelperClient: NativeFirmwareBackend {
         try await request { proxy, reply in proxy.restoreOriginalState(withReply: reply) }
     }
 
+    func enqueueQuitRecovery(removeComponents: Bool) async throws -> FirmwareLimitQuitRecoveryResponse {
+        try await request(timeout: 3) { proxy, reply in
+            proxy.enqueueQuitRecovery(removeComponents: removeComponents, withReply: reply)
+        }
+    }
+
     func oneTimeChargeStatus() async throws -> FirmwareLimitHelperOneTimeStatusResponse {
         try await request { proxy, reply in proxy.oneTimeChargeStatus(withReply: reply) }
     }
 
     private func request<Response: Decodable>(
+        timeout: TimeInterval = 20,
         _ start: @escaping (
             FirmwareLimitHelperProtocol,
             @escaping (NSData?, NSString?) -> Void
@@ -86,7 +94,7 @@ final class FirmwareLimitHelperClient: NativeFirmwareBackend {
                 delivery.deliver(.failure(FirmwareLimitHelperClientError.serviceUnavailable))
             }
             connection.resume()
-            DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + 20) {
+            DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + timeout) {
                 delivery.deliver(.failure(FirmwareLimitHelperClientError.timedOut))
                 connectionBox.connection.invalidate()
             }

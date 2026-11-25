@@ -507,6 +507,7 @@ private enum ChargeManagerTests {
         backend.helperInfoAvailable = false
         backend.failLegacyZeroReadOnce = true
         var upgrades = 0
+        var legacyReadsBeforeReplacement: Int?
         let battery = MauLeafBatterySnapshot(
             percent: 88, isCharging: false, isFullyCharged: false,
             isACConnected: true, precisePercent: 88
@@ -516,6 +517,7 @@ private enum ChargeManagerTests {
             autoUpgradeInstalledHelperOnLaunch: true,
             helperInstallerForTesting: {
                 upgrades += 1
+                legacyReadsBeforeReplacement = backend.readCount
                 backend.helperInfoAvailable = true
                 // The old Helper would reject the zeroed boot registers;
                 // the newly installed Helper can read the persisted snapshot.
@@ -530,8 +532,9 @@ private enum ChargeManagerTests {
         try await wait { backend.applyCount == 2 && backend.state.active && !manager.isBusy }
         manager.refresh()
         try await Task.sleep(nanoseconds: 80_000_000)
-        try check(upgrades == 1 && manager.hasOriginalStateSnapshot,
-                  "a Helper without the version handshake is replaced once and its managed snapshot survives")
+        try check(upgrades == 1 && manager.hasOriginalStateSnapshot
+                  && legacyReadsBeforeReplacement == 0,
+                  "a Helper without the version handshake is replaced without reading legacy state, while its managed snapshot survives")
         let stopped = await manager.prepareForTermination()
         try check(stopped && !backend.state.active, "post-upgrade quit still restores original state")
         UserDefaults.standard.set(false, forKey: "nativeFirmwareWriteConfirmed")

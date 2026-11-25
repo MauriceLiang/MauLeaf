@@ -213,8 +213,8 @@ struct FirmwareLimitState: Equatable, Codable {
     var isActive: Bool { activationByte == 0x02 }
 
     /// The target firmware can report zeroed limit registers after boot
-    /// while bfF0 is inactive. This is safe to *observe* but is not a
-    /// valid original snapshot or evidence that restoration succeeded.
+    /// while bfF0 is inactive. On the verified target, AC-powered zero-band
+    /// initialization and exact inactive restoration were proven on hardware.
     var isInactiveUninitialized: Bool {
         activationByte == 0x00 && upper == 0 && lower == 0
     }
@@ -251,7 +251,7 @@ struct FirmwareLimitOriginalStateSnapshot: Codable, Equatable {
         capturedAt: Date = Date(),
         restoreRequested: Bool = false
     ) throws {
-        guard state.isValid, capturedAt.timeIntervalSince1970.isFinite else {
+        guard Self.acceptsBaseline(state, identity: deviceIdentity), capturedAt.timeIntervalSince1970.isFinite else {
             throw FirmwareLimitCoreError.invalidOriginalSnapshot
         }
         schemaVersion = Self.currentSchemaVersion
@@ -261,9 +261,14 @@ struct FirmwareLimitOriginalStateSnapshot: Codable, Equatable {
         self.restoreRequested = restoreRequested
     }
 
+    private static func acceptsBaseline(_ state: FirmwareLimitState, identity: FirmwareLimitDeviceIdentity) -> Bool {
+        state.isValid || (state.isInactiveUninitialized &&
+            FirmwareLimitWritePermit.targetBlockReason(identity: identity) == nil)
+    }
+
     var isValid: Bool {
         schemaVersion == Self.currentSchemaVersion
-            && state.isValid
+            && Self.acceptsBaseline(state, identity: deviceIdentity)
             && capturedAt.timeIntervalSince1970.isFinite
     }
 }
@@ -491,7 +496,7 @@ struct FirmwareLimitController {
         permit: FirmwareLimitWritePermit,
         preflight: () throws -> Void = {}
     ) throws -> FirmwareLimitState {
-        guard original.isValid else { throw FirmwareLimitCoreError.invalidOriginalSnapshot }
+        guard original.isValid || original.isInactiveUninitialized else { throw FirmwareLimitCoreError.invalidOriginalSnapshot }
         try validateKeyMetadata()
         if let current = try? readRawState(), current == original { return current }
 
@@ -515,7 +520,10 @@ struct FirmwareLimitController {
             // during reboot. It is allowed ONLY here, with an identity-
             // matched original-state snapshot and restore permit.
             let zeroedAfterBoot = previousUpper == 0 && previousLower == 0
-            guard zeroedAfterBoot || (
+            let partialInactiveZero = activation == 0x00 &&
+                (previousUpper == 0 || previousLower == 0) &&
+                (0...100).contains(previousUpper) && (0...100).contains(previousLower)
+            guard zeroedAfterBoot || partialInactiveZero || (
                 (5...100).contains(previousUpper)
                 && (5...100).contains(previousLower)
             ) else {
@@ -527,7 +535,10 @@ struct FirmwareLimitController {
             // A zero/zero interval has no valid ordering. Rebuild it only
             // through the existing identity-bound, persisted-snapshot
             // restore permit; never try to save zeroes as the original state.
-            let upperFirst = zeroedAfterBoot || original.upper > previousLower
+            // Restoring an inactive 0/0 baseline follows the hardware-proven
+            // lower-zero then upper-zero order, never activating zero bounds.
+            let upperFirst = !original.isInactiveUninitialized &&
+                (zeroedAfterBoot || original.upper > previousLower)
             if upperFirst {
                 if previousUpper != original.upper {
                     try writeAndVerify(.upper, bytes: FirmwareLimitPolicy.encodeUInt32LittleEndian(original.upper), preflight: preflight)
@@ -632,10 +643,26 @@ struct FirmwareLimitController {
         )
     }
 
+    /// Battery-only recovery for a zero baseline: deactivate without
+    /// touching thresholds, including interrupted partial initialization.
+    /// Exact zero-band restoration is deferred to verified AC.
+    func deactivateForZeroRestore(permit: FirmwareLimitWritePermit, preflight: () throws -> Void) throws {
+        try validateKeyMetadata()
+        let activation = try readRaw(.activation).first ?? 0xFF
+        guard activation == 0x00 || activation == 0x02 else {
+            throw FirmwareLimitCoreError.invalidActivation(activation)
+        }
+        if activation == 0x02 {
+            try writeAndVerify(.activation, bytes: [0x00], preflight: preflight)
+        }
+        guard try readRaw(.activation) == [0x00] else {
+            throw FirmwareLimitCoreError.invalidActivation(0xFF)
+        }
+    }
+
     private func recover(previous: FirmwareLimitState) -> String {
-        // NEVER write 0/0 back to SMC as a rollback. An inactive 0/0 state
-        // is not a valid firmware configuration; the Helper owns the
-        // already-persisted original snapshot and must restore THAT state.
+        // The Helper owns the durable original snapshot and the AC-checked
+        // exact restoration of zero bounds. Core rollback only deactivates.
         if previous.isInactiveUninitialized {
             do {
                 try writeAndVerify(.activation, bytes: [0x00])
@@ -683,9 +710,8 @@ struct FirmwareLimitController {
             throw FirmwareLimitCoreError.invalidStoredBand(upper: -1, lower: -1)
         }
         let state = FirmwareLimitState(activationByte: activation, upper: upper, lower: lower)
-        // Read-only reporting can represent this one exact transient
-        // post-reboot state. Active zero/zero or any malformed band still
-        // fails closed. Callers must never snapshot it as the original state.
+        // Inactive zero/zero is an observable, unconfigured state.
+        // Active zero/zero and malformed bands still fail closed.
         guard state.isValid || state.isInactiveUninitialized else {
             throw FirmwareLimitCoreError.invalidStoredBand(upper: upper, lower: lower)
         }

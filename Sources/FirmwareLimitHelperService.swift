@@ -199,7 +199,9 @@ final class FirmwareLimitHelperService: NSObject, FirmwareLimitHelperProtocol {
                 let previous = try controller.readState()
                 let snapshot = try ensureOriginalStateSnapshot(beforeEnablingFrom: previous)
                 do {
-                    let state = try controller.configure(request, permit: permit)
+                    let state = try controller.configure(request, permit: permit, preflight: { [self] in
+                        _ = try writePermit(confirmed: confirmed)
+                    })
                     return FirmwareLimitHelperOperationResponse(
                         state: stateResponse(state),
                         oneTimePending: false,
@@ -943,7 +945,9 @@ final class FirmwareLimitHelperService: NSObject, FirmwareLimitHelperProtocol {
             guard isOnACPower(), let request = job.restoreRequest else { return }
             do {
                 let permit = try writePermit(confirmed: true)
-                _ = try controller.configure(request, permit: permit)
+                _ = try controller.configure(request, permit: permit, preflight: { [self] in
+                    _ = try writePermit(confirmed: true)
+                })
                 setPendingJob(nil)
                 removePersistedJob()
                 stopMonitoringIfIdle()

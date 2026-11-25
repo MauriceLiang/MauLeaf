@@ -2186,10 +2186,7 @@ final class ChargeManager: ObservableObject {
 
             let info = try await backend.readHelperInfo()
             guard FirmwareLimitHelperProtocolVersion.isCompatible(info) else {
-                throw NativeControlError.helperVersionMismatch(
-                    foundProtocol: info.protocolVersion,
-                    foundBuild: info.buildVersion
-                )
+                throw NativeControlError.helperVersionMismatch
             }
             let state = try await backend.readState()
             guard FirmwareLimitHelperProtocolVersion.isCompatible(
@@ -2264,19 +2261,13 @@ final class ChargeManager: ObservableObject {
                 // Confirm the exact bundled Helper before reading hardware.
                 let info = try await backend.readHelperInfo()
                 guard FirmwareLimitHelperProtocolVersion.isCompatible(info) else {
-                    throw NativeControlError.helperVersionMismatch(
-                        foundProtocol: info.protocolVersion,
-                        foundBuild: info.buildVersion
-                    )
+                    throw NativeControlError.helperVersionMismatch
                 }
                 let state = try await backend.readState()
                 guard FirmwareLimitHelperProtocolVersion.isCompatible(
                     state.helperVersion, build: state.helperBuildVersion
                 ) else {
-                    throw NativeControlError.helperUpgradeFailed(
-                        found: state.helperVersion,
-                        required: FirmwareLimitHelperProtocolVersion.current
-                    )
+                    throw NativeControlError.helperUpgradeFailed
                 }
                 let once = try await backend.oneTimeChargeStatus()
                 updateFromNativeState(state, oneTime: once, status: "原生控制服务已就绪。")
@@ -2822,9 +2813,8 @@ final class ChargeManager: ObservableObject {
 private enum NativeControlError: LocalizedError {
     case missingBundledHelper
     case authorizationFailed(String)
-    case outdatedHelper(found: Int, required: Int)
-    case helperUpgradeFailed(found: Int, required: Int)
-    case helperVersionMismatch(foundProtocol: Int, foundBuild: String)
+    case helperUpgradeFailed
+    case helperVersionMismatch
     case unsafeStateAfterInstall(AppText)
 
     var errorDescription: String? {
@@ -2834,15 +2824,14 @@ private enum NativeControlError: LocalizedError {
         case .authorizationFailed(let detail):
             return detail
         case .helperVersionMismatch:
-            return AppText(key: "当前 Helper 版本与应用要求不一致，正在安装应用内置版本。")
+            return AppText(key: "重装后的 Helper 版本仍与应用要求不一致，请检查应用包或重新下载 MauLeaf。")
                 .localized(in: AppLanguage.saved())
         case .unsafeStateAfterInstall(let reason):
             let message: AppText = "原生服务已安装，但当前固件状态不允许启用新的限充：\(reason)"
             return message.localized(in: AppLanguage.saved())
-        case .outdatedHelper(let found, let required):
-            return "MauLeaf 原生固件服务版本过旧（当前协议版本 \(found)，需要 \(required)），请重新启动应用并允许更新服务。"
-        case .helperUpgradeFailed(let found, let required):
-            return "MauLeaf 原生固件服务更新未生效（当前协议版本 \(found)，需要 \(required)）。请退出应用后重新启动，再尝试更新。"
+        case .helperUpgradeFailed:
+            return AppText(key: "重装后的 Helper 仍与应用要求的版本不一致，请检查应用包或重新下载 MauLeaf。")
+                .localized(in: AppLanguage.saved())
         }
     }
 }

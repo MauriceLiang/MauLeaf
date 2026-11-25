@@ -128,6 +128,17 @@ final class FirmwareLimitHelperService: NSObject, FirmwareLimitHelperProtocol {
             || FileManager.default.fileExists(atPath: deferredUninstallURL.path)
     }
 
+    /// Version discovery is independent of SMC reads and recovery-file validity.
+    /// Older Helpers that do not implement this method are treated as a
+    /// version mismatch by the app and replaced from its bundled resources.
+    func readHelperInfo(withReply reply: @escaping (NSData?, NSString?) -> Void) {
+        do {
+            reply(try JSONEncoder().encode(FirmwareLimitHelperInfoResponse.current) as NSData, nil)
+        } catch {
+            reply(nil, error.localizedDescription as NSString)
+        }
+    }
+
     func readState(withReply reply: @escaping (NSData?, NSString?) -> Void) {
         do {
             guard originalSnapshotLoadError == nil else {

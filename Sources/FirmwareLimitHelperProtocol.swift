@@ -52,7 +52,7 @@ enum FirmwareLimitHelperProtocolVersion {
 /// Increment this build whenever the privileged Helper implementation or
 /// its externally observable behavior changes.
 enum FirmwareLimitHelperBuildVersion {
-    static let current = "1.5.1"
+    static let current = "1.6.0"
 }
 
 struct FirmwareLimitHelperStateResponse: Codable, Equatable {
@@ -108,9 +108,7 @@ struct FirmwareLimitHelperStateResponse: Codable, Equatable {
             writeBlockReason = identityBlock ?? (
                 state.isActiveZeroed
                     ? "Active firmware limit has zeroed thresholds; new writes are blocked. Restore the verified original-state snapshot."
-                    : state.isInactiveUninitialized && snapshot == nil && !hasReconnectBaseline
-                        ? "Firmware limits are not initialized after startup; no managed recovery snapshot is present."
-                        : nil
+                    : nil
             )
             writeSupported = writeBlockReason == nil
             if let snapshot {
@@ -129,7 +127,7 @@ struct FirmwareLimitHelperStateResponse: Codable, Equatable {
             restoreSupported = restoreBlockReason == nil
                 && (!state.isActiveZeroed || (snapshot?.isValid == true))
         } else {
-            writeSupported = state.isValid || (state.isInactiveUninitialized && (snapshot != nil || hasReconnectBaseline))
+            writeSupported = state.isValid || state.isInactiveUninitialized
             writeBlockReason = writeSupported ? nil : "Firmware limits are not initialized or are invalid."
             restoreSupported = !state.isActiveZeroed || (snapshot?.isValid == true)
             restoreBlockReason = restoreSupported ? nil : "No verified original-state snapshot for active zeroed firmware."

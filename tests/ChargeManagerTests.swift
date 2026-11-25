@@ -199,7 +199,7 @@ private enum ChargeManagerTests {
         try await testStartupAutoUpgradeReusesCompatibleHelper()
         try await testStartupAutoUpgradeOutdatedHelperOnce()
         try await testOutdatedBuildWithCompatibleProtocolUpgrades()
-        try await testNewerHelperCannotBeDowngraded()
+        try await testNewerHelperIsReplacedByBundledVersion()
         try await testOutdatedActiveHelperCanBeRepairedWithoutFirmwareWrite()
         try await testInstallFailureDoesNotWriteFirmware()
         try await testAutomaticQuitRestore()
@@ -503,6 +503,7 @@ private enum ChargeManagerTests {
         let backend = FixtureNativeFirmwareBackend()
         _ = try await backend.applyLimit(upper: 80, lower: 78, confirmed: true)
         backend.simulateFirmwareBootReset()
+        backend.helperInfoAvailable = false
         backend.failLegacyZeroReadOnce = true
         var upgrades = 0
         let battery = MauLeafBatterySnapshot(
@@ -512,7 +513,10 @@ private enum ChargeManagerTests {
         let manager = ChargeManager(
             backend: backend, autoInstallNativeHelper: false,
             autoUpgradeInstalledHelperOnLaunch: true,
-            helperInstallerForTesting: { upgrades += 1 },
+            helperInstallerForTesting: {
+                upgrades += 1
+                backend.helperInfoAvailable = true
+            },
             helperArtifactsPresent: { true },
             batteryReader: { battery }, observePowerSourceChanges: false,
             dynamicSettleInterval: 0.01, rebootSettleInterval: 0.05
@@ -523,7 +527,7 @@ private enum ChargeManagerTests {
         manager.refresh()
         try await Task.sleep(nanoseconds: 80_000_000)
         try check(upgrades == 1 && manager.hasOriginalStateSnapshot,
-                  "old Helper 0/0 read error upgrades once and restores managed limit without deleting snapshot")
+                  "a Helper without the version handshake is replaced once and its managed snapshot survives")
         let stopped = await manager.prepareForTermination()
         try check(stopped && !backend.state.active, "post-upgrade quit still restores original state")
         UserDefaults.standard.set(false, forKey: "nativeFirmwareWriteConfirmed")
@@ -901,14 +905,13 @@ private enum ChargeManagerTests {
 
     @MainActor
     private static func testOutdatedBuildWithCompatibleProtocolUpgrades() async throws {
-        try check(FirmwareLimitHelperProtocolVersion.isCompatible(6, build: "1.3.0")
-                  && !FirmwareLimitHelperProtocolVersion.isCompatible(6, build: "1.2.0")
-                  && FirmwareLimitHelperProtocolVersion.isCompatible(6, build: "1.3.3")
-                  && !FirmwareLimitHelperProtocolVersion.isCompatible(6, build: nil)
-                  && !FirmwareLimitHelperProtocolVersion.isCompatible(5, build: "1.0.0")
-                  && !FirmwareLimitHelperProtocolVersion.isCompatible(6, build: "0.9.9")
-                  && !FirmwareLimitHelperProtocolVersion.isCompatible(6, build: "invalid")
-                  && FirmwareLimitHelperProtocolVersion.canUpgradeFrom(6, build: "0.9.9"),
+        try check(FirmwareLimitHelperProtocolVersion.isCompatible(7, build: "1.4.0")
+                  && !FirmwareLimitHelperProtocolVersion.isCompatible(7, build: "1.3.9")
+                  && !FirmwareLimitHelperProtocolVersion.isCompatible(7, build: "1.4.1")
+                  && !FirmwareLimitHelperProtocolVersion.isCompatible(7, build: nil)
+                  && !FirmwareLimitHelperProtocolVersion.isCompatible(6, build: "1.3.0")
+                  && !FirmwareLimitHelperProtocolVersion.isCompatible(8, build: "1.5.0")
+                  && FirmwareLimitHelperProtocolVersion.canUpgradeFrom(8, build: "1.5.0"),
                   "Helper build compatibility is independent of the visible app version")
         let backend = FixtureNativeFirmwareBackend()
         backend.reportedHelperBuildVersion = "0.9.9"
@@ -930,7 +933,7 @@ private enum ChargeManagerTests {
     }
 
     @MainActor
-    private static func testNewerHelperCannotBeDowngraded() async throws {
+    private static func testNewerHelperIsReplacedByBundledVersion() async throws {
         let backend = FixtureNativeFirmwareBackend()
         backend.reportedHelperVersion = FirmwareLimitHelperProtocolVersion.current + 1
         var installs = 0
@@ -938,15 +941,18 @@ private enum ChargeManagerTests {
             backend: backend,
             autoInstallNativeHelper: false,
             autoUpgradeInstalledHelperOnLaunch: true,
-            helperInstallerForTesting: { installs += 1 },
+            helperInstallerForTesting: {
+                installs += 1
+                backend.reportedHelperVersion = nil
+            },
             helperArtifactsPresent: { true }
         )
         manager.start()
-        try await wait { manager.helperTooNew }
-        try check(installs == 0 && !manager.canRepairNativeHelper
-                  && !manager.canToggleLimitFromCard && !manager.backendReady
-                  && backend.applyCount == 0,
-                  "an older app cannot auto-replace an unknown newer helper")
+        try await wait { installs == 1 && manager.backendReady && !manager.isBusy }
+        try check(installs == 1 && !manager.helperNeedsUpgrade
+                  && !manager.isError && backend.applyCount == 0
+                  && backend.restoreCount == 0,
+                  "any version mismatch, including a newer Helper, is replaced by the bundled build without SMC writes")
     }
 
     @MainActor

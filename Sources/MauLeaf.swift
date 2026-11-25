@@ -1398,6 +1398,20 @@ final class ChargeManager: ObservableObject {
                 self.automaticUnplugRetryAfter = Date().addingTimeInterval(8)
                 self.isBusy = false
                 await self.refreshNativeState()
+                // A deferred restore is a normal suspension state only after
+                // a fresh, verified read confirms the limit is inactive and
+                // the Helper has durably recorded the remaining recovery.
+                // Keep real errors visible if activation or recovery is unknown.
+                if !self.helperStateUnknown, self.helperVersionVerified,
+                   let state = self.currentState, state.activationByte == 0x00,
+                   !state.active, state.hasOriginalStateSnapshot,
+                   state.restorePending, state.restoreSupported, !self.fullOncePending {
+                    self.dynamicSessionUpper = nil
+                    self.dynamicNeedsNewCapture = true
+                    self.automaticUnplugRetryAfter = nil
+                    self.isError = false
+                    return
+                }
                 self.statusMessage = "拔电后尚未完成固件恢复；原始快照及后台恢复任务已保留：\(AppText(error: error))"
                 self.isError = true
             }
@@ -1608,6 +1622,10 @@ final class ChargeManager: ObservableObject {
             return activeOperation.status
         }
         if !isAdapterConnected && currentState?.hasOriginalStateSnapshot == true {
+            if restorePending, currentState?.activationByte == 0x00,
+               currentState?.active == false, !helperStateUnknown {
+                return "等待接电恢复"
+            }
             return restorePending ? "等待断电恢复" : "正在恢复原始参数"
         }
         if let state = currentState, state.isActiveZeroed {

@@ -2202,7 +2202,7 @@ final class ChargeManager: ObservableObject {
     private func helperInstallSafetyBlockReason(
         state: FirmwareLimitHelperStateResponse,
         oneTime: FirmwareLimitHelperOneTimeStatusResponse
-    ) -> String? {
+    ) -> AppText? {
         if oneTime.pending { return "检测到尚未完成的本次充满任务，已保留任务记录。" }
         if state.restorePending { return "检测到尚未完成的原始固件恢复任务，请等待恢复完成。" }
         if state.hasOriginalStateSnapshot {
@@ -2210,7 +2210,8 @@ final class ChargeManager: ObservableObject {
         }
         if state.active { return "检测到当前固件限充仍处于激活状态，未覆盖现有配置。" }
         if !state.writeSupported {
-            return state.writeBlockReason ?? "当前固件状态不允许写入新的充电限制。"
+            return state.writeBlockReason.map { AppText(verbatim: $0) }
+                ?? "当前固件状态不允许写入新的充电限制。"
         }
         return nil
     }
@@ -2810,7 +2811,7 @@ private enum NativeControlError: LocalizedError {
     case outdatedHelper(found: Int, required: Int)
     case helperUpgradeFailed(found: Int, required: Int)
     case helperVersionMismatch(foundProtocol: Int, foundBuild: String)
-    case unsafeStateAfterInstall(String)
+    case unsafeStateAfterInstall(AppText)
 
     var errorDescription: String? {
         switch self {
@@ -2818,10 +2819,12 @@ private enum NativeControlError: LocalizedError {
             return "应用包中缺少 MauLeaf 原生固件服务文件，请重新安装 MauLeaf。"
         case .authorizationFailed(let detail):
             return detail
-        case .helperVersionMismatch(let foundProtocol, let foundBuild):
-            return "已安装 Helper 版本不匹配（协议 \(foundProtocol)，构建 \(foundBuild)）；需要卸载旧服务并安装当前应用内置版本。"
+        case .helperVersionMismatch:
+            return AppText(key: "当前 Helper 版本与应用要求不一致，正在安装应用内置版本。")
+                .localized(in: AppLanguage.saved())
         case .unsafeStateAfterInstall(let reason):
-            return "原生服务已安装，但当前固件状态不允许启用新的限充：\(reason)"
+            let message: AppText = "原生服务已安装，但当前固件状态不允许启用新的限充：\(reason)"
+            return message.localized(in: AppLanguage.saved())
         case .outdatedHelper(let found, let required):
             return "MauLeaf 原生固件服务版本过旧（当前协议版本 \(found)，需要 \(required)），请重新启动应用并允许更新服务。"
         case .helperUpgradeFailed(let found, let required):

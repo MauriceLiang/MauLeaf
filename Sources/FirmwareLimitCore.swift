@@ -461,14 +461,15 @@ struct FirmwareLimitController {
     /// fallback is to leave the firmware limit inactive and verify that.
     func configure(
         _ request: FirmwareLimitRequest,
-        permit: FirmwareLimitWritePermit
+        permit: FirmwareLimitWritePermit,
+        preflight: () throws -> Void = {}
     ) throws -> FirmwareLimitState {
         let plan = try makePlan(for: request)
         if plan.isNoOp { return plan.previous }
 
         do {
             for step in plan.steps {
-                try execute(step)
+                try execute(step, preflight: preflight)
             }
             let final = try readState()
             guard final.isActive, final.upper == request.upper, final.lower == request.lower else {
@@ -480,7 +481,7 @@ struct FirmwareLimitController {
             }
             return final
         } catch {
-            let recovery = recover(previous: plan.previous)
+            let recovery = recover(previous: plan.previous, preflight: preflight)
             throw FirmwareLimitCoreError.transactionFailed(
                 primary: String(describing: error),
                 recovery: recovery
@@ -534,7 +535,7 @@ struct FirmwareLimitController {
             }
             // A zero/zero interval has no valid ordering. Rebuild it only
             // through the existing identity-bound, persisted-snapshot
-            // restore permit; never try to save zeroes as the original state.
+            // restore permit; never activate zero bounds.
             // Restoring an inactive 0/0 baseline follows the hardware-proven
             // lower-zero then upper-zero order, never activating zero bounds.
             let upperFirst = !original.isInactiveUninitialized &&
@@ -603,16 +604,16 @@ struct FirmwareLimitController {
         }
     }
 
-    private func execute(_ step: FirmwareLimitStep) throws {
+    private func execute(_ step: FirmwareLimitStep, preflight: () throws -> Void) throws {
         switch step {
         case .deactivate:
-            try writeAndVerify(.activation, bytes: [0x00])
+            try writeAndVerify(.activation, bytes: [0x00], preflight: preflight)
         case .writeUpper(let value):
-            try writeAndVerify(.upper, bytes: FirmwareLimitPolicy.encodeUInt32LittleEndian(value))
+            try writeAndVerify(.upper, bytes: FirmwareLimitPolicy.encodeUInt32LittleEndian(value), preflight: preflight)
         case .writeLower(let value):
-            try writeAndVerify(.lower, bytes: FirmwareLimitPolicy.encodeUInt32LittleEndian(value))
+            try writeAndVerify(.lower, bytes: FirmwareLimitPolicy.encodeUInt32LittleEndian(value), preflight: preflight)
         case .activate:
-            try writeAndVerify(.activation, bytes: [0x02])
+            try writeAndVerify(.activation, bytes: [0x02], preflight: preflight)
         }
     }
 
@@ -660,22 +661,22 @@ struct FirmwareLimitController {
         }
     }
 
-    private func recover(previous: FirmwareLimitState) -> String {
+    private func recover(previous: FirmwareLimitState, preflight: () throws -> Void = {}) -> String {
         // The Helper owns the durable original snapshot and the AC-checked
         // exact restoration of zero bounds. Core rollback only deactivates.
         if previous.isInactiveUninitialized {
             do {
-                try writeAndVerify(.activation, bytes: [0x00])
+                try writeAndVerify(.activation, bytes: [0x00], preflight: preflight)
                 return "inactive zeroed startup state left inactive; restore from saved original-state snapshot"
             } catch {
                 return "unable to confirm inactive zeroed state; saved original-state snapshot must be retained"
             }
         }
         do {
-            try writeAndVerify(.activation, bytes: [0x00])
-            try writeAndVerify(.upper, bytes: FirmwareLimitPolicy.encodeUInt32LittleEndian(previous.upper))
-            try writeAndVerify(.lower, bytes: FirmwareLimitPolicy.encodeUInt32LittleEndian(previous.lower))
-            try writeAndVerify(.activation, bytes: [previous.activationByte])
+            try writeAndVerify(.activation, bytes: [0x00], preflight: preflight)
+            try writeAndVerify(.upper, bytes: FirmwareLimitPolicy.encodeUInt32LittleEndian(previous.upper), preflight: preflight)
+            try writeAndVerify(.lower, bytes: FirmwareLimitPolicy.encodeUInt32LittleEndian(previous.lower), preflight: preflight)
+            try writeAndVerify(.activation, bytes: [previous.activationByte], preflight: preflight)
             let restored = try readState()
             guard restored == previous else {
                 throw FirmwareLimitCoreError.readbackMismatch(
@@ -687,7 +688,7 @@ struct FirmwareLimitController {
             return "the previous firmware state was restored and verified"
         } catch {
             do {
-                try writeAndVerify(.activation, bytes: [0x00])
+                try writeAndVerify(.activation, bytes: [0x00], preflight: preflight)
                 let activation = try readRaw(.activation).first ?? 0xFF
                 guard activation == 0x00 else {
                     throw FirmwareLimitCoreError.invalidActivation(activation)

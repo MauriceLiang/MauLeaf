@@ -886,7 +886,7 @@ private enum ChargeManagerTests {
         let legacy = try JSONDecoder().decode(FirmwareLimitHelperStateResponse.self, from: oldVersionPayload)
         try check(legacy.helperBuildVersion == nil
                   && !FirmwareLimitHelperProtocolVersion.isCompatible(legacy.helperVersion),
-                  "a v6 Helper without a build-version field cannot authorize dynamic writes")
+                  "a Helper without a build-version field cannot authorize dynamic writes")
     }
 
     @MainActor

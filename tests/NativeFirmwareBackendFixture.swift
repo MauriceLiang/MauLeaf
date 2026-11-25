@@ -22,6 +22,9 @@ final class FixtureNativeFirmwareBackend: NativeFirmwareBackend {
     var beginCount = 0
     var cancelCount = 0
     var restoreCount = 0
+    var quitHandoffCount = 0
+    var quitHandoffRemove = false
+    var failQuitHandoff = false
     var failNextApply = false
     var failNextRestore = false
     var failNextRead = false
@@ -258,6 +261,13 @@ final class FixtureNativeFirmwareBackend: NativeFirmwareBackend {
             oneTimePending: false,
             message: "Fake original firmware state restored and verified."
         )
+    }
+
+    func enqueueQuitRecovery(removeComponents: Bool) async throws -> FirmwareLimitQuitRecoveryResponse {
+        quitHandoffCount += 1
+        quitHandoffRemove = removeComponents
+        guard !failQuitHandoff else { throw FixtureBackendError.injected }
+        return FirmwareLimitQuitRecoveryResponse(accepted: true, removeComponents: removeComponents)
     }
 
     func oneTimeChargeStatus() async throws -> FirmwareLimitHelperOneTimeStatusResponse {

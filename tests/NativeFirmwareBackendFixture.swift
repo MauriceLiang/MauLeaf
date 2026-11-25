@@ -26,6 +26,7 @@ final class FixtureNativeFirmwareBackend: NativeFirmwareBackend {
     var failNextRead = false
     var failLegacyZeroReadOnce = false
     var helperAvailable = true
+    var helperInfoAvailable = true
     var reportedHelperVersion: Int?
     var reportedHelperBuildVersion: String?
     var readCount = 0
@@ -42,6 +43,17 @@ final class FixtureNativeFirmwareBackend: NativeFirmwareBackend {
         state = FirmwareLimitHelperStateResponse(
             state: FirmwareLimitState(activationByte: 0, upper: 0, lower: 0),
             identity: identity, snapshot: originalSnapshot
+        )
+    }
+
+    func readHelperInfo() async throws -> FirmwareLimitHelperInfoResponse {
+        guard helperAvailable else { throw FirmwareLimitHelperClientError.serviceUnavailable }
+        guard helperInfoAvailable else {
+            throw FirmwareLimitHelperClientError.remote("Installed Helper does not expose the required version handshake.")
+        }
+        return FirmwareLimitHelperInfoResponse(
+            protocolVersion: reportedHelperVersion ?? state.helperVersion,
+            buildVersion: reportedHelperBuildVersion ?? state.helperBuildVersion ?? "0.0.0"
         )
     }
 

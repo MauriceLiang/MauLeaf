@@ -487,8 +487,18 @@ final class FirmwareLimitHelperService: NSObject, FirmwareLimitHelperProtocol {
         }
 
         stateLock.lock()
-        let snapshot = originalStateSnapshot
+        var snapshot = originalStateSnapshot
         stateLock.unlock()
+
+        // An explicitly requested reset may restore a verified suspended
+        // baseline if the live firmware became inactive 0/0. Promote it
+        // durably before clearing the archive. Never invent thresholds.
+        if !retainReconnectBaseline, snapshot == nil,
+           let baseline = verifiedReconnectBaseline(),
+           let live = try? controller.readState(), live.isInactiveUninitialized {
+            try persistOriginalStateSnapshot(baseline)
+            snapshot = baseline
+        }
 
         if !retainReconnectBaseline {
             // Explicit disable, quit and the stable uninstall CLI end the
@@ -589,8 +599,13 @@ final class FirmwareLimitHelperService: NSObject, FirmwareLimitHelperProtocol {
             )
         }
 
+        // Inactive firmware needs no SMC write to abandon a stale charge
+        // job. Remove the durable record before clearing the in-memory job.
+        if FileManager.default.fileExists(atPath: jobURL.path) {
+            try FileManager.default.removeItem(at: jobURL)
+        }
         setPendingJob(nil)
-        removePersistedJob()
+        removeBackgroundRecoveryMarkerIfIdle()
         if legacyRestoreRequest != nil {
             try removeLegacyRestoreRequest()
         }
@@ -858,6 +873,29 @@ final class FirmwareLimitHelperService: NSObject, FirmwareLimitHelperProtocol {
         guard let job else {
             triggerDeferredUninstallIfReady()
             stopMonitoringIfIdle()
+            return
+        }
+
+        // An orphaned full-charge job cannot authorize a new limit.
+        // If no trustworthy original snapshot survives, only clear a
+        // stale job after verifying that the hardware is already inactive.
+        guard let snapshot, snapshot.isValid, !snapshot.restoreRequested,
+              FirmwareLimitWritePermit.restoreBlockReason(
+                  identity: identityProvider(), snapshotIdentity: snapshot.deviceIdentity
+              ) == nil else {
+            if originalSnapshotLoadError == nil, legacyRestoreLoadError == nil,
+               snapshot == nil, let live = try? controller.readState(), !live.isActive {
+                do {
+                    if FileManager.default.fileExists(atPath: jobURL.path) {
+                        try FileManager.default.removeItem(at: jobURL)
+                    }
+                    setPendingJob(nil)
+                    removeBackgroundRecoveryMarkerIfIdle()
+                    stopMonitoringIfIdle()
+                } catch {
+                    NSLog("MauLeaf orphan job cleanup will retry: %@", error.localizedDescription)
+                }
+            }
             return
         }
 

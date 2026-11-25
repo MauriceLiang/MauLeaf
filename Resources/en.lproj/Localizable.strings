@@ -333,3 +333,13 @@
 "请保持接电，尝试强制重置。若仍未就绪，请重启 Mac。未写入固件。" = "Keep AC connected and try Force Reset. If still unavailable, restart your Mac. No firmware was written.";
 
 "任务已清除，固件仍未就绪。请保持接电，必要时重启 Mac。" = "Tasks cleared; firmware is not ready. Keep AC connected and restart your Mac if needed.";
+
+"正在退出…" = "Quitting…";
+
+"未能确认后台服务已接收恢复任务。" = "Could not confirm that the background helper accepted the recovery job.";
+
+"未能确认后台服务已接收恢复任务。请返回应用重试；若选择仍然退出，请勿直接删除 App 或 Helper。" = "Could not confirm that the background helper accepted recovery. Return to the app and retry; if you quit anyway, do not delete the app or helper.";
+
+"退出时将恢复任务交给后台服务，应用无需等待恢复完成。" = "Recovery is handed to the background helper on quit.";
+
+"退出时无法确认后台恢复任务：%@" = "Could not confirm background quit recovery: %@";

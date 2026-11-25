@@ -1572,9 +1572,6 @@ final class ChargeManager: ObservableObject {
         }
         if helperStateUnknown { return "状态未知" }
         if helperNeedsUpgrade {
-            // For a known inactive old helper, the first click still means
-            // Enable (and upgrades the helper first). Do not label it as an
-            // update-only action when it would also modify AppleSMC.
             return "需要更新"
         }
         if restorePending { return "等待恢复" }
@@ -1838,8 +1835,7 @@ final class ChargeManager: ObservableObject {
             let state = try await backend.readState()
             guard !isPreparingToQuit else { return }
             if !FirmwareLimitHelperProtocolVersion.isCompatible(state.helperVersion, build: state.helperBuildVersion) {
-                // Never downgrade an unknown, newer protocol; old Helpers
-                // are migrated only after user-authorized installation.
+                // Incompatible Helpers are replaced via the stable safe uninstall CLI.
                 currentState = state
                 helperNeedsInstallation = false
                 helperNeedsUpgrade = FirmwareLimitHelperProtocolVersion.canUpgradeFrom(state.helperVersion, build: state.helperBuildVersion)
@@ -2200,7 +2196,7 @@ final class ChargeManager: ObservableObject {
         Task { await enableLimitAfterConsent() }
     }
 
-    /// The only privileged install/upgrade trigger is explicit opt-in.
+    /// First-time installation and activation require explicit opt-in.
     private func enableLimitAfterConsent() async {
         guard canEnableLimit else { return }
         activeOperation = .enablingLimit

@@ -1129,6 +1129,7 @@ final class ChargeManager: ObservableObject {
     private var powerRecheckTask: Task<Void, Never>?
     private let autoUpgradeInstalledHelperOnLaunch: Bool
     private var attemptedStartupHelperUpgrade = false
+    private var helperVersionVerified = false
     private let exitLifecycleForTesting: ((QuitComponentPolicy) async throws -> Void)?
     private let helperInstallerForTesting: (() async throws -> Void)?
     private let helperArtifactsPresent: () -> Bool
@@ -1672,8 +1673,8 @@ final class ChargeManager: ObservableObject {
     /// A stale/unknown installed Helper can be repaired explicitly without
     /// enabling a limit. This is essential when an older version was active.
     var canRepairNativeHelper: Bool {
-        (helperNeedsUpgrade || helperStateUnknown) && helperArtifactsPresent()
-            && !isBusy && !isPreparingToQuit
+        (helperNeedsUpgrade || (helperStateUnknown && !helperVersionVerified))
+            && helperArtifactsPresent() && !isBusy && !isPreparingToQuit
             && !(helperNeedsUpgrade && canEnableLimit)
     }
 
@@ -1848,6 +1849,7 @@ final class ChargeManager: ObservableObject {
             helperInfoVerified = true
 
             if !FirmwareLimitHelperProtocolVersion.isCompatible(info) {
+                helperVersionVerified = false
                 let observedState = try? await backend.readState()
                 guard !isPreparingToQuit else { return }
                 currentState = observedState
@@ -1863,6 +1865,7 @@ final class ChargeManager: ObservableObject {
                 return
             }
 
+            helperVersionVerified = true
             let state = try await backend.readState()
             guard !isPreparingToQuit else { return }
             // The state response repeats the version so a stale or mixed
@@ -1870,6 +1873,7 @@ final class ChargeManager: ObservableObject {
             if !FirmwareLimitHelperProtocolVersion.isCompatible(
                 state.helperVersion, build: state.helperBuildVersion
             ) {
+                helperVersionVerified = false
                 currentState = state
                 helperNeedsInstallation = false
                 helperNeedsUpgrade = true
@@ -1897,6 +1901,7 @@ final class ChargeManager: ObservableObject {
                 // preserve the UI's knowledge of an active legacy limit;
                 // it never authorizes writes. If the method is absent or
                 // state decoding fails, keep the state explicitly unknown.
+                helperVersionVerified = false
                 if !helperArtifactsPresent() {
                     helperNeedsInstallation = true
                     helperNeedsUpgrade = false
@@ -1928,6 +1933,7 @@ final class ChargeManager: ObservableObject {
             // The Helper version is already verified. A state-read failure
             // is a hardware/recovery problem, not a version mismatch; never
             // uninstall a correctly versioned recovery service for this.
+            helperVersionVerified = true
             helperNeedsInstallation = false
             helperNeedsUpgrade = false
             helperStateUnknown = true
@@ -1952,6 +1958,7 @@ final class ChargeManager: ObservableObject {
         status: AppText
     ) {
         currentState = state
+        helperVersionVerified = true
         helperNeedsInstallation = false
         helperNeedsUpgrade = false
         helperStateUnknown = false
@@ -2163,7 +2170,7 @@ final class ChargeManager: ObservableObject {
         failure: AppText
     ) async {
         guard !isBusy, !isPreparingToQuit,
-              helperNeedsUpgrade || helperStateUnknown else { return }
+              helperNeedsUpgrade || (helperStateUnknown && !helperVersionVerified) else { return }
         activeOperation = .repairingHelper
         defer { activeOperation = nil }
         isBusy = true

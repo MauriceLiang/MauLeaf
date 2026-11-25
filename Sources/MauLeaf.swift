@@ -823,7 +823,7 @@ struct ContentView: View {
     /// selected value is visible without an extra click. These only update
     /// local UserDefaults; no privileged firmware action is involved.
     private var settingsControls: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 5) {
             HStack(spacing: 8) {
                 settingsLabel("显示供电详情")
                 Spacer(minLength: 8)

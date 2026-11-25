@@ -1328,7 +1328,11 @@ final class ChargeManager: ObservableObject {
                 if self.isAdapterConnected { self.scheduleReconnectLimitResume() }
             }
             do {
-                _ = try await self.backend.restoreOriginalState()
+                if self.desiredLimitEnabled {
+                    _ = try await self.backend.suspendLimitForReconnect()
+                } else {
+                    _ = try await self.backend.restoreOriginalState()
+                }
                 let state = try await self.backend.readState()
                 let once = try await self.backend.oneTimeChargeStatus()
                 self.currentState = state
@@ -1369,8 +1373,7 @@ final class ChargeManager: ObservableObject {
               !isBusy, !fullOncePending, !helperNeedsUpgrade,
               let state = currentState, !state.active,
               !state.hasOriginalStateSnapshot, !state.restorePending,
-              state.writeSupported, !state.isInactiveUninitialized,
-              !state.isActiveZeroed else { return }
+              state.writeSupported, !state.isActiveZeroed else { return }
         let since = dynamicACStableSince ?? Date()
         let remaining = max(0, dynamicSettleInterval - Date().timeIntervalSince(since))
         automaticReconnectApplyTask = Task { [weak self] in
@@ -1387,7 +1390,7 @@ final class ChargeManager: ObservableObject {
             guard let current = try? await self.backend.readState(),
                   !current.active && !current.hasOriginalStateSnapshot,
                   !current.restorePending && current.writeSupported,
-                  !current.isInactiveUninitialized && !current.isActiveZeroed,
+                  !current.isActiveZeroed,
                   self.desiredLimitEnabled && self.isAdapterConnected else { return }
             await self.applyLimit(self.limit)
         }
@@ -1568,7 +1571,9 @@ final class ChargeManager: ObservableObject {
             return state.hasOriginalStateSnapshot ? "固件异常 · 待恢复" : "固件异常"
         }
         if let state = currentState, state.isInactiveUninitialized {
-            return state.hasOriginalStateSnapshot ? "重启后恢复中" : "固件未就绪"
+            if state.hasOriginalStateSnapshot { return "重启后恢复中" }
+            if state.hasReconnectBaseline && state.writeSupported { return "等待恢复限充" }
+            return "固件未就绪"
         }
         if helperStateUnknown { return "状态未知" }
         if helperNeedsUpgrade {
@@ -1679,7 +1684,13 @@ final class ChargeManager: ObservableObject {
     }
 
     /// All card actions reuse the existing hardware and restore safeguards.
+    private var canRecheckUninitializedFirmware: Bool {
+        currentState?.isInactiveUninitialized == true && !backendReady
+            && helperVersionVerified && !isBusy && !isPreparingToQuit
+    }
+
     var canToggleLimitFromCard: Bool {
+        if canRecheckUninitializedFirmware { return true }
         if canRepairNativeHelper { return true }
         if isLegacyActive { return canDisableLegacyLimit }
         if hasOriginalStateSnapshot || restorePending {
@@ -1689,6 +1700,7 @@ final class ChargeManager: ObservableObject {
     }
 
     var limitCardActionHint: AppText {
+        if canRecheckUninitializedFirmware { return "重新检测固件" }
         if canRepairNativeHelper { return "修复控制服务" }
         if isLegacyActive { return "停用旧版限制" }
         if restorePending || (hasOriginalStateSnapshot && currentState?.active != true && !fullOncePending) {
@@ -1699,7 +1711,9 @@ final class ChargeManager: ObservableObject {
 
     func toggleLimitFromCard() {
         guard canToggleLimitFromCard else { return }
-        if canRepairNativeHelper {
+        if canRecheckUninitializedFirmware {
+            Task { await refreshNativeState() }
+        } else if canRepairNativeHelper {
             Task { await repairNativeHelperAfterUserAction() }
         } else if isLegacyActive {
             requestLegacyDisableConfirmation()
@@ -2035,10 +2049,13 @@ final class ChargeManager: ObservableObject {
             isError = true
         } else if state.isInactiveUninitialized {
             modeText = "固件重启后尚未初始化限充阈值"
-            statusMessage = state.hasOriginalStateSnapshot
-                ? "已保留原始固件快照；待连接电源稳定后恢复原先的限充设置。"
-                : "固件限充值暂不可用，尚无可验证的恢复快照；不会自动写入。"
-            isError = false
+            if state.hasOriginalStateSnapshot || (state.hasReconnectBaseline && state.writeSupported) {
+                statusMessage = "已保留原始固件快照；待连接电源稳定后恢复原先的限充设置。"
+                isError = false
+            } else {
+                statusMessage = "固件限充阈值尚未初始化。保持电源连接，点击固件未就绪重新检测；若持续异常，请正常重启 Mac 后重试。未写入固件。"
+                isError = true
+            }
         } else if state.active && state.hasOriginalStateSnapshot {
             modeText = "限制充电已启用 · 上限 \(state.upper)%"
             statusMessage = status
@@ -2053,7 +2070,7 @@ final class ChargeManager: ObservableObject {
             isError = false
         }
 
-        if state.isActiveZeroed {
+        if state.isActiveZeroed || state.isInactiveUninitialized {
             // Do not overwrite a specific safety warning with the generic
             // "unsupported" message; a trusted snapshot is recoverable.
         } else if !state.writeSupported && !state.restoreSupported {
@@ -2269,6 +2286,13 @@ final class ChargeManager: ObservableObject {
                 let once = try await backend.oneTimeChargeStatus()
                 updateFromNativeState(state, oneTime: once, status: "原生控制服务已就绪。")
                 attemptedStartupHelperUpgrade = false
+                if state.isInactiveUninitialized && !state.writeSupported
+                    && !state.active && !state.hasOriginalStateSnapshot && !state.restorePending && !once.pending {
+                    // Installation succeeded. This is a hardware-readiness
+                    // state, not a failed Helper installation.
+                    isBusy = false
+                    return
+                }
                 if let reason = helperInstallSafetyBlockReason(state: state, oneTime: once) {
                     throw NativeControlError.unsafeStateAfterInstall(reason)
                 }
@@ -2603,7 +2627,7 @@ final class ChargeManager: ObservableObject {
             }
             let oneTime = try await backend.oneTimeChargeStatus()
             let needsRestore = state.active || state.hasOriginalStateSnapshot
-                || state.restorePending || oneTime.pending
+                || state.hasReconnectBaseline || state.restorePending || oneTime.pending
 
             if needsRestore {
                 guard state.restoreSupported else {
@@ -2624,6 +2648,7 @@ final class ChargeManager: ObservableObject {
             let verifiedOneTime = try await backend.oneTimeChargeStatus()
             let restored = !verified.active
                 && !verified.hasOriginalStateSnapshot
+                && !verified.hasReconnectBaseline
                 && !verified.restorePending
                 && !verifiedOneTime.pending
             let queued = verified.restorePending && !verifiedOneTime.pending

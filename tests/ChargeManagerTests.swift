@@ -491,8 +491,13 @@ private enum ChargeManagerTests {
         try await Task.sleep(nanoseconds: 180_000_000)
         try check(manager.popoverLimitStatus.source == "固件未就绪"
                   && !manager.hasOriginalStateSnapshot
-                  && backend.applyCount == 0 && !manager.canEnableLimit,
-                  "without a valid pre-install snapshot, 0/0 remains read-only and must not auto-write")
+                  && backend.applyCount == 0 && !manager.canEnableLimit
+                  && manager.canToggleLimitFromCard,
+                  "without a valid pre-install snapshot, 0/0 remains read-only but offers recheck")
+        let reads = backend.readCount
+        manager.toggleLimitFromCard()
+        try await wait { backend.readCount > reads }
+        try check(backend.applyCount == 0, "rechecking uninitialized firmware never writes SMC")
         UserDefaults.standard.set(false, forKey: "nativeFirmwareWriteConfirmed")
     }
 
@@ -585,15 +590,16 @@ private enum ChargeManagerTests {
                   "continuous battery operation causes no repeated firmware writes")
 
         backend.acConnected = true
+        backend.simulateReconnectZero()
         reading = MauLeafBatterySnapshot(
-            percent: 84, isCharging: true, isFullyCharged: false,
-            isACConnected: true, amperageMilliAmps: 400, precisePercent: 84.0
+            percent: 75, isCharging: true, isFullyCharged: false,
+            isACConnected: true, amperageMilliAmps: 400, precisePercent: 75.0
         )
         manager.simulatePowerSourceNotificationForTesting()
         try await wait { backend.applyCount == 2 && !manager.isBusy }
         try check(backend.state.active && backend.state.upper == 80
                   && backend.state.lower == 78 && manager.hasOriginalStateSnapshot,
-                  "stable replug creates a fresh snapshot and resumes only the previously enabled limit")
+                  "stable below-target replug with 0/0 uses the verified baseline and resumes only the previously enabled limit")
 
         manager.toggleLimitFromCard()
         try await wait { backend.restoreCount == 2 && !manager.isBusy }
@@ -944,13 +950,13 @@ private enum ChargeManagerTests {
 
     @MainActor
     private static func testOutdatedBuildWithCompatibleProtocolUpgrades() async throws {
-        try check(FirmwareLimitHelperProtocolVersion.isCompatible(7, build: "1.4.0")
-                  && !FirmwareLimitHelperProtocolVersion.isCompatible(7, build: "1.3.9")
-                  && !FirmwareLimitHelperProtocolVersion.isCompatible(7, build: "1.4.1")
-                  && !FirmwareLimitHelperProtocolVersion.isCompatible(7, build: nil)
-                  && !FirmwareLimitHelperProtocolVersion.isCompatible(6, build: "1.3.0")
-                  && !FirmwareLimitHelperProtocolVersion.isCompatible(8, build: "1.5.0")
-                  && FirmwareLimitHelperProtocolVersion.canUpgradeFrom(8, build: "1.5.0"),
+        try check(FirmwareLimitHelperProtocolVersion.isCompatible(8, build: "1.5.0")
+                  && !FirmwareLimitHelperProtocolVersion.isCompatible(8, build: "1.4.9")
+                  && !FirmwareLimitHelperProtocolVersion.isCompatible(8, build: "1.5.1")
+                  && !FirmwareLimitHelperProtocolVersion.isCompatible(8, build: nil)
+                  && !FirmwareLimitHelperProtocolVersion.isCompatible(7, build: "1.4.0")
+                  && !FirmwareLimitHelperProtocolVersion.isCompatible(9, build: "1.6.0")
+                  && FirmwareLimitHelperProtocolVersion.canUpgradeFrom(9, build: "1.6.0"),
                   "Helper build compatibility is independent of the visible app version")
         let backend = FixtureNativeFirmwareBackend()
         backend.reportedHelperBuildVersion = "0.9.9"

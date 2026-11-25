@@ -189,7 +189,7 @@ private enum ChargeManagerTests {
         try await testOfflineBootRestoresManagedSnapshot()
         try await testManagedBootZeroRecovery()
         try await testUnmanagedBootZeroNoWrite()
-        try await testLegacyHelperZeroReadUpgradesOnce()
+        try await testLegacyHelperWithoutHandshakeReinstallsOnce()
         try await testImmediatePowerEventRefresh()
         try await testFirstLaunchDefersAuthorization()
         try await testVisiblePanelPowerTimer()
@@ -497,7 +497,7 @@ private enum ChargeManagerTests {
     }
 
     @MainActor
-    private static func testLegacyHelperZeroReadUpgradesOnce() async throws {
+    private static func testLegacyHelperWithoutHandshakeReinstallsOnce() async throws {
         UserDefaults.standard.set(80, forKey: "chargeLimit")
         UserDefaults.standard.set(false, forKey: "dynamicHoldEnabled")
         UserDefaults.standard.set(true, forKey: "nativeFirmwareWriteConfirmed")
@@ -517,6 +517,9 @@ private enum ChargeManagerTests {
             helperInstallerForTesting: {
                 upgrades += 1
                 backend.helperInfoAvailable = true
+                // The old Helper would reject the zeroed boot registers;
+                // the newly installed Helper can read the persisted snapshot.
+                backend.failLegacyZeroReadOnce = false
             },
             helperArtifactsPresent: { true },
             batteryReader: { battery }, observePowerSourceChanges: false,
@@ -841,15 +844,19 @@ private enum ChargeManagerTests {
         )
         UserDefaults.standard.set(true, forKey: "nativeFirmwareWriteConfirmed")
         manager.start()
-        try await wait { manager.helperNeedsUpgrade }
+        try await wait { manager.helperNeedsUpgrade && manager.helperStateUnknown }
         try check(installs == 0 && backend.applyCount == 0
-                  && manager.popoverLimitStatus.source == "未启用",
-                  "startup detects stale helper without performing a privileged upgrade")
+                  && !manager.canEnableLimit && manager.canRepairNativeHelper,
+                  "an unverified Helper cannot enable limits before its bundled replacement is installed")
         manager.isAdapterConnected = true
+        manager.toggleLimitFromCard()
+        try await wait { installs == 1 && manager.backendReady && !manager.isBusy }
+        try check(!manager.isError && !backend.state.active && backend.applyCount == 0,
+                  "explicit repair replaces the Helper and reads fresh firmware state without writing SMC")
         manager.enableLimit()
-        try await wait { installs == 1 && backend.applyCount == 1 && !manager.isBusy }
+        try await wait { backend.applyCount == 1 && !manager.isBusy }
         try check(!manager.isError && backend.state.active && manager.hasOriginalStateSnapshot,
-                  "explicit enable upgrades once, checks new protocol and then writes safely")
+                  "enabling after replacement uses the newly verified Helper")
     }
 
     @MainActor

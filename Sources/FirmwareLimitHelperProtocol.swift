@@ -9,6 +9,7 @@ import Foundation
     func applyLimit(upper: Int, lower: Int, confirmed: Bool, withReply reply: @escaping (NSData?, NSString?) -> Void)
     func beginOneTimeCharge(upper: Int, lower: Int, confirmed: Bool, withReply reply: @escaping (NSData?, NSString?) -> Void)
     func cancelOneTimeCharge(withReply reply: @escaping (NSData?, NSString?) -> Void)
+    func suspendLimitForReconnect(withReply reply: @escaping (NSData?, NSString?) -> Void)
     func restoreOriginalState(withReply reply: @escaping (NSData?, NSString?) -> Void)
     func oneTimeChargeStatus(withReply reply: @escaping (NSData?, NSString?) -> Void)
 }
@@ -32,7 +33,7 @@ struct FirmwareLimitHelperInfoResponse: Codable, Equatable {
 /// this app. Any mismatch, including a newer Helper, uses the same
 /// service-only uninstall and reinstall path.
 enum FirmwareLimitHelperProtocolVersion {
-    static let current = 7
+    static let current = 8
     static let requiredBuild = FirmwareLimitHelperBuildVersion.current
 
     static func isCompatible(_ installed: Int, build: String? = nil) -> Bool {
@@ -51,7 +52,7 @@ enum FirmwareLimitHelperProtocolVersion {
 /// Increment this build whenever the privileged Helper implementation or
 /// its externally observable behavior changes.
 enum FirmwareLimitHelperBuildVersion {
-    static let current = "1.4.0"
+    static let current = "1.5.0"
 }
 
 struct FirmwareLimitHelperStateResponse: Codable, Equatable {
@@ -64,6 +65,7 @@ struct FirmwareLimitHelperStateResponse: Codable, Equatable {
     let writeSupported: Bool
     let writeBlockReason: String?
     let hasOriginalStateSnapshot: Bool
+    let hasReconnectBaseline: Bool
     let restorePending: Bool
     let restoreSupported: Bool
     let restoreBlockReason: String?
@@ -84,6 +86,7 @@ struct FirmwareLimitHelperStateResponse: Codable, Equatable {
         state: FirmwareLimitState,
         identity: FirmwareLimitDeviceIdentity? = nil,
         snapshot: FirmwareLimitOriginalStateSnapshot? = nil,
+        hasReconnectBaseline: Bool = false,
         legacyRestorePending: Bool = false,
         durableRecoveryRecorded: Bool = true
     ) {
@@ -94,6 +97,7 @@ struct FirmwareLimitHelperStateResponse: Codable, Equatable {
         upper = state.upper
         lower = state.lower
         hasOriginalStateSnapshot = snapshot != nil
+        self.hasReconnectBaseline = hasReconnectBaseline
         restorePending = durableRecoveryRecorded
             && ((snapshot?.restoreRequested ?? false) || legacyRestorePending)
         if let identity {
@@ -104,7 +108,7 @@ struct FirmwareLimitHelperStateResponse: Codable, Equatable {
             writeBlockReason = identityBlock ?? (
                 state.isActiveZeroed
                     ? "Active firmware limit has zeroed thresholds; new writes are blocked. Restore the verified original-state snapshot."
-                    : state.isInactiveUninitialized && snapshot == nil
+                    : state.isInactiveUninitialized && snapshot == nil && !hasReconnectBaseline
                         ? "Firmware limits are not initialized after startup; no managed recovery snapshot is present."
                         : nil
             )
@@ -125,7 +129,7 @@ struct FirmwareLimitHelperStateResponse: Codable, Equatable {
             restoreSupported = restoreBlockReason == nil
                 && (!state.isActiveZeroed || (snapshot?.isValid == true))
         } else {
-            writeSupported = state.isValid || (state.isInactiveUninitialized && snapshot != nil)
+            writeSupported = state.isValid || (state.isInactiveUninitialized && (snapshot != nil || hasReconnectBaseline))
             writeBlockReason = writeSupported ? nil : "Firmware limits are not initialized or are invalid."
             restoreSupported = !state.isActiveZeroed || (snapshot?.isValid == true)
             restoreBlockReason = restoreSupported ? nil : "No verified original-state snapshot for active zeroed firmware."
@@ -134,7 +138,7 @@ struct FirmwareLimitHelperStateResponse: Codable, Equatable {
 
     private enum CodingKeys: String, CodingKey {
         case helperVersion, helperBuildVersion, activationByte, active, upper, lower, writeSupported, writeBlockReason
-        case hasOriginalStateSnapshot, restorePending, restoreSupported, restoreBlockReason
+        case hasOriginalStateSnapshot, hasReconnectBaseline, restorePending, restoreSupported, restoreBlockReason
     }
 
     init(from decoder: Decoder) throws {
@@ -152,6 +156,7 @@ struct FirmwareLimitHelperStateResponse: Codable, Equatable {
         writeSupported = try container.decode(Bool.self, forKey: .writeSupported)
         writeBlockReason = try container.decodeIfPresent(String.self, forKey: .writeBlockReason)
         hasOriginalStateSnapshot = try container.decode(Bool.self, forKey: .hasOriginalStateSnapshot)
+        hasReconnectBaseline = try container.decodeIfPresent(Bool.self, forKey: .hasReconnectBaseline) ?? false
         restorePending = try container.decode(Bool.self, forKey: .restorePending)
         restoreSupported = try container.decode(Bool.self, forKey: .restoreSupported)
         restoreBlockReason = try container.decodeIfPresent(String.self, forKey: .restoreBlockReason)

@@ -513,6 +513,62 @@ private enum FirmwareLimitHelperServiceTests {
                      && !FileManager.default.fileExists(atPath: bootSnapshotURL.path),
                      "unmanaged zero/zero neither writes SMC nor creates an invalid original snapshot")
 
+        // A verified unplug restore retains an inactive baseline only in
+        // the same boot. It never treats 0/0 as a real original configuration.
+        let reconnectDir = directory.appendingPathComponent("reconnect", isDirectory: true)
+        try FileManager.default.createDirectory(at: reconnectDir, withIntermediateDirectories: true)
+        let reconnectTransport = HelperFakeTransport()
+        reconnectTransport.upper = 85
+        reconnectTransport.lower = 83
+        var reconnectAC = true
+        var bootID = "test-boot-A"
+        func reconnectService() -> FirmwareLimitHelperService {
+            FirmwareLimitHelperService(
+                transport: reconnectTransport, identityProvider: { identity },
+                isOnACPower: { reconnectAC }, isAdministrator: { true },
+                batteryObservation: {
+                    FirmwareLimitBatteryObservation(percent: 75, fullyCharged: false, externalConnected: reconnectAC)
+                },
+                pmsetReportsBatteryPower: { !reconnectAC }, isChargingNow: { false },
+                jobURL: reconnectDir.appendingPathComponent("one-time-charge.json"),
+                originalStateURL: reconnectDir.appendingPathComponent("original-firmware-state.json"),
+                restoreRequestURL: reconnectDir.appendingPathComponent("restore-original-state.pending"),
+                backgroundRecoveryURL: reconnectDir.appendingPathComponent("background-recovery.pending"),
+                legacyRestoreURL: reconnectDir.appendingPathComponent("legacy-restore.json"),
+                deferredUninstallURL: reconnectDir.appendingPathComponent("deferred-uninstall.pending"),
+                bootSessionProvider: { bootID }, monitorEnabled: false
+            )
+        }
+        var reconnectError: NSString?
+        reconnectService().applyLimit(upper: 80, lower: 78, confirmed: true) { _, error in reconnectError = error }
+        precondition(reconnectError == nil)
+        reconnectAC = false
+        reconnectService().suspendLimitForReconnect { _, error in reconnectError = error }
+        precondition(reconnectError == nil && reconnectTransport.activation == 0 &&
+                     reconnectTransport.upper == 85 && reconnectTransport.lower == 83)
+        reconnectTransport.upper = 0
+        reconnectTransport.lower = 0
+        reconnectAC = true
+        var reconnectData: NSData?
+        let writesBeforeReconnectRead = reconnectTransport.writes.count
+        reconnectService().readState { data, error in reconnectData = data; reconnectError = error }
+        let reconnectState = try JSONDecoder().decode(FirmwareLimitHelperStateResponse.self, from: reconnectData! as Data)
+        precondition(reconnectError == nil && reconnectState.hasReconnectBaseline &&
+                     !reconnectState.hasOriginalStateSnapshot && reconnectState.writeSupported &&
+                     reconnectTransport.writes.count == writesBeforeReconnectRead)
+        bootID = "test-boot-B"
+        reconnectService().applyLimit(upper: 80, lower: 78, confirmed: true) { _, error in reconnectError = error }
+        precondition(reconnectError != nil && reconnectTransport.writes.count == writesBeforeReconnectRead,
+                     "a prior boot baseline cannot authorize writes")
+        bootID = "test-boot-A"
+        reconnectService().applyLimit(upper: 80, lower: 78, confirmed: true) { _, error in reconnectError = error }
+        precondition(reconnectError == nil && reconnectTransport.activation == 2 && reconnectTransport.upper == 80)
+        reconnectService().restoreOriginalState { _, error in reconnectError = error }
+        precondition(reconnectError == nil && reconnectTransport.activation == 0 &&
+                     reconnectTransport.upper == 85 && reconnectTransport.lower == 83,
+                     "resumed limiting restores the real prior 85/83 baseline, never 0/0")
+        precondition(!FileManager.default.fileExists(atPath: reconnectDir.appendingPathComponent("reconnect-baseline.json").path))
+
         print("FirmwareLimitHelperServiceTests: PASS (snapshot, offline legacy restore, deferred retry, boot zero recovery, uninstall verification)")
     }
 }

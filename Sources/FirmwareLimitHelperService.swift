@@ -518,9 +518,8 @@ final class FirmwareLimitHelperService: NSObject, FirmwareLimitHelperProtocol {
             var requested = snapshot
             requested.restoreRequested = true
             try persistOriginalStateSnapshot(requested)
-            setPendingJob(nil)
-            removePersistedJob()
             startMonitoring()
+            try clearFullChargeJobForRestore()
 
             let current = try readStateForDisplay()
             // Even active zeroed thresholds may be restored from a verified
@@ -583,9 +582,8 @@ final class FirmwareLimitHelperService: NSObject, FirmwareLimitHelperProtocol {
                 throw FirmwareLimitCoreError.originalStateDeviceMismatch
             }
             try persistLegacyRestoreRequest(request)
-            setPendingJob(nil)
-            removePersistedJob()
             startMonitoring()
+            try clearFullChargeJobForRestore()
 
             let permit = try writeLegacyDisablePermit()
             let inactive = try controller.deactivate(permit: permit)
@@ -946,6 +944,14 @@ final class FirmwareLimitHelperService: NSObject, FirmwareLimitHelperProtocol {
               let job = try? JSONDecoder().decode(FirmwareLimitOnceJob.self, from: data),
               job.restoreRequest != nil else { return nil }
         return job
+    }
+
+    private func clearFullChargeJobForRestore() throws {
+        if FileManager.default.fileExists(atPath: jobURL.path) {
+            try FileManager.default.removeItem(at: jobURL)
+        }
+        setPendingJob(nil)
+        removeBackgroundRecoveryMarkerIfIdle()
     }
 
     private func removePersistedJob() {

@@ -1,6 +1,6 @@
 #!/bin/bash
-# Idempotent, rollback-capable installer for the privileged Helper.
-# Never touch root-owned charge-limit snapshots or recovery jobs.
+# Canonical service-only uninstall/reinstall for every Helper version mismatch.
+# Firmware snapshots and recovery jobs are persistent state and are NEVER removed.
 set -euo pipefail
 
 LABEL="com.local.chargecap.firmware-helper"
@@ -69,6 +69,8 @@ rollback() {
       /usr/bin/install -o root -g wheel -m 644 "$staging/old-plist" "$PLIST_TARGET" || true
       if [[ -f "$staging/old-finalizer" ]]; then
         /usr/bin/install -o root -g wheel -m 700 "$staging/old-finalizer" "$FINALIZER" || true
+      else
+        /bin/rm -f "$FINALIZER"
       fi
       if [[ "$was_running" == true ]]; then
         /bin/launchctl bootstrap system "$PLIST_TARGET" >/dev/null 2>&1 || true
@@ -99,16 +101,45 @@ if [[ "$had_previous" == true ]]; then
   if /bin/launchctl print "system/$LABEL" >/dev/null 2>&1; then
     was_running=true
     /bin/launchctl bootout "system/$LABEL"
+    # bootout can return before launchd has finished removing the old job.
+    # Wait boundedly before deleting files and bootstrapping the replacement.
+    for attempt in {1..20}; do
+      if ! /bin/launchctl print "system/$LABEL" >/dev/null 2>&1; then
+        break
+      fi
+      /bin/sleep 0.25
+    done
+    if /bin/launchctl print "system/$LABEL" >/dev/null 2>&1; then
+      echo "旧版 Helper 尚未完全停止，拒绝并行安装新服务。" >&2
+      exit 5
+    fi
   fi
 fi
 
-# Replace executable and registration atomically on the same APFS volume.
-# Snapshot, deferred recovery and one-time-charge records are never removed.
-/bin/mv -f "$staging/new-helper" "$TARGET"
+# Service-only uninstall: remove the old executable, LaunchDaemon and
+# finalizer after taking a rollback copy. Do NOT remove JOB_DIR or any
+# snapshot, restore marker, one-time-charge record or deferred-uninstall job.
 replaced=true
+/bin/rm -f "$TARGET" "$PLIST_TARGET" "$FINALIZER"
+if [[ -e "$TARGET" || -e "$PLIST_TARGET" || -e "$FINALIZER" ]]; then
+  echo "旧版 Helper 组件未能完整卸载；保留恢复数据并回滚。" >&2
+  exit 5
+fi
+
+# Install the exact Helper and scripts bundled with the current app.
+/bin/mv -f "$staging/new-helper" "$TARGET"
 /bin/mv -f "$staging/new-plist" "$PLIST_TARGET"
 /bin/mv -f "$staging/new-finalizer" "$FINALIZER"
 /bin/launchctl bootstrap system "$PLIST_TARGET"
-/bin/launchctl print "system/$LABEL" >/dev/null
+for attempt in {1..20}; do
+  if /bin/launchctl print "system/$LABEL" >/dev/null 2>&1; then
+    break
+  fi
+  /bin/sleep 0.25
+done
+if ! /bin/launchctl print "system/$LABEL" >/dev/null 2>&1; then
+  echo "新版 Helper 未能注册到 launchd，正在回滚。" >&2
+  exit 6
+fi
 
-echo "MauLeaf 原生 Helper 已安装并验证；原始固件快照及恢复任务未更改。"
+echo "MauLeaf 原生 Helper 已卸载旧版并重新安装当前应用内置版本；原始固件快照及恢复任务未更改。"

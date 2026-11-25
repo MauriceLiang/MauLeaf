@@ -1457,7 +1457,7 @@ final class ChargeManager: ObservableObject {
     /// A reboot may return bfF0 inactive and both thresholds zero while
     /// retaining the verified original snapshot. Recovery is allowed only
     /// for a pre-authorized, managed limit; an unknown zero state with no
-    /// snapshot is read-only and must never become the new baseline.
+    /// snapshot is eligible for a new baseline only on the verified target.
     private var needsManagedBootReapply: Bool {
         guard let state = currentState else { return false }
         return state.isInactiveUninitialized && state.hasOriginalStateSnapshot
@@ -1616,6 +1616,7 @@ final class ChargeManager: ObservableObject {
         if let state = currentState, state.isInactiveUninitialized {
             if state.hasOriginalStateSnapshot { return "重启后恢复中" }
             if state.hasReconnectBaseline && state.writeSupported { return "等待恢复限充" }
+            if state.writeSupported { return "未启用" }
             return "固件未就绪"
         }
         if helperStateUnknown { return "状态未知" }
@@ -2091,12 +2092,15 @@ final class ChargeManager: ObservableObject {
                 : "重启后读到激活的无效固件上限 0/0，且没有可信原始快照；已阻止写入，请保留 Helper 并反馈诊断。"
             isError = true
         } else if state.isInactiveUninitialized {
-            modeText = "固件重启后尚未初始化限充阈值"
+            modeText = "限制充电未启用"
             if state.hasOriginalStateSnapshot || (state.hasReconnectBaseline && state.writeSupported) {
                 statusMessage = "已保留原始固件快照；待连接电源稳定后恢复原先的限充设置。"
                 isError = false
+            } else if state.writeSupported {
+                statusMessage = status
+                isError = false
             } else {
-                statusMessage = "请保持接电，尝试强制重置。若仍未就绪，请重启 Mac。未写入固件。"
+                statusMessage = "当前系统或硬件配置不允许写入新的充电上限。"
                 isError = true
             }
         } else if state.active && state.hasOriginalStateSnapshot {

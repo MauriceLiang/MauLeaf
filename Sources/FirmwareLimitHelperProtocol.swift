@@ -11,6 +11,7 @@ import Foundation
     func cancelOneTimeCharge(withReply reply: @escaping (NSData?, NSString?) -> Void)
     func suspendLimitForReconnect(withReply reply: @escaping (NSData?, NSString?) -> Void)
     func restoreOriginalState(withReply reply: @escaping (NSData?, NSString?) -> Void)
+    func enqueueQuitRecovery(removeComponents: Bool, withReply reply: @escaping (NSData?, NSString?) -> Void)
     func oneTimeChargeStatus(withReply reply: @escaping (NSData?, NSString?) -> Void)
 }
 
@@ -33,7 +34,7 @@ struct FirmwareLimitHelperInfoResponse: Codable, Equatable {
 /// this app. Any mismatch, including a newer Helper, uses the same
 /// service-only uninstall and reinstall path.
 enum FirmwareLimitHelperProtocolVersion {
-    static let current = 8
+    static let current = 9
     static let requiredBuild = FirmwareLimitHelperBuildVersion.current
 
     static func isCompatible(_ installed: Int, build: String? = nil) -> Bool {
@@ -52,7 +53,7 @@ enum FirmwareLimitHelperProtocolVersion {
 /// Increment this build whenever the privileged Helper implementation or
 /// its externally observable behavior changes.
 enum FirmwareLimitHelperBuildVersion {
-    static let current = "1.6.0"
+    static let current = "1.7.0"
 }
 
 struct FirmwareLimitHelperStateResponse: Codable, Equatable {
@@ -88,7 +89,8 @@ struct FirmwareLimitHelperStateResponse: Codable, Equatable {
         snapshot: FirmwareLimitOriginalStateSnapshot? = nil,
         hasReconnectBaseline: Bool = false,
         legacyRestorePending: Bool = false,
-        durableRecoveryRecorded: Bool = true
+        durableRecoveryRecorded: Bool = true,
+        quitRecoveryPending: Bool = false
     ) {
         helperVersion = FirmwareLimitHelperProtocolVersion.current
         helperBuildVersion = FirmwareLimitHelperBuildVersion.current
@@ -99,12 +101,12 @@ struct FirmwareLimitHelperStateResponse: Codable, Equatable {
         hasOriginalStateSnapshot = snapshot != nil
         self.hasReconnectBaseline = hasReconnectBaseline
         restorePending = durableRecoveryRecorded
-            && ((snapshot?.restoreRequested ?? false) || legacyRestorePending)
+            && ((snapshot?.restoreRequested ?? false) || legacyRestorePending || quitRecoveryPending)
         if let identity {
             let identityBlock = FirmwareLimitWritePermit.targetBlockReason(identity: identity)
             // Inactive zero is a measured restorable baseline on the
             // exact allowlisted target; active zero is never writable.
-            writeBlockReason = identityBlock ?? (
+            writeBlockReason = quitRecoveryPending ? "Background quit recovery is pending." : identityBlock ?? (
                 state.isActiveZeroed
                     ? "Active firmware limit has zeroed thresholds; new writes are blocked. Restore the verified original-state snapshot."
                     : nil
@@ -126,7 +128,7 @@ struct FirmwareLimitHelperStateResponse: Codable, Equatable {
             restoreSupported = restoreBlockReason == nil
                 && (!state.isActiveZeroed || (snapshot?.isValid == true))
         } else {
-            writeSupported = state.isValid || state.isInactiveUninitialized
+            writeSupported = !quitRecoveryPending && (state.isValid || state.isInactiveUninitialized)
             writeBlockReason = writeSupported ? nil : "Firmware limits are not initialized or are invalid."
             restoreSupported = !state.isActiveZeroed || (snapshot?.isValid == true)
             restoreBlockReason = restoreSupported ? nil : "No verified original-state snapshot for active zeroed firmware."
@@ -174,6 +176,12 @@ struct FirmwareLimitHelperPlanResponse: Codable, Equatable {
         noOp = plan.isNoOp
         steps = plan.steps.map(\.description)
     }
+}
+
+/// Acknowledgment of durable ownership transfer, NOT hardware restoration.
+struct FirmwareLimitQuitRecoveryResponse: Codable, Equatable {
+    let accepted: Bool
+    let removeComponents: Bool
 }
 
 struct FirmwareLimitHelperOperationResponse: Codable, Equatable {

@@ -48,7 +48,6 @@ jobs:
         env:
           TARGET_ARCH: arm64
           BUILD_NUMBER: '8000'
-          FIX5_CANDIDATE: ${{ github.event.pull_request.number == 59 && github.event.pull_request.head.repo.full_name == github.repository && github.head_ref == 'fix/zero-baseline-initialization' }}
         shell: bash
         run: |
           set -euo pipefail
@@ -62,12 +61,7 @@ jobs:
             | sed -nE 's/^v[0-9]+\.[0-9]+\.[0-9]+-preview\.([0-9]+)$/\1/p' \
             | sort -n | tail -n 1)"
           next_preview=$((${latest:-0} + 1))
-          if [[ "$FIX5_CANDIDATE" == "true" ]]; then
-            [[ "$RELEASE_VERSION" == "1.0.0" ]] || exit 2
-            export RELEASE_LABEL="1.0.0-fix5"
-          else
-            export RELEASE_LABEL="${RELEASE_VERSION}-preview.${next_preview}"
-          fi
+          export RELEASE_LABEL="${RELEASE_VERSION}-preview.${next_preview}"
           echo "PR-only candidate: ${RELEASE_LABEL} (no release tag)"
           bash Scripts/ci/package-macos.sh
           test -s "dist/MauLeaf-${RELEASE_LABEL}-macos-arm64.dmg"
@@ -82,53 +76,6 @@ jobs:
             dist/*.sha256
           if-no-files-found: error
           retention-days: 7
-
-  # One explicitly requested test release from the trusted same-repo fix5 PR.
-  # The exact tested merge commit is tagged; main and stable releases remain unchanged.
-  publish-fix5:
-    if: github.event_name == 'pull_request' && github.event.pull_request.number == 59 && github.event.pull_request.head.repo.full_name == github.repository && github.head_ref == 'fix/zero-baseline-initialization'
-    needs: [test, package-smoke]
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/download-artifact@v4
-        with:
-          name: mauleaf-arm64-pr-59
-          path: artifacts
-      - name: Publish verified fix5 prerelease
-        env:
-          GH_TOKEN: ${{ github.token }}
-          TESTED_SHA: ${{ github.sha }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          tag=v1.0.0-fix5
-          dmg=artifacts/MauLeaf-1.0.0-fix5-macos-arm64.dmg
-          test -s "$dmg"
-          if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            echo "The immutable fix5 release already exists; refusing to overwrite."
-            exit 0
-          fi
-          (cd artifacts && sha256sum MauLeaf-1.0.0-fix5-macos-arm64.dmg > SHA256SUMS.txt)
-          cat > notes.md <<'EOF'
-          ## 简体中文
-          - 退出仅等待 Helper 持久化恢复任务，固件恢复及组件清理由后台执行。
-          - 移除退出时额外的进度卡片；已安装匹配的 Helper 无需重复授权。
-          - 保留原始固件快照、断电恢复和安全卸载校验；Helper 1.7.0。
-          - Apple Silicon (arm64)，macOS 15；测试候选版，仍需真机验证。
-
-          ## English
-          - Fast quit hands a persistent recovery request to the Helper, which restores firmware and handles component cleanup in the background.
-          - Remove the extra quit progress card; no repeated authorization with the matching installed Helper.
-          - Preserve snapshots, power-source guards and verified removal; Helper 1.7.0.
-          - Apple Silicon (arm64), macOS 15; test prerelease, physical-device validation pending.
-          EOF
-          gh release create "$tag" "$dmg" artifacts/SHA256SUMS.txt \
-            --repo "$GITHUB_REPOSITORY" --target "$TESTED_SHA" \
-            --title "MauLeaf 1.0.0-fix5" --notes-file notes.md --prerelease --latest=false
-          gh release view "$tag" --repo "$GITHUB_REPOSITORY" --json url,isPrerelease,assets
 
   prepare:
     if: >-
@@ -310,6 +257,19 @@ jobs:
             printf '\n\nTarget platform: Apple Silicon (arm64) only.\n' >> artifacts/RELEASE_NOTES.md
           fi
           grep -qi 'Apple Silicon' artifacts/RELEASE_NOTES.md
+          # Generate version metadata directly from the tagged release sources.
+          APP_VERSION="$(tr -d '[:space:]' < VERSION)"
+          HELPER_VERSION="$(sed -nE 's/^[[:space:]]*static let current = "([0-9]+\.[0-9]+\.[0-9]+)"$/\1/p' Sources/FirmwareLimitHelperProtocol.swift)"
+          HELPER_PROTOCOL="$(sed -nE 's/^[[:space:]]*static let current = ([0-9]+)$/\1/p' Sources/FirmwareLimitHelperProtocol.swift)"
+          [[ "$APP_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ && "$HELPER_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ && "$HELPER_PROTOCOL" =~ ^[0-9]+$ ]] || exit 1
+          [[ "$RELEASE_LABEL" == "$APP_VERSION" || "$RELEASE_LABEL" == "$APP_VERSION"-preview.* ]] || exit 1
+          {
+            printf '## Version information / 版本信息\n\n'
+            printf -- '- App / 应用版本: **%s**\n- Helper / 后台服务版本: **%s**\n- XPC protocol / 通信协议: **v%s**\n\n' "$APP_VERSION" "$HELPER_VERSION" "$HELPER_PROTOCOL"
+            cat artifacts/RELEASE_NOTES.md
+          } > artifacts/RELEASE_NOTES.with-versions.md
+          mv artifacts/RELEASE_NOTES.with-versions.md artifacts/RELEASE_NOTES.md
+          printf 'Release version: %s; Helper: %s; XPC protocol: v%s\n' "$APP_VERSION" "$HELPER_VERSION" "$HELPER_PROTOCOL"
           test -s "artifacts/MauLeaf-${RELEASE_LABEL}-macos-arm64.dmg"
           if find artifacts -maxdepth 1 -type f | grep -Eq 'x86_64|INTEL'; then
             echo "Intel artifacts are not part of Preview 5." >&2

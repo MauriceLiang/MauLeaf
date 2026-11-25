@@ -12,13 +12,15 @@ It runs as root through the LaunchDaemon com.local.chargecap.firmware-helper. Th
 
 Normal Quit and uninstall do not require AC power. When the device is unplugged, the privileged helper writes a durable restoration request (including the activation-only legacy Preview 4 case) and users may immediately exit or remove MauLeaf.app. A standalone root-owned finalizer, installed outside the app bundle, validates that the limit is inactive and all recovery records are gone before removing the helper and LaunchDaemon after AC reconnects. The main app is not needed for deferred cleanup.
 
-If users explicitly refuse even temporary background recovery, the uninstaller offers a documented two-flag forced removal mode. It immediately deletes the service and snapshots after warning that the hardware charge limit may remain in effect, with no guaranteed restoration. This is never the default.
+There is no forced removal mode; recovery records must be retained until safe restoration is verified.
 
 ## Installation and upgrade
 
-On app launch, MauLeaf performs read-only battery and helper state checks without administrator authorization. If no helper or recovery artifacts exist, battery display and local charge-limit preferences still work. The bundled installer runs only after the user explicitly clicks to enable a charging limit and confirms the firmware action. A stale helper is upgraded on that same explicit action, followed by a fresh XPC firmware state read before any write. If an installed helper is unreachable, the app does not silently install or claim the hardware limit is inactive.
+Helper compatibility is independent of the application version. A compatible Helper is reused. An incompatible protocol or insufficient build triggers an authorized uninstall/reinstall of the bundled Helper, separate from enabling a charge limit.
 
-The installer validates the helper's code-signing identifier and existing LaunchDaemon metadata. It upgrades only an existing helper whose label, path, and signing identifier all match MauLeaf; unrelated same-name services are not overwritten. Snapshot and pending recovery files are preserved during helper upgrades.
+The installer validates the bundled payload, calls the same `uninstall-native-firmware-helper.sh --remove-components` used by normal component removal, and installs only after verified removal. The old installed executable must support the stable CLI contracts `--restore-original-state` and `--verify-clean-and-inactive`; future Helper versions must preserve these commands independently of XPC changes. If restoration cannot be verified, the old Helper and recovery records remain and installation stops. There is no forced deletion fallback.
+
+After replacement, the application reads fresh firmware and job state. An inactive 0/0 state without a trusted snapshot remains read-only; no limit is written merely because installation succeeded.
 
 ## XPC surface
 

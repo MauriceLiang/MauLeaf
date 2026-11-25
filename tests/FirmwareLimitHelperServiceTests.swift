@@ -489,8 +489,7 @@ private enum FirmwareLimitHelperServiceTests {
                      && !FileManager.default.fileExists(atPath: bootSnapshotURL.path),
                      "battery-only active 0/0 recovers exactly under the strict offline permit")
 
-        // Without any snapshot, 0/0 must not be captured as the previous
-        // firmware configuration or authorize a new privileged write.
+        // A measured inactive zero baseline can be captured on the verified target.
         bootTransport.activation = 0
         bootTransport.upper = 0
         bootTransport.lower = 0
@@ -503,15 +502,21 @@ private enum FirmwareLimitHelperServiceTests {
         )
         precondition(noSnapshotState.isInactiveUninitialized
                      && !noSnapshotState.hasOriginalStateSnapshot
-                     && !noSnapshotState.writeSupported,
-                     "unmanaged boot zero/zero remains read-only and blocks new activation")
+                     && noSnapshotState.writeSupported && bootTransport.writes.count == beforeRejected,
+                     "inactive zero is ready for explicit initialization without writing on read")
         var noSnapshotError: NSString?
         noSnapshotService.applyLimit(upper: 80, lower: 78, confirmed: true) {
             _, error in noSnapshotError = error
         }
-        precondition(noSnapshotError != nil && bootTransport.writes.count == beforeRejected
-                     && !FileManager.default.fileExists(atPath: bootSnapshotURL.path),
-                     "unmanaged zero/zero neither writes SMC nor creates an invalid original snapshot")
+        precondition(noSnapshotError == nil && bootTransport.activation == 2
+                     && bootTransport.upper == 80 && bootTransport.lower == 78)
+        let zeroSnapshot = try JSONDecoder().decode(FirmwareLimitOriginalStateSnapshot.self,
+            from: Data(contentsOf: bootSnapshotURL))
+        precondition(zeroSnapshot.state.isInactiveUninitialized && zeroSnapshot.isValid)
+        noSnapshotService.restoreOriginalState { _, error in noSnapshotError = error }
+        precondition(noSnapshotError == nil && bootTransport.activation == 0
+                     && bootTransport.upper == 0 && bootTransport.lower == 0
+                     && !FileManager.default.fileExists(atPath: bootSnapshotURL.path))
 
         // A verified unplug restore retains an inactive baseline only in
         // the same boot. It never treats 0/0 as a real original configuration.
@@ -556,11 +561,6 @@ private enum FirmwareLimitHelperServiceTests {
         precondition(reconnectError == nil && reconnectState.hasReconnectBaseline &&
                      !reconnectState.hasOriginalStateSnapshot && reconnectState.writeSupported &&
                      reconnectTransport.writes.count == writesBeforeReconnectRead)
-        bootID = "test-boot-B"
-        reconnectService().applyLimit(upper: 80, lower: 78, confirmed: true) { _, error in reconnectError = error }
-        precondition(reconnectError != nil && reconnectTransport.writes.count == writesBeforeReconnectRead,
-                     "a prior boot baseline cannot authorize writes")
-        bootID = "test-boot-A"
         reconnectService().applyLimit(upper: 80, lower: 78, confirmed: true) { _, error in reconnectError = error }
         precondition(reconnectError == nil && reconnectTransport.activation == 2 && reconnectTransport.upper == 80)
         reconnectService().restoreOriginalState { _, error in reconnectError = error }
@@ -568,6 +568,22 @@ private enum FirmwareLimitHelperServiceTests {
                      reconnectTransport.upper == 85 && reconnectTransport.lower == 83,
                      "resumed limiting restores the real prior 85/83 baseline, never 0/0")
         precondition(!FileManager.default.fileExists(atPath: reconnectDir.appendingPathComponent("reconnect-baseline.json").path))
+        reconnectTransport.upper = 0
+        reconnectTransport.lower = 0
+        reconnectService().applyLimit(upper: 80, lower: 78, confirmed: true) { _, error in reconnectError = error }
+        precondition(reconnectError == nil)
+        reconnectAC = false
+        let beforeOffline = reconnectTransport.writes.count
+        reconnectService().suspendLimitForReconnect { _, error in reconnectError = error }
+        precondition(reconnectError != nil && reconnectTransport.activation == 0 &&
+                     reconnectTransport.upper == 80 && reconnectTransport.lower == 78 &&
+                     Array(reconnectTransport.writes.dropFirst(beforeOffline)) == ["bfF0=00"],
+                     "offline zero baseline recovery deactivates only, deferring zero writes")
+        reconnectAC = true
+        reconnectService().restoreOriginalState { _, error in reconnectError = error }
+        precondition(reconnectError == nil && reconnectTransport.activation == 0 &&
+                     reconnectTransport.upper == 0 && reconnectTransport.lower == 0,
+                     "AC reconnect completes exact zero restoration")
 
         print("FirmwareLimitHelperServiceTests: PASS (snapshot, offline legacy restore, deferred retry, boot zero recovery, uninstall verification)")
     }

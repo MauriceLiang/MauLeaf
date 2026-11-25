@@ -48,6 +48,7 @@ jobs:
         env:
           TARGET_ARCH: arm64
           BUILD_NUMBER: '8000'
+          FIX2_CANDIDATE: ${{ github.event.pull_request.number == 58 && github.event.pull_request.head.repo.full_name == github.repository && github.head_ref == 'fix/firmware-zero-readiness' }}
         shell: bash
         run: |
           set -euo pipefail
@@ -61,7 +62,12 @@ jobs:
             | sed -nE 's/^v[0-9]+\.[0-9]+\.[0-9]+-preview\.([0-9]+)$/\1/p' \
             | sort -n | tail -n 1)"
           next_preview=$((${latest:-0} + 1))
-          export RELEASE_LABEL="${RELEASE_VERSION}-preview.${next_preview}"
+          if [[ "$FIX2_CANDIDATE" == "true" ]]; then
+            [[ "$RELEASE_VERSION" == "1.0.0" ]] || exit 2
+            export RELEASE_LABEL="1.0.0-fix2"
+          else
+            export RELEASE_LABEL="${RELEASE_VERSION}-preview.${next_preview}"
+          fi
           echo "PR-only candidate: ${RELEASE_LABEL} (no release tag)"
           bash Scripts/ci/package-macos.sh
           test -s "dist/MauLeaf-${RELEASE_LABEL}-macos-arm64.dmg"
@@ -76,6 +82,51 @@ jobs:
             dist/*.sha256
           if-no-files-found: error
           retention-days: 7
+
+  # One explicitly requested test release from the trusted same-repo fix2 PR.
+  # The exact tested merge commit is tagged; main and stable releases remain unchanged.
+  publish-fix2:
+    if: github.event_name == 'pull_request' && github.event.pull_request.number == 58 && github.event.pull_request.head.repo.full_name == github.repository && github.head_ref == 'fix/firmware-zero-readiness'
+    needs: [test, package-smoke]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: mauleaf-arm64-pr-58
+          path: artifacts
+      - name: Publish verified fix2 prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TESTED_SHA: ${{ github.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag=v1.0.0-fix2
+          dmg=artifacts/MauLeaf-1.0.0-fix2-macos-arm64.dmg
+          test -s "$dmg"
+          if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "The immutable fix2 release already exists; refusing to overwrite."
+            exit 0
+          fi
+          (cd artifacts && sha256sum MauLeaf-1.0.0-fix2-macos-arm64.dmg > SHA256SUMS.txt)
+          cat > notes.md <<'EOF'
+          ## 简体中文
+          - 增加强制重置、孤立充满任务清理及可信原始配置恢复。
+          - 修复 Helper 版本不匹配与固件未就绪提示，简化菜单栏反馈。
+          - Apple Silicon (arm64)，macOS 15；测试候选版，仍需真机验证。
+
+          ## English
+          - Add force reset, orphaned full-charge task cleanup and verified reconnect recovery.
+          - Simplify firmware readiness feedback and safely reinstall incompatible Helpers.
+          - Apple Silicon (arm64), macOS 15; test prerelease, physical-device validation pending.
+          EOF
+          gh release create "$tag" "$dmg" artifacts/SHA256SUMS.txt \
+            --repo "$GITHUB_REPOSITORY" --target "$TESTED_SHA" \
+            --title "MauLeaf 1.0.0-fix2" --notes-file notes.md --prerelease --latest=false
+          gh release view "$tag" --repo "$GITHUB_REPOSITORY" --json url,isPrerelease,assets
 
   prepare:
     if: >-

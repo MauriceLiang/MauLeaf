@@ -46,7 +46,7 @@ private enum FirmwareLimitHelperServiceTests {
         )
         precondition(SystemFirmwareReader.decode(Data([0xFF, 0x00])) == nil,
                      "invalid firmware bytes are rejected")
-        let legacyState = Data(#"{ "activationByte": 0, "active": false, "upper": 80, "lower": 78 }"#.utf8)
+        let legacyState = Data(#"{ "activationByte": 0, "active": false, "upper": 80, "lower": 78, "writeSupported": true, "writeBlockReason": null, "hasOriginalStateSnapshot": false, "restorePending": false, "restoreSupported": true, "restoreBlockReason": null }"#.utf8)
         let legacyResponse = try JSONDecoder().decode(FirmwareLimitHelperStateResponse.self, from: legacyState)
         precondition(legacyResponse.helperVersion == 0,
                      "a response from the previously installed helper is detected as outdated")
@@ -83,6 +83,16 @@ private enum FirmwareLimitHelperServiceTests {
             backgroundRecoveryURL: backgroundRecoveryURL,
             monitorEnabled: false
         )
+
+        var helperInfoData: NSData?
+        var helperInfoError: NSString?
+        service.readHelperInfo { data, error in helperInfoData = data; helperInfoError = error }
+        precondition(helperInfoError == nil, "Helper version handshake does not depend on firmware register reads")
+        let helperInfo = try JSONDecoder().decode(
+            FirmwareLimitHelperInfoResponse.self, from: helperInfoData! as Data
+        )
+        precondition(FirmwareLimitHelperProtocolVersion.isCompatible(helperInfo),
+                     "the Helper reports its exact protocol and build version independently")
 
         var stateData: NSData?
         var stateError: NSString?

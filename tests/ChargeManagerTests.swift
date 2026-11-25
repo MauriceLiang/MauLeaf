@@ -198,7 +198,7 @@ private enum ChargeManagerTests {
         try await testUpgradeRequiresExplicitEnable()
         try await testStartupAutoUpgradeReusesCompatibleHelper()
         try await testVerifiedHelperStateReadFailureDoesNotReplaceHelper()
-        try await testStartupAutoUpgradeOutdatedHelperOnce()
+        try await testStartupAutoUpgradeAndLaterMismatch()
         try await testOutdatedBuildWithCompatibleProtocolUpgrades()
         try await testNewerHelperIsReplacedByBundledVersion()
         try await testOutdatedActiveHelperCanBeRepairedWithoutFirmwareWrite()
@@ -910,7 +910,7 @@ private enum ChargeManagerTests {
     }
 
     @MainActor
-    private static func testStartupAutoUpgradeOutdatedHelperOnce() async throws {
+    private static func testStartupAutoUpgradeAndLaterMismatch() async throws {
         let backend = FixtureNativeFirmwareBackend()
         backend.reportedHelperVersion = FirmwareLimitHelperProtocolVersion.current - 1
         var installs = 0

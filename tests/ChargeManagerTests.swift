@@ -197,6 +197,7 @@ private enum ChargeManagerTests {
         try await testUnknownInstalledHelperDoesNotAssumeSafeState()
         try await testUpgradeRequiresExplicitEnable()
         try await testStartupAutoUpgradeReusesCompatibleHelper()
+        try await testVerifiedHelperStateReadFailureDoesNotReplaceHelper()
         try await testStartupAutoUpgradeOutdatedHelperOnce()
         try await testOutdatedBuildWithCompatibleProtocolUpgrades()
         try await testNewerHelperIsReplacedByBundledVersion()
@@ -876,6 +877,25 @@ private enum ChargeManagerTests {
         try check(legacy.helperBuildVersion == nil
                   && !FirmwareLimitHelperProtocolVersion.isCompatible(legacy.helperVersion),
                   "a v6 Helper without a build-version field cannot authorize dynamic writes")
+    }
+
+    @MainActor
+    private static func testVerifiedHelperStateReadFailureDoesNotReplaceHelper() async throws {
+        let backend = FixtureNativeFirmwareBackend()
+        backend.failNextRead = true
+        var installs = 0
+        let manager = ChargeManager(
+            backend: backend,
+            autoInstallNativeHelper: false,
+            autoUpgradeInstalledHelperOnLaunch: true,
+            helperInstallerForTesting: { installs += 1 },
+            helperArtifactsPresent: { true }
+        )
+        manager.start()
+        try await wait { manager.helperStateUnknown && !manager.isBusy }
+        try check(installs == 0 && !manager.helperNeedsUpgrade
+                  && backend.applyCount == 0 && backend.restoreCount == 0,
+                  "a correctly versioned Helper with an unreadable firmware state is not uninstalled or replaced")
     }
 
     @MainActor

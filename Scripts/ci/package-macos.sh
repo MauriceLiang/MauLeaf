@@ -7,7 +7,7 @@ cd "$(dirname "$0")/../.."
 RELEASE_LABEL="${RELEASE_LABEL:-$RELEASE_VERSION}"
 RELEASE_LABEL="${RELEASE_LABEL#v}"
 [[ "$RELEASE_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || exit 2
-[[ "$RELEASE_LABEL" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-preview\.[0-9]+)?$ ]] || exit 2
+[[ "$RELEASE_LABEL" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-preview\.[0-9]+|-fix[0-9]+)?$ ]] || exit 2
 [[ "$TARGET_ARCH" == arm64 ]] || {
   echo "MauLeaf Preview 5 supports Apple Silicon arm64 builds only." >&2
   exit 2

@@ -64,6 +64,17 @@ rollback() {
   trap - EXIT
   if [[ "$rc" -ne 0 && "$replaced" == true ]]; then
     echo "新 Helper 安装未完成，回滚已安装的二进制文件；恢复快照始终保留。" >&2
+    # A failed bootstrap may have partially registered the new job. Remove
+    # that registration before restoring the previous executable and plist.
+    if /bin/launchctl print "system/$LABEL" >/dev/null 2>&1; then
+      /bin/launchctl bootout "system/$LABEL" >/dev/null 2>&1 || true
+      for attempt in {1..20}; do
+        if ! /bin/launchctl print "system/$LABEL" >/dev/null 2>&1; then
+          break
+        fi
+        /bin/sleep 0.25
+      done
+    fi
     if [[ "$had_previous" == true ]]; then
       /usr/bin/install -o root -g wheel -m 755 "$staging/old-helper" "$TARGET" || true
       /usr/bin/install -o root -g wheel -m 644 "$staging/old-plist" "$PLIST_TARGET" || true

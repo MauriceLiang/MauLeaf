@@ -71,7 +71,7 @@ struct FirmwareLimitHelperStateResponse: Codable, Equatable {
     let restoreBlockReason: String?
 
     /// Some firmware boots with inactive activation and zeroed thresholds.
-    /// This is not a valid saved limit and must not become a new snapshot.
+    /// This is an unconfigured state, not an active charge band.
     var isInactiveUninitialized: Bool {
         activationByte == 0x00 && upper == 0 && lower == 0
     }
@@ -102,9 +102,8 @@ struct FirmwareLimitHelperStateResponse: Codable, Equatable {
             && ((snapshot?.restoreRequested ?? false) || legacyRestorePending)
         if let identity {
             let identityBlock = FirmwareLimitWritePermit.targetBlockReason(identity: identity)
-            // On a cold reboot bfF0 can report inactive with bfD0/bfE0
-            // both zero. Do not create a new snapshot from those values.
-            // A valid existing snapshot may be used for managed recovery.
+            // Inactive zero is a measured restorable baseline on the
+            // exact allowlisted target; active zero is never writable.
             writeBlockReason = identityBlock ?? (
                 state.isActiveZeroed
                     ? "Active firmware limit has zeroed thresholds; new writes are blocked. Restore the verified original-state snapshot."

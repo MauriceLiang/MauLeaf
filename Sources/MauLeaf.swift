@@ -1575,9 +1575,6 @@ final class ChargeManager: ObservableObject {
             // For a known inactive old helper, the first click still means
             // Enable (and upgrades the helper first). Do not label it as an
             // update-only action when it would also modify AppleSMC.
-            if currentState?.active == false && !hasOriginalStateSnapshot && !restorePending {
-                return "未启用"
-            }
             return "需要更新"
         }
         if restorePending { return "等待恢复" }
@@ -1643,10 +1640,9 @@ final class ChargeManager: ObservableObject {
         let clean = currentState?.active == false && !hasOriginalStateSnapshot
             && !restorePending && !fullOncePending
         let needsFirstInstall = helperNeedsInstallation && currentState == nil && !helperArtifactsPresent()
-        let needsExplicitUpgrade = false // Replacement is a separate repair action.
         return isAdapterConnected && !isBusy && !isPreparingToQuit && !fullOncePending
             && ((clean && backendReady) || (
-                hardwareWriteBlockReason == nil && (needsFirstInstall || needsExplicitUpgrade)
+                hardwareWriteBlockReason == nil && needsFirstInstall
             ))
     }
 
@@ -1675,7 +1671,6 @@ final class ChargeManager: ObservableObject {
     var canRepairNativeHelper: Bool {
         (helperNeedsUpgrade || helperStateUnknown) && !helperTooNew && helperArtifactsPresent()
             && !isBusy && !isPreparingToQuit
-             
     }
 
     /// All card actions reuse the existing hardware and restore safeguards.
@@ -2113,7 +2108,7 @@ final class ChargeManager: ObservableObject {
 
     /// One attempted upgrade per launch, only for verified older protocols.
     /// macOS explicitly requests admin authorization; no firmware writes.
-    private func upgradeNativeHelperAfterStartupCheck(previous: FirmwareLimitHelperStateResponse) async {
+    private func upgradeNativeHelperAfterStartupCheck(previous _: FirmwareLimitHelperStateResponse) async {
         guard !isBusy, !isPreparingToQuit, helperNeedsUpgrade else { return }
         activeOperation = .repairingHelper
         defer { activeOperation = nil }

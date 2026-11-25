@@ -1643,7 +1643,7 @@ final class ChargeManager: ObservableObject {
         let clean = currentState?.active == false && !hasOriginalStateSnapshot
             && !restorePending && !fullOncePending
         let needsFirstInstall = helperNeedsInstallation && currentState == nil && !helperArtifactsPresent()
-        let needsExplicitUpgrade = helperNeedsUpgrade && clean
+        let needsExplicitUpgrade = false // Replacement is a separate repair action.
         return isAdapterConnected && !isBusy && !isPreparingToQuit && !fullOncePending
             && ((clean && backendReady) || (
                 hardwareWriteBlockReason == nil && (needsFirstInstall || needsExplicitUpgrade)
@@ -1675,7 +1675,7 @@ final class ChargeManager: ObservableObject {
     var canRepairNativeHelper: Bool {
         (helperNeedsUpgrade || helperStateUnknown) && !helperTooNew && helperArtifactsPresent()
             && !isBusy && !isPreparingToQuit
-            && !(helperNeedsUpgrade && canEnableLimit)
+             
     }
 
     /// All card actions reuse the existing hardware and restore safeguards.
@@ -2132,14 +2132,16 @@ final class ChargeManager: ObservableObject {
                     found: state.helperVersion, required: FirmwareLimitHelperProtocolVersion.current
                 )
             }
-            guard (!previous.active || state.active),
-                  (!previous.hasOriginalStateSnapshot || state.hasOriginalStateSnapshot),
-                  (!previous.restorePending || state.restorePending) else {
+            // The shared uninstaller has restored the old firmware state.
+            // A replacement must never inherit an active or pending limit.
+            let once = try await backend.oneTimeChargeStatus()
+            guard !state.active, !state.hasOriginalStateSnapshot,
+                  !state.restorePending, !once.pending else {
                 throw NativeControlError.unsafeStateAfterInstall
             }
-            let once = try await backend.oneTimeChargeStatus()
             updateFromNativeState(state, oneTime: once, status: "原生控制服务已更新并验证。")
             isBusy = false
+            scheduleReconnectLimitResume()
         } catch {
             isBusy = false
             await refreshNativeState()
@@ -2171,8 +2173,13 @@ final class ChargeManager: ObservableObject {
                 )
             }
             let once = try await backend.oneTimeChargeStatus()
+            guard !state.active, !state.hasOriginalStateSnapshot,
+                  !state.restorePending, !once.pending else {
+                throw NativeControlError.unsafeStateAfterInstall
+            }
             updateFromNativeState(state, oneTime: once, status: "原生控制服务已修复。")
             isBusy = false
+            scheduleReconnectLimitResume()
         } catch {
             isBusy = false
             await refreshNativeState()
@@ -2203,7 +2210,7 @@ final class ChargeManager: ObservableObject {
         guard canEnableLimit else { return }
         activeOperation = .enablingLimit
         defer { activeOperation = nil }
-        if helperNeedsInstallation || helperNeedsUpgrade {
+        if helperNeedsInstallation {
             isBusy = true
             isError = false
             statusMessage = "正在安装或更新原生固件服务，需要管理员授权…"
@@ -2223,9 +2230,17 @@ final class ChargeManager: ObservableObject {
                 }
                 let once = try await backend.oneTimeChargeStatus()
                 updateFromNativeState(state, oneTime: once, status: "原生控制服务已就绪。")
-                guard state.writeSupported, !state.active, !state.hasOriginalStateSnapshot,
+                guard !state.active, !state.hasOriginalStateSnapshot,
                       !state.restorePending, !once.pending else {
                     throw NativeControlError.unsafeStateAfterInstall
+                }
+                guard state.writeSupported else {
+                    isBusy = false
+                    statusMessage = state.isInactiveUninitialized
+                        ? "固件未就绪"
+                        : "当前系统或硬件配置不允许写入新的充电上限。"
+                    isError = true
+                    return
                 }
             } catch {
                 isBusy = false
@@ -2776,7 +2791,7 @@ private enum NativeControlError: LocalizedError {
         case .authorizationFailed(let detail):
             return detail
         case .unsafeStateAfterInstall:
-            return "安装后的服务存在活动限充或待恢复任务，拒绝覆盖固件状态。"
+            return "安装后的服务仍存在活动限充、原始快照或待恢复任务，未启用限充。"
         case .outdatedHelper(let found, let required):
             return "MauLeaf 原生固件服务版本过旧（当前协议版本 \(found)，需要 \(required)），请重新启动应用并允许更新服务。"
         case .helperUpgradeFailed(let found, let required):

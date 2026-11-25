@@ -607,6 +607,39 @@ private enum FirmwareLimitHelperServiceTests {
                      reconnectTransport.upper == 0 && reconnectTransport.lower == 0,
                      "a stale reconnect archive cannot replace the measured new boot baseline")
 
+        // The app can exit after the durable acknowledgment. Restarting
+        // the Helper must recover without the app or its XPC connection.
+        reconnectTransport.upper = 0
+        reconnectTransport.lower = 0
+        let quitService = reconnectService()
+        quitService.applyLimit(upper: 80, lower: 78, confirmed: true) { _, error in reconnectError = error }
+        precondition(reconnectError == nil && reconnectTransport.activation == 2)
+        var quitData: NSData?
+        let writesBeforeQuit = reconnectTransport.writes.count
+        quitService.enqueueQuitRecovery(removeComponents: false) { data, error in
+            quitData = data; reconnectError = error
+        }
+        precondition(reconnectError == nil && quitData != nil)
+        let acknowledgment = try JSONDecoder().decode(FirmwareLimitQuitRecoveryResponse.self, from: quitData! as Data)
+        precondition(acknowledgment.accepted && !acknowledgment.removeComponents)
+        let quitMarker = reconnectDir.appendingPathComponent("quit-recovery.pending")
+        precondition(FileManager.default.fileExists(atPath: quitMarker.path)
+                     && reconnectTransport.writes.count == writesBeforeQuit
+                     && reconnectTransport.activation == 2)
+        let restartedQuitService = reconnectService()
+        precondition(restartedQuitService.hasPendingBackgroundRecovery)
+        restartedQuitService.applyLimit(upper: 85, lower: 83, confirmed: true) { _, error in reconnectError = error }
+        precondition(reconnectError != nil && reconnectTransport.writes.count == writesBeforeQuit)
+        reconnectAC = false
+        restartedQuitService.runOneTimeMonitorTickForTesting()
+        precondition(reconnectTransport.activation == 0 && reconnectTransport.upper == 80 &&
+                     FileManager.default.fileExists(atPath: quitMarker.path))
+        reconnectAC = true
+        restartedQuitService.runOneTimeMonitorTickForTesting()
+        precondition(reconnectTransport.activation == 0 && reconnectTransport.upper == 0 &&
+                     reconnectTransport.lower == 0 && !FileManager.default.fileExists(atPath: quitMarker.path))
+        try restartedQuitService.verifyReadyForDeferredRemoval()
+
         print("FirmwareLimitHelperServiceTests: PASS (snapshot, offline legacy restore, deferred retry, boot zero recovery, uninstall verification)")
     }
 }

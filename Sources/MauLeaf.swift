@@ -2202,6 +2202,7 @@ final class ChargeManager: ObservableObject {
             }
             let once = try await backend.oneTimeChargeStatus()
             updateFromNativeState(state, oneTime: once, status: success)
+            attemptedStartupHelperUpgrade = false
             isBusy = false
         } catch {
             isBusy = false
@@ -2279,6 +2280,7 @@ final class ChargeManager: ObservableObject {
                 }
                 let once = try await backend.oneTimeChargeStatus()
                 updateFromNativeState(state, oneTime: once, status: "原生控制服务已就绪。")
+                attemptedStartupHelperUpgrade = false
                 if let reason = helperInstallSafetyBlockReason(state: state, oneTime: once) {
                     throw NativeControlError.unsafeStateAfterInstall(reason)
                 }

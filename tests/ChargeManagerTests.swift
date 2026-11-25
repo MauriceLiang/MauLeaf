@@ -184,6 +184,7 @@ private enum ChargeManagerTests {
         try await testDynamicHoldAboveTargetAndReconnect()
         try await testDynamicHoldSuspendsDuringOneTimeFullCharge()
         try await testUnplugAutomaticallyRestoresAndReplugResumes()
+        try await testUnplugZeroBaselineShowsWaitingWithoutWarning()
         try await testUnplugWithUnsafeBatteryPreservesRecovery()
         try await testUnknownPowerDoesNotRestore()
         try await testOfflineBootRestoresManagedSnapshot()
@@ -661,6 +662,51 @@ private enum ChargeManagerTests {
         try check(stopped, "an already restored and manually disabled app can quit")
         UserDefaults.standard.removeObject(forKey: "desiredChargeLimitEnabled")
         UserDefaults.standard.set(false, forKey: "nativeFirmwareWriteConfirmed")
+    }
+
+    @MainActor
+    private static func testUnplugZeroBaselineShowsWaitingWithoutWarning() async throws {
+        UserDefaults.standard.set(false, forKey: "desiredChargeLimitEnabled")
+        UserDefaults.standard.set(false, forKey: "dynamicHoldEnabled")
+        UserDefaults.standard.set(true, forKey: "nativeFirmwareWriteConfirmed")
+        let backend = FixtureNativeFirmwareBackend()
+        backend.simulateFirmwareBootReset()
+        var battery = MauLeafBatterySnapshot(
+            percent: 88, isCharging: false, isFullyCharged: false,
+            isACConnected: true, precisePercent: 88
+        )
+        let manager = ChargeManager(
+            backend: backend, autoInstallNativeHelper: false,
+            batteryReader: { battery }, observePowerSourceChanges: false,
+            dynamicSettleInterval: 0.01
+        )
+        manager.start()
+        try await wait { manager.canEnableLimit }
+        manager.toggleLimitFromCard()
+        try await wait { backend.state.active && !manager.isBusy }
+        backend.acConnected = false
+        battery = MauLeafBatterySnapshot(
+            percent: 87, isCharging: false, isFullyCharged: false,
+            isACConnected: false, precisePercent: 87
+        )
+        manager.simulatePowerSourceNotificationForTesting()
+        try await wait { backend.restoreCount == 1 && manager.restorePending && !manager.isBusy }
+        try await Task.sleep(nanoseconds: 120_000_000)
+        try check(!backend.state.active && manager.hasOriginalStateSnapshot
+                  && !manager.isError && manager.popoverLimitStatus.source == "等待接电恢复",
+                  "verified inactive pending zero restore uses the status pill without duplicate error feedback")
+        backend.acConnected = true
+        _ = try await backend.restoreOriginalState()
+        battery = MauLeafBatterySnapshot(
+            percent: 75, isCharging: true, isFullyCharged: false,
+            isACConnected: true, precisePercent: 75
+        )
+        manager.simulatePowerSourceNotificationForTesting()
+        try await wait { backend.applyCount == 2 && backend.state.active && !manager.isBusy }
+        manager.toggleLimitFromCard()
+        try await wait { !manager.hasOriginalStateSnapshot && !manager.isBusy }
+        UserDefaults.standard.set(false, forKey: "nativeFirmwareWriteConfirmed")
+        UserDefaults.standard.removeObject(forKey: "desiredChargeLimitEnabled")
     }
 
     @MainActor

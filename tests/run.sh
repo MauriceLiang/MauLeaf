@@ -263,9 +263,13 @@ test -s "$ROOT/docs/releases/v0.8.0.md"
 bash -n "$ROOT/build.command"
 bash -n "$ROOT/Scripts/install-native-firmware-helper.sh"
 bash -n "$ROOT/Scripts/uninstall-native-firmware-helper.sh"
-# Normal quit restores first; Keep retains launchd registration, Remove needs administrator authorization.
+# Normal quit hands a durable job to the Helper; no synchronous restore or administrator prompt.
 # Normal quit must never ask the component policy every time.
-grep -Fq 'let policy = manager.quitComponentPolicy' "$ROOT/Sources/MauLeaf.swift"
+grep -Fq 'await manager.handoffQuitRecovery()' "$ROOT/Sources/MauLeaf.swift"
+grep -Fq 'let remove = quitComponentPolicy == .remove' "$ROOT/Sources/MauLeaf.swift"
+grep -Fq 'enqueueQuitRecovery(removeComponents: remove)' "$ROOT/Sources/MauLeaf.swift"
+grep -Fq 'quit-recovery.pending' "$ROOT/Support/com.local.chargecap.firmware-helper.plist"
+grep -Fq 'try processQuitRecoveryLocked()' "$ROOT/Sources/FirmwareLimitHelperService.swift"
 grep -Fq 'removeComponentsOnQuit ? .remove : .keep' "$ROOT/Sources/MauLeaf.swift"
 if grep -Fq 'question.runModal()' "$ROOT/Sources/MauLeaf.swift"; then
     echo "Normal quit must use the stored policy without a modal chooser" >&2

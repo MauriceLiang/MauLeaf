@@ -50,6 +50,13 @@ private enum FirmwareLimitHelperServiceTests {
         let legacyResponse = try JSONDecoder().decode(FirmwareLimitHelperStateResponse.self, from: legacyState)
         precondition(legacyResponse.helperVersion == 0,
                      "a response from the previously installed helper is detected as outdated")
+        let incompleteLegacyState = Data(#"{ "activationByte": 0, "active": false, "upper": 80, "lower": 78 }"#.utf8)
+        do {
+            _ = try JSONDecoder().decode(FirmwareLimitHelperStateResponse.self, from: incompleteLegacyState)
+            preconditionFailure("incomplete legacy state must not default missing safety flags to a clean state")
+        } catch is DecodingError {
+            // Missing snapshot/recovery/write flags are unknown, never safe defaults.
+        }
 
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent("mauleaf-native-helper-\(UUID().uuidString)", isDirectory: true)

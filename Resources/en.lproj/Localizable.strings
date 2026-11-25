@@ -262,7 +262,7 @@
 "动态保电已应用：目标 %@%%，临时上限 %@%%。" = "Dynamic Hold applied: target %@%%, temporary ceiling %@%%.";
 "退出时移除组件" = "Remove components on quit";
 "开启后每次退出会移除控制组件；关闭则保留。" = "On: remove the helper and scripts when quitting. Off: keep them installed.";
-"建议卸载前开启，退出并确认清理完成后再删除 App。" = "Enable before uninstalling. Quit before deleting.";
+"建议卸载前开启，退出并确认清理完成后再删除 App。" = "Enable before uninstalling. Quit; verify cleanup before deleting.";
 "关闭后保留供电状态，仅隐藏供电流向图" = "When disabled, keep the power status visible and hide only the flow diagram.";
 "显示供电详情" = "Power details";
 "固件异常 · 待恢复" = "Firmware error · Recovery pending";

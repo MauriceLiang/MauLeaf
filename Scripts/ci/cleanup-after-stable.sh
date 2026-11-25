@@ -26,16 +26,33 @@ jq -e --arg dmg "MauLeaf-${STABLE_TAG#v}-macos-arm64.dmg" \
 jq -e '.assets | any(.name == "SHA256SUMS.txt" and .size > 0)' \
   <<< "$stable_json" >/dev/null
 
+# Verify the actual published bytes before destructive cleanup.
+verify_dir="$(mktemp -d)"
+trap 'rm -rf "$verify_dir"' EXIT
+gh release download "$STABLE_TAG" --repo "$REPO" --dir "$verify_dir" \
+  --pattern "MauLeaf-${STABLE_TAG#v}-macos-arm64.dmg" --pattern SHA256SUMS.txt
+(
+  cd "$verify_dir"
+  expected="MauLeaf-${STABLE_TAG#v}-macos-arm64.dmg"
+  [[ "$(wc -l < SHA256SUMS.txt)" -eq 1 ]]
+  grep -Eq "^[0-9a-fA-F]{64}  ${expected//./\\.}$" SHA256SUMS.txt
+  sha256sum --check --strict SHA256SUMS.txt
+)
+
 # Only remove preview tags explicitly superseded by this verified stable
 # release. The 1.0.0 milestone also absorbs the 0.8.1 and 0.9.1 preview
 # sequences; preserve all previously published stable releases and their tags.
 preview_prefixes=("$STABLE_TAG-preview.")
-if [[ "$STABLE_TAG" == "v1.0.0" ]]; then
+if [[ "$STABLE_TAG" == "v1.0.0" || "$STABLE_TAG" == "v1.1.0" ]]; then
   preview_prefixes+=("v0.8.1-preview." "v0.9.1-preview.")
+fi
+if [[ "$STABLE_TAG" == "v1.1.0" ]]; then
+  preview_prefixes+=("v1.0.0-preview." "v1.0.0-fix")
 fi
 superseded_preview() {
   local tag="$1" prefix
-  [[ "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+-preview\.[0-9]+$ ]] || return 1
+  [[ "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+-preview\.[0-9]+$ ||
+     ( "$STABLE_TAG" == "v1.1.0" && "$tag" =~ ^v1\.0\.0-fix[0-9]+$ ) ]] || return 1
   for prefix in "${preview_prefixes[@]}"; do
     [[ "$tag" == "$prefix"* ]] && return 0
   done
@@ -90,6 +107,24 @@ while IFS=$'\t' read -r name sha; do
     [[ "$(gh api "repos/$REPO/pulls/44" --jq '.head.sha')" == "$sha" ]] || exit 5
     [[ "$(gh api "repos/$REPO/issues/53" --jq '.state')" == "open" ]] || exit 5
     echo "Removing superseded diagnostic branch from closed PR #44; issue #53 tracks follow-up"
+    gh api -X DELETE "repos/$REPO/git/refs/heads/$name" >/dev/null
+    branch_removed=$((branch_removed + 1))
+  elif [[ "$STABLE_TAG" == "v1.1.0" ]] &&
+       { [[ "$name" == "fix/helper-reinstall-on-version-mismatch" && "$sha" == "dd1b032bff673b949925789e02f6f95349be8706" ]] ||
+         [[ "$name" == "fix/helper-reinstall-lifecycle" && "$sha" == "17788728b49431c3fb009a1a90a7622f46dc9c36" ]]; }; then
+    # Closed PRs #56 and #57 were explicitly superseded by merged #58.
+    # Only remove the exact unchanged heads, and never an open PR.
+    if [[ "$name" == "fix/helper-reinstall-on-version-mismatch" ]]; then
+      pr=56
+    else
+      pr=57
+    fi
+    [[ "$(gh api "repos/$REPO/pulls/$pr" --jq '.state')" == "closed" ]] || exit 5
+    [[ "$(gh api "repos/$REPO/pulls/$pr" --jq '.head.sha')" == "$sha" ]] || exit 5
+    [[ "$(gh api "repos/$REPO/pulls/58" --jq '.merged')" == "true" ]] || exit 5
+    open_count="$(gh api --method GET "repos/$REPO/pulls" -f state=open -f head="MauriceLiang:$name" --jq 'length')"
+    [[ "$open_count" == "0" ]] || exit 5
+    echo "Removing superseded, unchanged branch from PR #$pr: $name"
     gh api -X DELETE "repos/$REPO/git/refs/heads/$name" >/dev/null
     branch_removed=$((branch_removed + 1))
   else

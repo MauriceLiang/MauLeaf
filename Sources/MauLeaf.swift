@@ -838,7 +838,7 @@ struct ContentView: View {
                 .accessibilityLabel(manager.text("显示供电详情"))
                 .help(manager.text("关闭后保留供电状态，仅隐藏供电流向图"))
             }
-            .frame(minHeight: 30)
+            .frame(minHeight: 26)
 
             HStack(spacing: 8) {
                 settingsLabel("界面语言")
@@ -854,7 +854,7 @@ struct ContentView: View {
                 .accessibilityLabel(manager.text("界面语言"))
                 .help(manager.text("切换界面语言"))
             }
-            .frame(minHeight: 30)
+            .frame(minHeight: 26)
 
             HStack(spacing: 8) {
                 settingsLabel("动态保电")
@@ -876,7 +876,7 @@ struct ContentView: View {
                     ? "本次充满期间不可修改动态保电"
                     : "高于目标时保持电量；关闭后在已测试机型上可能出现拔电识别延迟"))
             }
-            .frame(minHeight: 30)
+            .frame(minHeight: 26)
             Text(manager.text("超限时保持电量；关闭后拔电识别可能延迟（已测试机型）。"))
                 .font(.caption2)
                 .foregroundStyle(.secondary)
@@ -909,7 +909,7 @@ struct ContentView: View {
                 .accessibilityLabel(manager.text("退出时移除组件"))
                 .help(manager.text("开启后每次退出会移除控制组件；关闭则保留。"))
             }
-            .frame(minHeight: 30)
+            .frame(minHeight: 26)
             Text(manager.text("建议卸载前开启，退出并确认清理完成后再删除 App。"))
                 .font(.caption2)
                 .foregroundStyle(.secondary)
@@ -921,7 +921,7 @@ struct ContentView: View {
                     .controlSize(.small)
                     .disabled(!manager.canForceReset)
             }
-            .frame(minHeight: 30)
+            .frame(minHeight: 26)
         }
         .padding(.vertical, 2)
     }

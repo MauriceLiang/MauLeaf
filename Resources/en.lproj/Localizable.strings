@@ -322,3 +322,13 @@
 "充电控制已重置，所有充电任务已取消，可重新启用限充。" = "Charge control reset. All charging tasks were cancelled; limiting can be enabled again.";
 
 "充电任务已清除，但固件阈值仍未就绪。请保持接电并重新检测，必要时重启 Mac。" = "Charging tasks cleared, but firmware thresholds are not ready. Keep AC connected and recheck; restart your Mac if necessary.";
+
+"详情" = "Details";
+
+"重置未完成" = "Reset incomplete";
+
+"取消充电任务并恢复原始配置。恢复失败时保留恢复数据。" = "Cancel charging tasks and restore the original settings. Recovery data is kept if restoration fails.";
+
+"请保持接电，尝试强制重置。若仍未就绪，请重启 Mac。未写入固件。" = "Keep AC connected and try Force Reset. If still unavailable, restart your Mac. No firmware was written.";
+
+"任务已清除，固件仍未就绪。请保持接电，必要时重启 Mac。" = "Tasks cleared; firmware is not ready. Keep AC connected and restart your Mac if needed.";

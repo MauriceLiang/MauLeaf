@@ -12,6 +12,7 @@ final class FixtureNativeFirmwareBackend: NativeFirmwareBackend {
         architecture: "arm64"
     )
     private var originalSnapshot: FirmwareLimitOriginalStateSnapshot?
+    private var reconnectBaseline: FirmwareLimitOriginalStateSnapshot?
 
     var state = FirmwareLimitHelperStateResponse(
         state: FirmwareLimitState(activationByte: 0x00, upper: 80, lower: 78)
@@ -26,6 +27,7 @@ final class FixtureNativeFirmwareBackend: NativeFirmwareBackend {
     var failNextRead = false
     var failLegacyZeroReadOnce = false
     var helperAvailable = true
+    var helperInfoAvailable = true
     var reportedHelperVersion: Int?
     var reportedHelperBuildVersion: String?
     var readCount = 0
@@ -39,9 +41,29 @@ final class FixtureNativeFirmwareBackend: NativeFirmwareBackend {
     /// Simulates a reboot on firmware that resets bfD0/bfE0 to zero
     /// while the root-owned original snapshot survives.
     func simulateFirmwareBootReset() {
+        reconnectBaseline = nil
         state = FirmwareLimitHelperStateResponse(
             state: FirmwareLimitState(activationByte: 0, upper: 0, lower: 0),
             identity: identity, snapshot: originalSnapshot
+        )
+    }
+
+    func simulateReconnectZero() {
+        state = FirmwareLimitHelperStateResponse(
+            state: FirmwareLimitState(activationByte: 0, upper: 0, lower: 0),
+            identity: identity, snapshot: originalSnapshot,
+            hasReconnectBaseline: reconnectBaseline != nil
+        )
+    }
+
+    func readHelperInfo() async throws -> FirmwareLimitHelperInfoResponse {
+        guard helperAvailable else { throw FirmwareLimitHelperClientError.serviceUnavailable }
+        guard helperInfoAvailable else {
+            throw FirmwareLimitHelperClientError.remote("Installed Helper does not expose the required version handshake.")
+        }
+        return FirmwareLimitHelperInfoResponse(
+            protocolVersion: reportedHelperVersion ?? state.helperVersion,
+            buildVersion: reportedHelperBuildVersion ?? state.helperBuildVersion ?? "0.0.0"
         )
     }
 
@@ -79,15 +101,20 @@ final class FixtureNativeFirmwareBackend: NativeFirmwareBackend {
             throw FixtureBackendError.injected
         }
         if originalSnapshot == nil {
-            originalSnapshot = try! FirmwareLimitOriginalStateSnapshot(
-                deviceIdentity: identity,
-                state: FirmwareLimitState(
-                    activationByte: state.activationByte,
-                    upper: state.upper,
-                    lower: state.lower
+            if state.isInactiveUninitialized, let reconnectBaseline {
+                originalSnapshot = reconnectBaseline
+            } else {
+                originalSnapshot = try FirmwareLimitOriginalStateSnapshot(
+                    deviceIdentity: identity,
+                    state: FirmwareLimitState(
+                        activationByte: state.activationByte,
+                        upper: state.upper,
+                        lower: state.lower
+                    )
                 )
-            )
+            }
         }
+        reconnectBaseline = nil
         state = FirmwareLimitHelperStateResponse(
             state: FirmwareLimitState(activationByte: 0x02, upper: upper, lower: lower),
             identity: identity,
@@ -134,13 +161,26 @@ final class FixtureNativeFirmwareBackend: NativeFirmwareBackend {
         )
     }
 
+    func suspendLimitForReconnect() async throws -> FirmwareLimitHelperOperationResponse {
+        let baseline = originalSnapshot
+        let restored = try await restoreOriginalState()
+        if let baseline, !restored.state.active, !restored.state.hasOriginalStateSnapshot {
+            reconnectBaseline = baseline
+            state = FirmwareLimitHelperStateResponse(
+                state: baseline.state, identity: identity, hasReconnectBaseline: true
+            )
+        }
+        return FirmwareLimitHelperOperationResponse(state: state, oneTimePending: pending, message: restored.message)
+    }
+
     func restoreOriginalState() async throws -> FirmwareLimitHelperOperationResponse {
+        reconnectBaseline = nil
         restoreCount += 1
         if failNextRestore {
             failNextRestore = false
             throw FixtureBackendError.injected
         }
-        if !acConnected && (originalSnapshot == nil || !offlineRestoreAllowed) {
+        if !acConnected && (state.active || originalSnapshot != nil) && (originalSnapshot == nil || !offlineRestoreAllowed) {
             if var snapshot = originalSnapshot {
                 snapshot.restoreRequested = true
                 originalSnapshot = snapshot

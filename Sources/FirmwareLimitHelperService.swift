@@ -7,6 +7,12 @@ private struct FirmwareLimitLegacyRestoreRequest: Codable {
     let requestedAt: Date
 }
 
+/// A previously verified inactive original configuration from this boot only.
+private struct FirmwareReconnectBaseline: Codable {
+    let bootSession: String
+    let snapshot: FirmwareLimitOriginalStateSnapshot
+}
+
 /// Privileged native firmware controller. The app never receives a raw SMC
 /// transport; every write is guarded and verified inside this root process.
 final class FirmwareLimitHelperService: NSObject, FirmwareLimitHelperProtocol {
@@ -19,6 +25,8 @@ final class FirmwareLimitHelperService: NSObject, FirmwareLimitHelperProtocol {
     private let isChargingNow: () -> Bool
     private let jobURL: URL
     private let originalStateURL: URL
+    private let reconnectBaselineURL: URL
+    private let bootSessionProvider: () -> String?
     private let restoreRequestURL: URL
     private let backgroundRecoveryURL: URL
     private let legacyRestoreURL: URL
@@ -55,6 +63,7 @@ final class FirmwareLimitHelperService: NSObject, FirmwareLimitHelperProtocol {
         legacyRestoreURL: URL = URL(fileURLWithPath: "/Library/Application Support/MauLeaf/legacy-restore.json"),
         deferredUninstallURL: URL = URL(fileURLWithPath: "/Library/Application Support/MauLeaf/deferred-uninstall.pending"),
         deferredUninstallScriptURL: URL = URL(fileURLWithPath: "/Library/Application Support/MauLeaf/complete-deferred-uninstall.sh"),
+        bootSessionProvider: @escaping () -> String? = FirmwareLimitRuntime.bootSessionID,
         now: @escaping () -> Date = Date.init,
         monitorEnabled: Bool = true
     ) {
@@ -67,6 +76,8 @@ final class FirmwareLimitHelperService: NSObject, FirmwareLimitHelperProtocol {
         self.isChargingNow = isChargingNow
         self.jobURL = jobURL
         self.originalStateURL = originalStateURL
+        self.reconnectBaselineURL = originalStateURL.deletingLastPathComponent().appendingPathComponent("reconnect-baseline.json")
+        self.bootSessionProvider = bootSessionProvider
         self.restoreRequestURL = restoreRequestURL
         self.backgroundRecoveryURL = backgroundRecoveryURL
         self.legacyRestoreURL = legacyRestoreURL
@@ -126,6 +137,17 @@ final class FirmwareLimitHelperService: NSObject, FirmwareLimitHelperProtocol {
             || originalStateSnapshot?.restoreRequested == true
             || legacyRestoreRequest != nil
             || FileManager.default.fileExists(atPath: deferredUninstallURL.path)
+    }
+
+    /// Version discovery is independent of SMC reads and recovery-file validity.
+    /// Older Helpers that do not implement this method are treated as a
+    /// version mismatch by the app and replaced from its bundled resources.
+    func readHelperInfo(withReply reply: @escaping (NSData?, NSString?) -> Void) {
+        do {
+            reply(try JSONEncoder().encode(FirmwareLimitHelperInfoResponse.current) as NSData, nil)
+        } catch {
+            reply(nil, error.localizedDescription as NSString)
+        }
     }
 
     func readState(withReply reply: @escaping (NSData?, NSString?) -> Void) {
@@ -303,6 +325,24 @@ final class FirmwareLimitHelperService: NSObject, FirmwareLimitHelperProtocol {
         }
     }
 
+    /// Physical disconnect: restore the exact original state, retain only a
+    /// same-boot, identity-bound baseline for the next authorized AC session.
+    func suspendLimitForReconnect(withReply reply: @escaping (NSData?, NSString?) -> Void) {
+        do {
+            let response = try withHardwareWatchdog {
+                guard isAdministrator(), batteryObservation().externalConnected == false,
+                      pmsetReportsBatteryPower(), !isChargingNow(),
+                      !FileManager.default.fileExists(atPath: deferredUninstallURL.path) else {
+                    throw FirmwareLimitCoreError.transportFailure("Cannot verify a battery-only disconnect; no reconnect baseline was created.")
+                }
+                return try restoreOriginalStateLocked(retainReconnectBaseline: true)
+            }
+            reply(try JSONEncoder().encode(response) as NSData, nil)
+        } catch {
+            reply(nil, error.localizedDescription as NSString)
+        }
+    }
+
     func restoreOriginalState(withReply reply: @escaping (NSData?, NSString?) -> Void) {
         do {
             let response = try withHardwareWatchdog {
@@ -337,7 +377,8 @@ final class FirmwareLimitHelperService: NSObject, FirmwareLimitHelperProtocol {
               !FileManager.default.fileExists(atPath: originalStateURL.path),
               !FileManager.default.fileExists(atPath: legacyRestoreURL.path),
               !FileManager.default.fileExists(atPath: restoreRequestURL.path),
-              !FileManager.default.fileExists(atPath: jobURL.path) else {
+              !FileManager.default.fileExists(atPath: jobURL.path),
+              !FileManager.default.fileExists(atPath: reconnectBaselineURL.path) else {
             throw FirmwareLimitCoreError.transportFailure(
                 "Pending or unverified firmware recovery data still exists."
             )
@@ -389,6 +430,7 @@ final class FirmwareLimitHelperService: NSObject, FirmwareLimitHelperProtocol {
             state: state,
             identity: identityProvider(),
             snapshot: snapshot,
+            hasReconnectBaseline: snapshot == nil && verifiedReconnectBaseline() != nil,
             legacyRestorePending: legacyPending,
             durableRecoveryRecorded: FileManager.default.fileExists(
                 atPath: backgroundRecoveryURL.path
@@ -420,27 +462,49 @@ final class FirmwareLimitHelperService: NSObject, FirmwareLimitHelperProtocol {
         guard !previous.isActive else {
             throw FirmwareLimitCoreError.legacyActiveStateWithoutSnapshot
         }
-        // Inactive zero/zero after reboot is not a valid pre-install
-        // firmware state and must NEVER become an original snapshot.
-        guard previous.isValid else {
+        // Prefer a valid current hardware state. Only inactive 0/0 may
+        // use a root-owned, same-boot baseline verified at unplug.
+        let snapshot: FirmwareLimitOriginalStateSnapshot
+        if previous.isValid {
+            snapshot = try FirmwareLimitOriginalStateSnapshot(
+                deviceIdentity: identityProvider(), state: previous
+            )
+        } else if previous.isInactiveUninitialized,
+                  let baseline = verifiedReconnectBaseline(),
+                  !FileManager.default.fileExists(atPath: deferredUninstallURL.path) {
+            snapshot = baseline
+        } else {
             throw FirmwareLimitCoreError.invalidStoredBand(upper: previous.upper, lower: previous.lower)
         }
-        let snapshot = try FirmwareLimitOriginalStateSnapshot(
-            deviceIdentity: identityProvider(),
-            state: previous
-        )
         try persistOriginalStateSnapshot(snapshot)
+        try clearReconnectBaseline()
         return snapshot
     }
 
-    private func restoreOriginalStateLocked() throws -> FirmwareLimitHelperOperationResponse {
+    private func restoreOriginalStateLocked(retainReconnectBaseline: Bool = false) throws -> FirmwareLimitHelperOperationResponse {
         guard originalSnapshotLoadError == nil else {
             throw FirmwareLimitCoreError.invalidOriginalSnapshot
         }
 
         stateLock.lock()
-        let snapshot = originalStateSnapshot
+        var snapshot = originalStateSnapshot
         stateLock.unlock()
+
+        // An explicitly requested reset may restore a verified suspended
+        // baseline if the live firmware became inactive 0/0. Promote it
+        // durably before clearing the archive. Never invent thresholds.
+        if !retainReconnectBaseline, snapshot == nil,
+           let baseline = verifiedReconnectBaseline(),
+           let live = try? controller.readState(), live.isInactiveUninitialized {
+            try persistOriginalStateSnapshot(baseline)
+            snapshot = baseline
+        }
+
+        if !retainReconnectBaseline {
+            // Explicit disable, quit and the stable uninstall CLI end the
+            // suspended session. The archive is never an active restore job.
+            try clearReconnectBaseline()
+        }
 
         if let snapshot {
             guard snapshot.isValid,
@@ -454,9 +518,8 @@ final class FirmwareLimitHelperService: NSObject, FirmwareLimitHelperProtocol {
             var requested = snapshot
             requested.restoreRequested = true
             try persistOriginalStateSnapshot(requested)
-            setPendingJob(nil)
-            removePersistedJob()
             startMonitoring()
+            try clearFullChargeJobForRestore()
 
             let current = try readStateForDisplay()
             // Even active zeroed thresholds may be restored from a verified
@@ -479,6 +542,14 @@ final class FirmwareLimitHelperService: NSObject, FirmwareLimitHelperProtocol {
                         _ = try writeRestorePermit(for: requested)
                     }
                 )
+            }
+            if retainReconnectBaseline, !restored.isActive,
+               restored == snapshot.state, let boot = bootSessionProvider(), !boot.isEmpty {
+                var baseline = snapshot
+                baseline.restoreRequested = false
+                let data = try JSONEncoder().encode(FirmwareReconnectBaseline(bootSession: boot, snapshot: baseline))
+                try data.write(to: reconnectBaselineURL, options: .atomic)
+                try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: reconnectBaselineURL.path)
             }
             try removePersistedOriginalStateSnapshot()
             stopMonitoringIfIdle()
@@ -511,9 +582,8 @@ final class FirmwareLimitHelperService: NSObject, FirmwareLimitHelperProtocol {
                 throw FirmwareLimitCoreError.originalStateDeviceMismatch
             }
             try persistLegacyRestoreRequest(request)
-            setPendingJob(nil)
-            removePersistedJob()
             startMonitoring()
+            try clearFullChargeJobForRestore()
 
             let permit = try writeLegacyDisablePermit()
             let inactive = try controller.deactivate(permit: permit)
@@ -527,8 +597,13 @@ final class FirmwareLimitHelperService: NSObject, FirmwareLimitHelperProtocol {
             )
         }
 
+        // Inactive firmware needs no SMC write to abandon a stale charge
+        // job. Remove the durable record before clearing the in-memory job.
+        if FileManager.default.fileExists(atPath: jobURL.path) {
+            try FileManager.default.removeItem(at: jobURL)
+        }
         setPendingJob(nil)
-        removePersistedJob()
+        removeBackgroundRecoveryMarkerIfIdle()
         if legacyRestoreRequest != nil {
             try removeLegacyRestoreRequest()
         }
@@ -636,6 +711,32 @@ final class FirmwareLimitHelperService: NSObject, FirmwareLimitHelperProtocol {
                 userConfirmed: true
             )
         )
+    }
+
+    private func verifiedReconnectBaseline() -> FirmwareLimitOriginalStateSnapshot? {
+        guard let boot = bootSessionProvider(), !boot.isEmpty,
+              !FileManager.default.fileExists(atPath: restoreRequestURL.path),
+              !FileManager.default.fileExists(atPath: jobURL.path),
+              !FileManager.default.fileExists(atPath: legacyRestoreURL.path),
+              !FileManager.default.fileExists(atPath: deferredUninstallURL.path),
+              let attrs = try? FileManager.default.attributesOfItem(atPath: reconnectBaselineURL.path),
+              attrs[.type] as? FileAttributeType == .typeRegular,
+              (attrs[.ownerAccountID] as? NSNumber)?.uint32Value == geteuid(),
+              (attrs[.posixPermissions] as? NSNumber)?.intValue == 0o600,
+              let data = try? Data(contentsOf: reconnectBaselineURL),
+              let baseline = try? JSONDecoder().decode(FirmwareReconnectBaseline.self, from: data),
+              baseline.bootSession == boot, baseline.snapshot.isValid,
+              !baseline.snapshot.state.isActive, !baseline.snapshot.restoreRequested,
+              FirmwareLimitWritePermit.targetBlockReason(identity: identityProvider()) == nil,
+              FirmwareLimitWritePermit.restoreBlockReason(identity: identityProvider(), snapshotIdentity: baseline.snapshot.deviceIdentity) == nil
+        else { return nil }
+        return baseline.snapshot
+    }
+
+    private func clearReconnectBaseline() throws {
+        if FileManager.default.fileExists(atPath: reconnectBaselineURL.path) {
+            try FileManager.default.removeItem(at: reconnectBaselineURL)
+        }
     }
 
     private func persistOriginalStateSnapshot(
@@ -773,6 +874,29 @@ final class FirmwareLimitHelperService: NSObject, FirmwareLimitHelperProtocol {
             return
         }
 
+        // An orphaned full-charge job cannot authorize a new limit.
+        // If no trustworthy original snapshot survives, only clear a
+        // stale job after verifying that the hardware is already inactive.
+        guard let snapshot, snapshot.isValid, !snapshot.restoreRequested,
+              FirmwareLimitWritePermit.restoreBlockReason(
+                  identity: identityProvider(), snapshotIdentity: snapshot.deviceIdentity
+              ) == nil else {
+            if originalSnapshotLoadError == nil, legacyRestoreLoadError == nil,
+               snapshot == nil, let live = try? controller.readState(), !live.isActive {
+                do {
+                    if FileManager.default.fileExists(atPath: jobURL.path) {
+                        try FileManager.default.removeItem(at: jobURL)
+                    }
+                    setPendingJob(nil)
+                    removeBackgroundRecoveryMarkerIfIdle()
+                    stopMonitoringIfIdle()
+                } catch {
+                    NSLog("MauLeaf orphan job cleanup will retry: %@", error.localizedDescription)
+                }
+            }
+            return
+        }
+
         let observation = batteryObservation()
         let decision = FirmwareLimitOneTimeChargeCoordinator.decision(
             job: job,
@@ -822,6 +946,14 @@ final class FirmwareLimitHelperService: NSObject, FirmwareLimitHelperProtocol {
         return job
     }
 
+    private func clearFullChargeJobForRestore() throws {
+        if FileManager.default.fileExists(atPath: jobURL.path) {
+            try FileManager.default.removeItem(at: jobURL)
+        }
+        setPendingJob(nil)
+        removeBackgroundRecoveryMarkerIfIdle()
+    }
+
     private func removePersistedJob() {
         try? FileManager.default.removeItem(at: jobURL)
         removeBackgroundRecoveryMarkerIfIdle()
@@ -851,6 +983,8 @@ final class FirmwareLimitHelperService: NSObject, FirmwareLimitHelperProtocol {
               !FileManager.default.fileExists(atPath: restoreRequestURL.path),
               let firmware = try? controller.readState(),
               !firmware.isActive else { return }
+        // A deferred full removal ends any suspended session as well.
+        do { try clearReconnectBaseline() } catch { return }
 
         let process = Process()
         process.executableURL = deferredUninstallScriptURL

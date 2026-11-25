@@ -1,10 +1,12 @@
 import Foundation
 
 protocol NativeFirmwareBackend {
+    func readHelperInfo() async throws -> FirmwareLimitHelperInfoResponse
     func readState() async throws -> FirmwareLimitHelperStateResponse
     func applyLimit(upper: Int, lower: Int, confirmed: Bool) async throws -> FirmwareLimitHelperOperationResponse
     func beginOneTimeCharge(upper: Int, lower: Int, confirmed: Bool) async throws -> FirmwareLimitHelperOperationResponse
     func cancelOneTimeCharge() async throws -> FirmwareLimitHelperOperationResponse
+    func suspendLimitForReconnect() async throws -> FirmwareLimitHelperOperationResponse
     func restoreOriginalState() async throws -> FirmwareLimitHelperOperationResponse
     func oneTimeChargeStatus() async throws -> FirmwareLimitHelperOneTimeStatusResponse
 }
@@ -30,6 +32,10 @@ enum FirmwareLimitHelperClientError: Error, LocalizedError {
 final class FirmwareLimitHelperClient: NativeFirmwareBackend {
     private let serviceName = "com.local.chargecap.firmware-helper"
 
+    func readHelperInfo() async throws -> FirmwareLimitHelperInfoResponse {
+        try await request { proxy, reply in proxy.readHelperInfo(withReply: reply) }
+    }
+
     func readState() async throws -> FirmwareLimitHelperStateResponse {
         try await request { proxy, reply in proxy.readState(withReply: reply) }
     }
@@ -48,6 +54,10 @@ final class FirmwareLimitHelperClient: NativeFirmwareBackend {
 
     func cancelOneTimeCharge() async throws -> FirmwareLimitHelperOperationResponse {
         try await request { proxy, reply in proxy.cancelOneTimeCharge(withReply: reply) }
+    }
+
+    func suspendLimitForReconnect() async throws -> FirmwareLimitHelperOperationResponse {
+        try await request { proxy, reply in proxy.suspendLimitForReconnect(withReply: reply) }
     }
 
     func restoreOriginalState() async throws -> FirmwareLimitHelperOperationResponse {

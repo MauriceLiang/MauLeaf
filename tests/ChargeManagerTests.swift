@@ -189,7 +189,8 @@ private enum ChargeManagerTests {
         try await testOfflineBootRestoresManagedSnapshot()
         try await testManagedBootZeroRecovery()
         try await testUnmanagedBootZeroNoWrite()
-        try await testLegacyHelperZeroReadUpgradesOnce()
+        try await testForceResetOrphanFullCharge()
+        try await testLegacyHelperWithoutHandshakeReinstallsOnce()
         try await testImmediatePowerEventRefresh()
         try await testFirstLaunchDefersAuthorization()
         try await testVisiblePanelPowerTimer()
@@ -197,9 +198,10 @@ private enum ChargeManagerTests {
         try await testUnknownInstalledHelperDoesNotAssumeSafeState()
         try await testUpgradeRequiresExplicitEnable()
         try await testStartupAutoUpgradeReusesCompatibleHelper()
-        try await testStartupAutoUpgradeOutdatedHelperOnce()
+        try await testVerifiedHelperStateReadFailureDoesNotReplaceHelper()
+        try await testStartupAutoUpgradeAndLaterMismatch()
         try await testOutdatedBuildWithCompatibleProtocolUpgrades()
-        try await testNewerHelperCannotBeDowngraded()
+        try await testNewerHelperIsReplacedByBundledVersion()
         try await testOutdatedActiveHelperCanBeRepairedWithoutFirmwareWrite()
         try await testInstallFailureDoesNotWriteFirmware()
         try await testAutomaticQuitRestore()
@@ -490,21 +492,58 @@ private enum ChargeManagerTests {
         try await Task.sleep(nanoseconds: 180_000_000)
         try check(manager.popoverLimitStatus.source == "固件未就绪"
                   && !manager.hasOriginalStateSnapshot
-                  && backend.applyCount == 0 && !manager.canEnableLimit,
-                  "without a valid pre-install snapshot, 0/0 remains read-only and must not auto-write")
+                  && backend.applyCount == 0 && !manager.canEnableLimit
+                  && manager.canToggleLimitFromCard,
+                  "without a valid pre-install snapshot, 0/0 remains read-only but offers recheck")
+        let reads = backend.readCount
+        manager.toggleLimitFromCard()
+        try await wait { backend.readCount > reads }
+        try check(backend.applyCount == 0, "rechecking uninitialized firmware never writes SMC")
         UserDefaults.standard.set(false, forKey: "nativeFirmwareWriteConfirmed")
     }
 
     @MainActor
-    private static func testLegacyHelperZeroReadUpgradesOnce() async throws {
+    private static func testForceResetOrphanFullCharge() async throws {
+        UserDefaults.standard.set(true, forKey: "desiredChargeLimitEnabled")
+        UserDefaults.standard.set(true, forKey: "nativeFirmwareWriteConfirmed")
+        let backend = FixtureNativeFirmwareBackend()
+        backend.simulateFirmwareBootReset()
+        backend.pending = true
+        let battery = MauLeafBatterySnapshot(
+            percent: 70, isCharging: true, isFullyCharged: false,
+            isACConnected: true, precisePercent: 70
+        )
+        let manager = ChargeManager(
+            backend: backend, autoInstallNativeHelper: false,
+            batteryReader: { battery }, observePowerSourceChanges: false
+        )
+        manager.start()
+        try await wait { manager.currentState?.isInactiveUninitialized == true && manager.fullOncePending }
+        try check(manager.canForceReset, "reset remains available with orphaned charge job")
+        manager.requestForceReset()
+        try check(manager.showForceResetConfirmation, "force reset requires confirmation")
+        manager.confirmForceReset()
+        try await wait { backend.restoreCount == 1 && !manager.isBusy }
+        try check(!backend.pending && !manager.fullOncePending && !backend.state.active
+                  && backend.applyCount == 0 && !manager.backendReady
+                  && !UserDefaults.standard.bool(forKey: "desiredChargeLimitEnabled"),
+                  "reset clears stale tasks without inventing a zero-state baseline or re-enabling the limit")
+        UserDefaults.standard.removeObject(forKey: "desiredChargeLimitEnabled")
+        UserDefaults.standard.set(false, forKey: "nativeFirmwareWriteConfirmed")
+    }
+
+    @MainActor
+    private static func testLegacyHelperWithoutHandshakeReinstallsOnce() async throws {
         UserDefaults.standard.set(80, forKey: "chargeLimit")
         UserDefaults.standard.set(false, forKey: "dynamicHoldEnabled")
         UserDefaults.standard.set(true, forKey: "nativeFirmwareWriteConfirmed")
         let backend = FixtureNativeFirmwareBackend()
         _ = try await backend.applyLimit(upper: 80, lower: 78, confirmed: true)
         backend.simulateFirmwareBootReset()
+        backend.helperInfoAvailable = false
         backend.failLegacyZeroReadOnce = true
         var upgrades = 0
+        var legacyReadsBeforeReplacement: Int?
         let battery = MauLeafBatterySnapshot(
             percent: 88, isCharging: false, isFullyCharged: false,
             isACConnected: true, precisePercent: 88
@@ -512,7 +551,14 @@ private enum ChargeManagerTests {
         let manager = ChargeManager(
             backend: backend, autoInstallNativeHelper: false,
             autoUpgradeInstalledHelperOnLaunch: true,
-            helperInstallerForTesting: { upgrades += 1 },
+            helperInstallerForTesting: {
+                upgrades += 1
+                legacyReadsBeforeReplacement = backend.readCount
+                backend.helperInfoAvailable = true
+                // The old Helper would reject the zeroed boot registers;
+                // the newly installed Helper can read the persisted snapshot.
+                backend.failLegacyZeroReadOnce = false
+            },
             helperArtifactsPresent: { true },
             batteryReader: { battery }, observePowerSourceChanges: false,
             dynamicSettleInterval: 0.01, rebootSettleInterval: 0.05
@@ -522,8 +568,9 @@ private enum ChargeManagerTests {
         try await wait { backend.applyCount == 2 && backend.state.active && !manager.isBusy }
         manager.refresh()
         try await Task.sleep(nanoseconds: 80_000_000)
-        try check(upgrades == 1 && manager.hasOriginalStateSnapshot,
-                  "old Helper 0/0 read error upgrades once and restores managed limit without deleting snapshot")
+        try check(upgrades == 1 && manager.hasOriginalStateSnapshot
+                  && legacyReadsBeforeReplacement == 0,
+                  "a Helper without the version handshake is replaced without reading legacy state, while its managed snapshot survives")
         let stopped = await manager.prepareForTermination()
         try check(stopped && !backend.state.active, "post-upgrade quit still restores original state")
         UserDefaults.standard.set(false, forKey: "nativeFirmwareWriteConfirmed")
@@ -574,15 +621,16 @@ private enum ChargeManagerTests {
                   "continuous battery operation causes no repeated firmware writes")
 
         backend.acConnected = true
+        backend.simulateReconnectZero()
         reading = MauLeafBatterySnapshot(
-            percent: 84, isCharging: true, isFullyCharged: false,
-            isACConnected: true, amperageMilliAmps: 400, precisePercent: 84.0
+            percent: 75, isCharging: true, isFullyCharged: false,
+            isACConnected: true, amperageMilliAmps: 400, precisePercent: 75.0
         )
         manager.simulatePowerSourceNotificationForTesting()
         try await wait { backend.applyCount == 2 && !manager.isBusy }
         try check(backend.state.active && backend.state.upper == 80
                   && backend.state.lower == 78 && manager.hasOriginalStateSnapshot,
-                  "stable replug creates a fresh snapshot and resumes only the previously enabled limit")
+                  "stable below-target replug with 0/0 uses the verified baseline and resumes only the previously enabled limit")
 
         manager.toggleLimitFromCard()
         try await wait { backend.restoreCount == 2 && !manager.isBusy }
@@ -836,15 +884,19 @@ private enum ChargeManagerTests {
         )
         UserDefaults.standard.set(true, forKey: "nativeFirmwareWriteConfirmed")
         manager.start()
-        try await wait { manager.helperNeedsUpgrade }
+        try await wait { manager.helperNeedsUpgrade && manager.helperStateUnknown }
         try check(installs == 0 && backend.applyCount == 0
-                  && manager.popoverLimitStatus.source == "未启用",
-                  "startup detects stale helper without performing a privileged upgrade")
+                  && !manager.canEnableLimit && manager.canRepairNativeHelper,
+                  "an unverified Helper cannot enable limits before its bundled replacement is installed")
         manager.isAdapterConnected = true
+        manager.toggleLimitFromCard()
+        try await wait { installs == 1 && manager.backendReady && !manager.isBusy }
+        try check(!manager.isError && !backend.state.active && backend.applyCount == 0,
+                  "explicit repair replaces the Helper and reads fresh firmware state without writing SMC")
         manager.enableLimit()
-        try await wait { installs == 1 && backend.applyCount == 1 && !manager.isBusy }
+        try await wait { backend.applyCount == 1 && !manager.isBusy }
         try check(!manager.isError && backend.state.active && manager.hasOriginalStateSnapshot,
-                  "explicit enable upgrades once, checks new protocol and then writes safely")
+                  "enabling after replacement uses the newly verified Helper")
     }
 
     @MainActor
@@ -871,11 +923,31 @@ private enum ChargeManagerTests {
         let legacy = try JSONDecoder().decode(FirmwareLimitHelperStateResponse.self, from: oldVersionPayload)
         try check(legacy.helperBuildVersion == nil
                   && !FirmwareLimitHelperProtocolVersion.isCompatible(legacy.helperVersion),
-                  "a v6 Helper without a build-version field cannot authorize dynamic writes")
+                  "a Helper without a build-version field cannot authorize dynamic writes")
     }
 
     @MainActor
-    private static func testStartupAutoUpgradeOutdatedHelperOnce() async throws {
+    private static func testVerifiedHelperStateReadFailureDoesNotReplaceHelper() async throws {
+        let backend = FixtureNativeFirmwareBackend()
+        backend.failNextRead = true
+        var installs = 0
+        let manager = ChargeManager(
+            backend: backend,
+            autoInstallNativeHelper: false,
+            autoUpgradeInstalledHelperOnLaunch: true,
+            helperInstallerForTesting: { installs += 1 },
+            helperArtifactsPresent: { true }
+        )
+        manager.start()
+        try await wait { manager.helperStateUnknown && !manager.isBusy }
+        try check(installs == 0 && !manager.helperNeedsUpgrade
+                  && !manager.canRepairNativeHelper
+                  && backend.applyCount == 0 && backend.restoreCount == 0,
+                  "a correctly versioned Helper with an unreadable firmware state is not uninstalled or replaced")
+    }
+
+    @MainActor
+    private static func testStartupAutoUpgradeAndLaterMismatch() async throws {
         let backend = FixtureNativeFirmwareBackend()
         backend.reportedHelperVersion = FirmwareLimitHelperProtocolVersion.current - 1
         var installs = 0
@@ -897,18 +969,25 @@ private enum ChargeManagerTests {
         manager.refresh()
         try await Task.sleep(nanoseconds: 100_000_000)
         try check(installs == 1, "periodic refresh never re-installs a compatible helper")
+
+        // A later external replacement with another incompatible Helper
+        // must still use the same automatic service-only reinstall path.
+        backend.reportedHelperVersion = FirmwareLimitHelperProtocolVersion.current - 1
+        manager.refresh()
+        try await wait { installs == 2 && manager.backendReady && !manager.isBusy }
+        try check(backend.applyCount == 0 && backend.restoreCount == 0,
+                  "a later Helper version mismatch is also replaced without touching firmware state")
     }
 
     @MainActor
     private static func testOutdatedBuildWithCompatibleProtocolUpgrades() async throws {
-        try check(FirmwareLimitHelperProtocolVersion.isCompatible(6, build: "1.3.0")
-                  && !FirmwareLimitHelperProtocolVersion.isCompatible(6, build: "1.2.0")
-                  && FirmwareLimitHelperProtocolVersion.isCompatible(6, build: "1.3.3")
-                  && !FirmwareLimitHelperProtocolVersion.isCompatible(6, build: nil)
-                  && !FirmwareLimitHelperProtocolVersion.isCompatible(5, build: "1.0.0")
-                  && !FirmwareLimitHelperProtocolVersion.isCompatible(6, build: "0.9.9")
-                  && !FirmwareLimitHelperProtocolVersion.isCompatible(6, build: "invalid")
-                  && FirmwareLimitHelperProtocolVersion.canUpgradeFrom(6, build: "0.9.9"),
+        try check(FirmwareLimitHelperProtocolVersion.isCompatible(8, build: "1.5.1")
+                  && !FirmwareLimitHelperProtocolVersion.isCompatible(8, build: "1.4.9")
+                  && !FirmwareLimitHelperProtocolVersion.isCompatible(8, build: "1.5.2")
+                  && !FirmwareLimitHelperProtocolVersion.isCompatible(8, build: nil)
+                  && !FirmwareLimitHelperProtocolVersion.isCompatible(7, build: "1.4.0")
+                  && !FirmwareLimitHelperProtocolVersion.isCompatible(9, build: "1.6.0")
+                  && FirmwareLimitHelperProtocolVersion.canUpgradeFrom(9, build: "1.6.0"),
                   "Helper build compatibility is independent of the visible app version")
         let backend = FixtureNativeFirmwareBackend()
         backend.reportedHelperBuildVersion = "0.9.9"
@@ -930,7 +1009,7 @@ private enum ChargeManagerTests {
     }
 
     @MainActor
-    private static func testNewerHelperCannotBeDowngraded() async throws {
+    private static func testNewerHelperIsReplacedByBundledVersion() async throws {
         let backend = FixtureNativeFirmwareBackend()
         backend.reportedHelperVersion = FirmwareLimitHelperProtocolVersion.current + 1
         var installs = 0
@@ -938,15 +1017,18 @@ private enum ChargeManagerTests {
             backend: backend,
             autoInstallNativeHelper: false,
             autoUpgradeInstalledHelperOnLaunch: true,
-            helperInstallerForTesting: { installs += 1 },
+            helperInstallerForTesting: {
+                installs += 1
+                backend.reportedHelperVersion = nil
+            },
             helperArtifactsPresent: { true }
         )
         manager.start()
-        try await wait { manager.helperTooNew }
-        try check(installs == 0 && !manager.canRepairNativeHelper
-                  && !manager.canToggleLimitFromCard && !manager.backendReady
-                  && backend.applyCount == 0,
-                  "an older app cannot auto-replace an unknown newer helper")
+        try await wait { installs == 1 && manager.backendReady && !manager.isBusy }
+        try check(installs == 1 && !manager.helperNeedsUpgrade
+                  && !manager.isError && backend.applyCount == 0
+                  && backend.restoreCount == 0,
+                  "any version mismatch, including a newer Helper, is replaced by the bundled build without SMC writes")
     }
 
     @MainActor

@@ -1,6 +1,6 @@
 #!/bin/bash
-# Idempotent, rollback-capable installer for the privileged Helper.
-# Never touch root-owned charge-limit snapshots or recovery jobs.
+# Canonical service-only uninstall/reinstall for every Helper version mismatch.
+# Firmware snapshots and recovery jobs are persistent state and are NEVER removed.
 set -euo pipefail
 
 LABEL="com.local.chargecap.firmware-helper"
@@ -35,20 +35,62 @@ if [[ "$plist_label" != "$LABEL" || "$plist_program" != "$TARGET" ]]; then
 fi
 
 had_previous=false
-if [[ -e "$TARGET" || -e "$PLIST_TARGET" || -L "$TARGET" || -L "$PLIST_TARGET" ]]; then
-  if [[ -L "$TARGET" || -L "$PLIST_TARGET" || ! -f "$TARGET" || ! -f "$PLIST_TARGET" ]]; then
-    echo "检测到不完整或来源不明的同名服务，拒绝覆盖。" >&2
+had_target=false
+had_plist=false
+had_finalizer=false
+
+# Validate each installed component independently. A partially removed
+# Helper is recoverable as long as every remaining component has MauLeaf's
+# expected identity and root ownership.
+if [[ -L "$TARGET" ]]; then
+  echo "检测到符号链接 Helper，拒绝替换。" >&2
+  exit 3
+fi
+if [[ -e "$TARGET" ]]; then
+  if [[ ! -f "$TARGET" ]] || [[ "$(/usr/bin/stat -f '%u' "$TARGET")" != "0" ]] ||
+     ! /usr/bin/codesign --verify --strict "$TARGET"; then
+    echo "现有 Helper 文件类型、签名或 root 所有权无效，拒绝替换。" >&2
+    exit 3
+  fi
+  existing_identifier=$(/usr/bin/codesign -dv --verbose=2 "$TARGET" 2>&1 | /usr/bin/sed -n 's/^Identifier=//p')
+  if [[ "$existing_identifier" != "$LABEL" ]]; then
+    echo "现有 Helper 签名标识不属于 MauLeaf，拒绝替换。" >&2
+    exit 3
+  fi
+  had_target=true
+fi
+
+if [[ -L "$PLIST_TARGET" ]]; then
+  echo "检测到符号链接 LaunchDaemon，拒绝替换。" >&2
+  exit 3
+fi
+if [[ -e "$PLIST_TARGET" ]]; then
+  if [[ ! -f "$PLIST_TARGET" ]] || [[ "$(/usr/bin/stat -f '%u' "$PLIST_TARGET")" != "0" ]]; then
+    echo "现有 LaunchDaemon 文件类型或 root 所有权无效，拒绝替换。" >&2
     exit 3
   fi
   existing_label=$(/usr/libexec/PlistBuddy -c 'Print :Label' "$PLIST_TARGET" 2>/dev/null || true)
   existing_program=$(/usr/libexec/PlistBuddy -c 'Print :ProgramArguments:0' "$PLIST_TARGET" 2>/dev/null || true)
-  existing_identifier=$(/usr/bin/codesign -dv --verbose=2 "$TARGET" 2>&1 | /usr/bin/sed -n 's/^Identifier=//p')
-  if [[ "$existing_label" != "$LABEL" || "$existing_program" != "$TARGET" || "$existing_identifier" != "$LABEL" ]] ||
-     [[ "$(/usr/bin/stat -f '%u' "$TARGET")" != "0" || "$(/usr/bin/stat -f '%u' "$PLIST_TARGET")" != "0" ]] ||
-     ! /usr/bin/codesign --verify --strict "$TARGET"; then
-    echo "现有同名服务不是受信任的 MauLeaf root Helper，拒绝覆盖。" >&2
+  if [[ "$existing_label" != "$LABEL" || "$existing_program" != "$TARGET" ]]; then
+    echo "现有 LaunchDaemon 身份不属于 MauLeaf，拒绝替换。" >&2
     exit 3
   fi
+  had_plist=true
+fi
+
+if [[ -L "$FINALIZER" ]]; then
+  echo "检测到符号链接恢复脚本，拒绝替换。" >&2
+  exit 3
+fi
+if [[ -e "$FINALIZER" ]]; then
+  if [[ ! -f "$FINALIZER" ]] || [[ "$(/usr/bin/stat -f '%u' "$FINALIZER")" != "0" ]]; then
+    echo "现有恢复脚本不是受信任的 root 文件，拒绝替换。" >&2
+    exit 3
+  fi
+  had_finalizer=true
+fi
+
+if [[ "$had_target" == true || "$had_plist" == true || "$had_finalizer" == true ]]; then
   had_previous=true
 fi
 
@@ -64,17 +106,38 @@ rollback() {
   trap - EXIT
   if [[ "$rc" -ne 0 && "$replaced" == true ]]; then
     echo "新 Helper 安装未完成，回滚已安装的二进制文件；恢复快照始终保留。" >&2
+    # A failed bootstrap may have partially registered the new job. Remove
+    # that registration before restoring the previous executable and plist.
+    if /bin/launchctl print "system/$LABEL" >/dev/null 2>&1; then
+      /bin/launchctl bootout "system/$LABEL" >/dev/null 2>&1 || true
+      for attempt in {1..20}; do
+        if ! /bin/launchctl print "system/$LABEL" >/dev/null 2>&1; then
+          break
+        fi
+        /bin/sleep 0.25
+      done
+    fi
     if [[ "$had_previous" == true ]]; then
-      /usr/bin/install -o root -g wheel -m 755 "$staging/old-helper" "$TARGET" || true
-      /usr/bin/install -o root -g wheel -m 644 "$staging/old-plist" "$PLIST_TARGET" || true
+      if [[ -f "$staging/old-helper" ]]; then
+        /usr/bin/install -o root -g wheel -m 755 "$staging/old-helper" "$TARGET" || true
+      else
+        /bin/rm -f "$TARGET"
+      fi
+      if [[ -f "$staging/old-plist" ]]; then
+        /usr/bin/install -o root -g wheel -m 644 "$staging/old-plist" "$PLIST_TARGET" || true
+      else
+        /bin/rm -f "$PLIST_TARGET"
+      fi
       if [[ -f "$staging/old-finalizer" ]]; then
         /usr/bin/install -o root -g wheel -m 700 "$staging/old-finalizer" "$FINALIZER" || true
+      else
+        /bin/rm -f "$FINALIZER"
       fi
-      if [[ "$was_running" == true ]]; then
+      if [[ "$was_running" == true && -f "$TARGET" && -f "$PLIST_TARGET" ]]; then
         /bin/launchctl bootstrap system "$PLIST_TARGET" >/dev/null 2>&1 || true
       fi
     else
-      /bin/rm -f "$TARGET" "$PLIST_TARGET"
+      /bin/rm -f "$TARGET" "$PLIST_TARGET" "$FINALIZER"
     fi
   elif [[ "$rc" -ne 0 && "$had_previous" == true && "$was_running" == true ]]; then
     /bin/launchctl bootstrap system "$PLIST_TARGET" >/dev/null 2>&1 || true
@@ -91,24 +154,51 @@ trap rollback EXIT
 /usr/bin/codesign --verify --strict "$staging/new-helper"
 /usr/bin/plutil -lint "$staging/new-plist"
 if [[ "$had_previous" == true ]]; then
-  /bin/cp -p "$TARGET" "$staging/old-helper"
-  /bin/cp -p "$PLIST_TARGET" "$staging/old-plist"
-  if [[ -f "$FINALIZER" && ! -L "$FINALIZER" ]]; then
-    /bin/cp -p "$FINALIZER" "$staging/old-finalizer"
-  fi
+  if [[ "$had_target" == true ]]; then /bin/cp -p "$TARGET" "$staging/old-helper"; fi
+  if [[ "$had_plist" == true ]]; then /bin/cp -p "$PLIST_TARGET" "$staging/old-plist"; fi
+  if [[ "$had_finalizer" == true ]]; then /bin/cp -p "$FINALIZER" "$staging/old-finalizer"; fi
   if /bin/launchctl print "system/$LABEL" >/dev/null 2>&1; then
     was_running=true
     /bin/launchctl bootout "system/$LABEL"
+    # bootout can return before launchd has finished removing the old job.
+    # Wait boundedly before deleting files and bootstrapping the replacement.
+    for attempt in {1..20}; do
+      if ! /bin/launchctl print "system/$LABEL" >/dev/null 2>&1; then
+        break
+      fi
+      /bin/sleep 0.25
+    done
+    if /bin/launchctl print "system/$LABEL" >/dev/null 2>&1; then
+      echo "旧版 Helper 尚未完全停止，拒绝并行安装新服务。" >&2
+      exit 5
+    fi
   fi
 fi
 
-# Replace executable and registration atomically on the same APFS volume.
-# Snapshot, deferred recovery and one-time-charge records are never removed.
-/bin/mv -f "$staging/new-helper" "$TARGET"
+# Service-only uninstall: remove the old executable, LaunchDaemon and
+# finalizer after taking a rollback copy. Do NOT remove JOB_DIR or any
+# snapshot, restore marker, one-time-charge record or deferred-uninstall job.
 replaced=true
+/bin/rm -f "$TARGET" "$PLIST_TARGET" "$FINALIZER"
+if [[ -e "$TARGET" || -e "$PLIST_TARGET" || -e "$FINALIZER" ]]; then
+  echo "旧版 Helper 组件未能完整卸载；保留恢复数据并回滚。" >&2
+  exit 5
+fi
+
+# Install the exact Helper and scripts bundled with the current app.
+/bin/mv -f "$staging/new-helper" "$TARGET"
 /bin/mv -f "$staging/new-plist" "$PLIST_TARGET"
 /bin/mv -f "$staging/new-finalizer" "$FINALIZER"
 /bin/launchctl bootstrap system "$PLIST_TARGET"
-/bin/launchctl print "system/$LABEL" >/dev/null
+for attempt in {1..20}; do
+  if /bin/launchctl print "system/$LABEL" >/dev/null 2>&1; then
+    break
+  fi
+  /bin/sleep 0.25
+done
+if ! /bin/launchctl print "system/$LABEL" >/dev/null 2>&1; then
+  echo "新版 Helper 未能注册到 launchd，正在回滚。" >&2
+  exit 6
+fi
 
-echo "MauLeaf 原生 Helper 已安装并验证；原始固件快照及恢复任务未更改。"
+echo "MauLeaf 原生 Helper 已卸载旧版并重新安装当前应用内置版本；原始固件快照及恢复任务未更改。"

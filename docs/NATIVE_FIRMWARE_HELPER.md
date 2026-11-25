@@ -106,3 +106,9 @@ Preview 4 and earlier did not persist the original thresholds. If an active lega
 - Transactions are serialized and guarded by a watchdog.
 - CI uses an in-memory fake transport only. No hardware writes occur in automated tests.
 - Actual charge-stop and resume behavior on the target M1 Pro remains to be observed on AC power.
+
+## Inactive 0/0 after reconnect
+
+The unplug path restores and verifies the exact original configuration first. When the user still intends to use charge limiting, the Helper retains a separate root-owned reconnect baseline, bound to the current boot session and verified device identity. It is not a live limit or a pending restore task. On a subsequent stable AC connection, a valid current state takes precedence; only inactive 0/0 may use the verified same-boot baseline. The Helper promotes that baseline to the active recovery snapshot before writing a new limit. Explicit disable, normal quit and full uninstallation clear it. Helper service-only replacement preserves persistent recovery data.
+
+An inactive 0/0 state without an eligible baseline or original snapshot is still read-only. The UI offers a firmware recheck and advises keeping AC connected, restarting normally if necessary, and collecting a read-only Hardware Probe report if the state persists. No default thresholds are invented, no zero thresholds are written, and this state is not classified as a failed Helper installation. Real hardware confirmation remains necessary.

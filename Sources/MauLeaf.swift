@@ -561,6 +561,14 @@ struct ContentView: View {
         } message: {
             Text(manager.text("当前固件限充没有 MauLeaf 原始快照。无法确认这些值是否由 Preview 4 或其他工具设置。继续操作只会清除 bfF0 激活标志，并保留 bfD0、bfE0 当前值；无法恢复历史阈值。"))
         }
+        .alert(manager.text("强制重置充电控制？"), isPresented: $manager.showForceResetConfirmation) {
+            Button(manager.text("强制重置"), role: .destructive) {
+                manager.confirmForceReset()
+            }
+            Button(manager.text("取消"), role: .cancel) {}
+        } message: {
+            Text(manager.text("取消充电任务并恢复原始配置。恢复失败时保留恢复数据。"))
+        }
         .task { manager.start() }
     }
 
@@ -815,7 +823,7 @@ struct ContentView: View {
     /// selected value is visible without an extra click. These only update
     /// local UserDefaults; no privileged firmware action is involved.
     private var settingsControls: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 5) {
             HStack(spacing: 8) {
                 settingsLabel("显示供电详情")
                 Spacer(minLength: 8)
@@ -830,7 +838,7 @@ struct ContentView: View {
                 .accessibilityLabel(manager.text("显示供电详情"))
                 .help(manager.text("关闭后保留供电状态，仅隐藏供电流向图"))
             }
-            .frame(minHeight: 30)
+            .frame(minHeight: 26)
 
             HStack(spacing: 8) {
                 settingsLabel("界面语言")
@@ -846,7 +854,7 @@ struct ContentView: View {
                 .accessibilityLabel(manager.text("界面语言"))
                 .help(manager.text("切换界面语言"))
             }
-            .frame(minHeight: 30)
+            .frame(minHeight: 26)
 
             HStack(spacing: 8) {
                 settingsLabel("动态保电")
@@ -868,7 +876,7 @@ struct ContentView: View {
                     ? "本次充满期间不可修改动态保电"
                     : "高于目标时保持电量；关闭后在已测试机型上可能出现拔电识别延迟"))
             }
-            .frame(minHeight: 30)
+            .frame(minHeight: 26)
             Text(manager.text("超限时保持电量；关闭后拔电识别可能延迟（已测试机型）。"))
                 .font(.caption2)
                 .foregroundStyle(.secondary)
@@ -901,11 +909,19 @@ struct ContentView: View {
                 .accessibilityLabel(manager.text("退出时移除组件"))
                 .help(manager.text("开启后每次退出会移除控制组件；关闭则保留。"))
             }
-            .frame(minHeight: 30)
+            .frame(minHeight: 26)
             Text(manager.text("建议卸载前开启，退出并确认清理完成后再删除 App。"))
                 .font(.caption2)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
+            HStack {
+                settingsLabel("充电控制重置")
+                Spacer(minLength: 8)
+                Button(manager.text("强制重置")) { manager.requestForceReset() }
+                    .controlSize(.small)
+                    .disabled(!manager.canForceReset)
+            }
+            .frame(minHeight: 26)
         }
         .padding(.vertical, 2)
     }
@@ -931,29 +947,50 @@ struct OperationFeedbackView: View {
     @State private var dismissedError: AppText?
     @State private var showDetails = false
     @State private var errorDetails: AppText = ""
+    @State private var errorTitle: AppText = "操作未完成"
 
     private var errorVisible: Bool {
-        !manager.isBusy && manager.isError && dismissedError != manager.statusMessage
+        !manager.isBusy && manager.isError && !isRoutineFirmwareReadiness
+            && dismissedError != manager.statusMessage
+    }
+
+    // The charge-control status pill already communicates readiness.
+    // Do not duplicate it with a persistent warning card.
+    private var isRoutineFirmwareReadiness: Bool {
+        guard firmwareNotReady else { return false }
+        let message = manager.statusMessage.source
+        return message == "请保持接电，尝试强制重置。若仍未就绪，请重启 Mac。未写入固件。"
+            || message == "任务已清除，固件仍未就绪。请保持接电，必要时重启 Mac。"
     }
 
     private var genericBusy: Bool {
         manager.isBusy && manager.activeOperation == nil
     }
 
+    private var firmwareNotReady: Bool {
+        manager.currentState?.isInactiveUninitialized == true
+            && !manager.backendReady
+    }
+
+    private var compactErrorTitle: AppText {
+        if manager.statusMessage.source.hasPrefix("重置尚未完成") { return "重置未完成" }
+        return firmwareNotReady ? "固件未就绪" : manager.statusMessage
+    }
+
     var body: some View {
         Group {
             if errorVisible || genericBusy {
-                VStack(alignment: .leading, spacing: 7) {
-                    HStack(alignment: .top, spacing: 8) {
+                VStack(alignment: .leading, spacing: 5) {
+                    HStack(alignment: .center, spacing: 7) {
                         if genericBusy {
                             ProgressView().controlSize(.small)
                         } else {
                             Image(systemName: "exclamationmark.triangle.fill")
                                 .foregroundStyle(Color.orange)
                         }
-                        Text(manager.text(manager.statusMessage))
+                        Text(manager.text(errorVisible ? compactErrorTitle : manager.statusMessage))
                             .font(.caption)
-                            .lineLimit(errorVisible ? 3 : 2)
+                            .lineLimit(2)
                             .fixedSize(horizontal: false, vertical: true)
                             .layoutPriority(1)
                             .frame(maxWidth: .infinity, alignment: .leading)
@@ -966,24 +1003,29 @@ struct OperationFeedbackView: View {
                         }
                     }
                     if errorVisible {
-                        HStack(spacing: 12) {
-                            Button(manager.text("查看详情")) {
+                        HStack(spacing: 10) {
+                            Button(manager.text("详情")) {
                                 errorDetails = manager.statusMessage
+                                errorTitle = firmwareNotReady ? "固件未就绪" : "操作未完成"
                                 showDetails = true
                             }
-                            if manager.canRetryChargeRequest {
+                            if manager.canRetryChargeRequest && (!firmwareNotReady || !manager.canForceReset) {
                                 Button(manager.text("重试")) { manager.retryChargeRequest() }
+                            }
+                            if manager.canForceReset {
+                                Button(manager.text("强制重置")) { manager.requestForceReset() }
                             }
                         }
                         .font(.caption)
                         .buttonStyle(.link)
+                        .padding(.leading, 20)
                     }
                 }
-                .padding(11)
+                .padding(8)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .background(Color.primary.opacity(0.045), in: RoundedRectangle(cornerRadius: 10))
                 .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(Color.primary.opacity(0.08)))
-                .padding(.bottom, 12)
+                .padding(.bottom, 8)
                 .transition(.opacity.combined(with: .move(edge: .top)))
             }
         }
@@ -995,7 +1037,7 @@ struct OperationFeedbackView: View {
         .onReceive(manager.$statusMessage.removeDuplicates().receive(on: RunLoop.main)) { message in
             if dismissedError != message { dismissedError = nil }
         }
-        .alert(manager.text("操作未完成"), isPresented: $showDetails) {
+        .alert(manager.text(errorTitle), isPresented: $showDetails) {
             Button(manager.text("关闭"), role: .cancel) { }
         } message: { Text(manager.text(errorDetails)) }
     }
@@ -1116,9 +1158,9 @@ final class ChargeManager: ObservableObject {
     @Published var isError = false
     @Published var showNativeWriteConfirmation = false
     @Published var showLegacyDisableConfirmation = false
+    @Published var showForceResetConfirmation = false
     @Published private(set) var helperNeedsInstallation = false
     @Published private(set) var helperNeedsUpgrade = false
-    @Published private(set) var helperTooNew = false
     @Published private(set) var helperStateUnknown = false
 
     private let backend: NativeFirmwareBackend
@@ -1130,6 +1172,7 @@ final class ChargeManager: ObservableObject {
     private var powerRecheckTask: Task<Void, Never>?
     private let autoUpgradeInstalledHelperOnLaunch: Bool
     private var attemptedStartupHelperUpgrade = false
+    private var helperVersionVerified = false
     private let exitLifecycleForTesting: ((QuitComponentPolicy) async throws -> Void)?
     private let helperInstallerForTesting: (() async throws -> Void)?
     private let helperArtifactsPresent: () -> Bool
@@ -1328,7 +1371,11 @@ final class ChargeManager: ObservableObject {
                 if self.isAdapterConnected { self.scheduleReconnectLimitResume() }
             }
             do {
-                _ = try await self.backend.restoreOriginalState()
+                if self.desiredLimitEnabled {
+                    _ = try await self.backend.suspendLimitForReconnect()
+                } else {
+                    _ = try await self.backend.restoreOriginalState()
+                }
                 let state = try await self.backend.readState()
                 let once = try await self.backend.oneTimeChargeStatus()
                 self.currentState = state
@@ -1338,7 +1385,7 @@ final class ChargeManager: ObservableObject {
                 self.restoreReady = state.restoreSupported
                 guard !state.active && !state.hasOriginalStateSnapshot
                         && !state.restorePending && !once.pending else {
-                    throw NativeControlError.unsafeStateAfterInstall
+                    throw NativeControlError.unsafeStateAfterInstall("恢复原始固件状态后校验未通过。")
                 }
                 self.dynamicSessionUpper = nil
                 self.dynamicNeedsNewCapture = true
@@ -1369,8 +1416,7 @@ final class ChargeManager: ObservableObject {
               !isBusy, !fullOncePending, !helperNeedsUpgrade,
               let state = currentState, !state.active,
               !state.hasOriginalStateSnapshot, !state.restorePending,
-              state.writeSupported, !state.isInactiveUninitialized,
-              !state.isActiveZeroed else { return }
+              state.writeSupported, !state.isActiveZeroed else { return }
         let since = dynamicACStableSince ?? Date()
         let remaining = max(0, dynamicSettleInterval - Date().timeIntervalSince(since))
         automaticReconnectApplyTask = Task { [weak self] in
@@ -1387,7 +1433,7 @@ final class ChargeManager: ObservableObject {
             guard let current = try? await self.backend.readState(),
                   !current.active && !current.hasOriginalStateSnapshot,
                   !current.restorePending && current.writeSupported,
-                  !current.isInactiveUninitialized && !current.isActiveZeroed,
+                  !current.isActiveZeroed,
                   self.desiredLimitEnabled && self.isAdapterConnected else { return }
             await self.applyLimit(self.limit)
         }
@@ -1568,7 +1614,9 @@ final class ChargeManager: ObservableObject {
             return state.hasOriginalStateSnapshot ? "固件异常 · 待恢复" : "固件异常"
         }
         if let state = currentState, state.isInactiveUninitialized {
-            return state.hasOriginalStateSnapshot ? "重启后恢复中" : "固件未就绪"
+            if state.hasOriginalStateSnapshot { return "重启后恢复中" }
+            if state.hasReconnectBaseline && state.writeSupported { return "等待恢复限充" }
+            return "固件未就绪"
         }
         if helperStateUnknown { return "状态未知" }
         if helperNeedsUpgrade {
@@ -1673,13 +1721,19 @@ final class ChargeManager: ObservableObject {
     /// A stale/unknown installed Helper can be repaired explicitly without
     /// enabling a limit. This is essential when an older version was active.
     var canRepairNativeHelper: Bool {
-        (helperNeedsUpgrade || helperStateUnknown) && !helperTooNew && helperArtifactsPresent()
-            && !isBusy && !isPreparingToQuit
+        (helperNeedsUpgrade || (helperStateUnknown && !helperVersionVerified))
+            && helperArtifactsPresent() && !isBusy && !isPreparingToQuit
             && !(helperNeedsUpgrade && canEnableLimit)
     }
 
     /// All card actions reuse the existing hardware and restore safeguards.
+    private var canRecheckUninitializedFirmware: Bool {
+        currentState?.isInactiveUninitialized == true && !backendReady
+            && helperVersionVerified && !isBusy && !isPreparingToQuit
+    }
+
     var canToggleLimitFromCard: Bool {
+        if canRecheckUninitializedFirmware { return true }
         if canRepairNativeHelper { return true }
         if isLegacyActive { return canDisableLegacyLimit }
         if hasOriginalStateSnapshot || restorePending {
@@ -1689,6 +1743,7 @@ final class ChargeManager: ObservableObject {
     }
 
     var limitCardActionHint: AppText {
+        if canRecheckUninitializedFirmware { return "重新检测固件" }
         if canRepairNativeHelper { return "修复控制服务" }
         if isLegacyActive { return "停用旧版限制" }
         if restorePending || (hasOriginalStateSnapshot && currentState?.active != true && !fullOncePending) {
@@ -1699,7 +1754,9 @@ final class ChargeManager: ObservableObject {
 
     func toggleLimitFromCard() {
         guard canToggleLimitFromCard else { return }
-        if canRepairNativeHelper {
+        if canRecheckUninitializedFirmware {
+            Task { await refreshNativeState() }
+        } else if canRepairNativeHelper {
             Task { await repairNativeHelperAfterUserAction() }
         } else if isLegacyActive {
             requestLegacyDisableConfirmation()
@@ -1839,35 +1896,55 @@ final class ChargeManager: ObservableObject {
 
     private func refreshNativeState() async {
         guard !isPreparingToQuit, !isBusy else { return }
+        var helperInfoVerified = false
         do {
+            // Version handshake must run before SMC access. A compatible
+            // Helper can report its identity even when firmware state or a
+            // persisted recovery snapshot cannot currently be read.
+            let info = try await backend.readHelperInfo()
+            guard !isPreparingToQuit else { return }
+            helperInfoVerified = true
+
+            if !FirmwareLimitHelperProtocolVersion.isCompatible(info) {
+                // Do not ask an incompatible Helper to interpret its own
+                // firmware state. The bundled replacement will read the
+                // preserved snapshot and pending jobs after installation.
+                helperVersionVerified = false
+                currentState = nil
+                helperNeedsInstallation = false
+                helperNeedsUpgrade = true
+                helperStateUnknown = true
+                backendReady = false
+                restoreReady = false
+                modeText = "原生控制服务版本不匹配"
+                statusMessage = "当前 Helper 与应用要求的版本不一致；将卸载旧版并安装应用内置版本。"
+                isError = false
+                scheduleStartupHelperReplacement()
+                return
+            }
+
+            helperVersionVerified = true
             let state = try await backend.readState()
             guard !isPreparingToQuit else { return }
-            if !FirmwareLimitHelperProtocolVersion.isCompatible(state.helperVersion, build: state.helperBuildVersion) {
-                // Never downgrade an unknown, newer protocol; old Helpers
-                // are migrated only after user-authorized installation.
+            // The state response repeats the version so a stale or mixed
+            // service response cannot authorize a firmware operation.
+            if !FirmwareLimitHelperProtocolVersion.isCompatible(
+                state.helperVersion, build: state.helperBuildVersion
+            ) {
+                helperVersionVerified = false
                 currentState = state
                 helperNeedsInstallation = false
-                helperNeedsUpgrade = FirmwareLimitHelperProtocolVersion.canUpgradeFrom(state.helperVersion, build: state.helperBuildVersion)
-                helperTooNew = !helperNeedsUpgrade
+                helperNeedsUpgrade = true
                 helperStateUnknown = false
                 backendReady = false
                 restoreReady = false
-                modeText = "原生控制服务需要更新"
-                if helperTooNew {
-                    statusMessage = "已安装的控制服务版本比当前应用更新；请使用较新版本的 MauLeaf，不会自动降级。"
-                    isError = true
-                } else {
-                    statusMessage = "正在检查已安装控制服务的兼容性；如需升级将请求一次管理员授权。"
-                    isError = state.active || state.hasOriginalStateSnapshot || state.restorePending
-                    if autoUpgradeInstalledHelperOnLaunch && !attemptedStartupHelperUpgrade,
-                       (autoInstallNativeHelper || helperInstallerForTesting != nil),
-                       helperArtifactsPresent() {
-                        attemptedStartupHelperUpgrade = true
-                        Task { await upgradeNativeHelperAfterStartupCheck(previous: state) }
-                    }
-                }
+                modeText = "原生控制服务版本不匹配"
+                statusMessage = "控制服务版本校验不一致；将卸载旧版并安装应用内置版本。"
+                isError = false
+                scheduleStartupHelperReplacement()
                 return
             }
+
             let once = try await backend.oneTimeChargeStatus()
             guard !isPreparingToQuit else { return }
             updateFromNativeState(state, oneTime: once, status: "已读取原生固件状态。")
@@ -1875,46 +1952,62 @@ final class ChargeManager: ObservableObject {
             guard !isPreparingToQuit else { return }
             backendReady = false
             restoreReady = false
-            helperNeedsUpgrade = false
-            helperTooNew = false
-            if isHelperUnavailable(error) && !helperArtifactsPresent() {
-                // First launch, no Helper or root-owned recovery files.
-                helperNeedsInstallation = true
-                helperStateUnknown = false
-                currentState = nil
-                fullOncePending = false
-                fullOnceCancelRequested = false
-                modeText = "限制充电未启用"
-                statusMessage = "未安装原生固件控制服务；点击启用限制充电时再请求授权。"
-                isError = false
-            } else {
-                // Connection failure with existing files is NOT clean state.
-                helperNeedsInstallation = false
-                helperStateUnknown = true
-                modeText = "固件控制状态未知"
-                statusMessage = "无法连接固件控制服务；请保留恢复组件：\(AppText(error: error))"
-                isError = true
-                // Preview 4 Helper could not report inactive 0/0 after boot
-                // and fails before it can advertise its build version.
-                // Replace that known older binary once, using the existing
-                // root-preserving installer. Never classify arbitrary remote
-                // failures as a clean or reinstallable firmware state.
-                if isLegacyInactiveZeroFailure(error)
-                    && autoUpgradeInstalledHelperOnLaunch
-                    && !attemptedStartupHelperUpgrade
-                    && (autoInstallNativeHelper || helperInstallerForTesting != nil)
-                    && helperArtifactsPresent() {
-                    attemptedStartupHelperUpgrade = true
-                    Task { await repairNativeHelperAfterUserAction() }
+
+            if !helperInfoVerified {
+                // Missing handshake means an older Helper or an unreachable
+                // installed service. Read-only state is attempted only to
+                // preserve the UI's knowledge of an active legacy limit;
+                // it never authorizes writes. If the method is absent or
+                // state decoding fails, keep the state explicitly unknown.
+                helperVersionVerified = false
+                if !helperArtifactsPresent() {
+                    helperNeedsInstallation = true
+                    helperNeedsUpgrade = false
+                    helperStateUnknown = false
+                    currentState = nil
+                    fullOncePending = false
+                    fullOnceCancelRequested = false
+                    modeText = "限制充电未启用"
+                    statusMessage = "未安装原生固件控制服务；点击启用限制充电时再请求授权。"
+                    isError = false
+                    return
                 }
+
+                // An installed Helper that cannot answer the version
+                // handshake is not eligible for firmware operations. Do not
+                // call its legacy readState: it may reject zeroed boot values
+                // or omit the snapshot/recovery flags entirely.
+                currentState = nil
+                helperNeedsInstallation = false
+                helperNeedsUpgrade = true
+                helperStateUnknown = true
+                modeText = "原生控制服务版本未知"
+                statusMessage = "无法验证当前 Helper 版本；保留所有恢复数据，正在卸载旧版并重新安装内置 Helper。"
+                isError = false
+                scheduleStartupHelperReplacement()
+                return
             }
+
+            // The Helper version is already verified. A state-read failure
+            // is a hardware/recovery problem, not a version mismatch; never
+            // uninstall a correctly versioned recovery service for this.
+            helperVersionVerified = true
+            helperNeedsInstallation = false
+            helperNeedsUpgrade = false
+            helperStateUnknown = true
+            modeText = "固件控制状态未知"
+            statusMessage = "已确认原生控制服务版本，但无法读取固件或恢复状态；请保留 Helper 和恢复数据：\(AppText(error: error))"
+            isError = true
         }
     }
 
-    private func isLegacyInactiveZeroFailure(_ error: Error) -> Bool {
-        guard let failure = error as? FirmwareLimitHelperClientError,
-              case .remote(let message) = failure else { return false }
-        return message.contains("Stored firmware limits are invalid: upper 0%, lower 0%.")
+    private func scheduleStartupHelperReplacement() {
+        guard autoUpgradeInstalledHelperOnLaunch,
+              !attemptedStartupHelperUpgrade,
+              (autoInstallNativeHelper || helperInstallerForTesting != nil),
+              helperArtifactsPresent() else { return }
+        attemptedStartupHelperUpgrade = true
+        Task { await replaceNativeHelperAfterStartupCheck() }
     }
 
     private func updateFromNativeState(
@@ -1923,9 +2016,9 @@ final class ChargeManager: ObservableObject {
         status: AppText
     ) {
         currentState = state
+        helperVersionVerified = true
         helperNeedsInstallation = false
         helperNeedsUpgrade = false
-        helperTooNew = false
         helperStateUnknown = false
         // Migration from the former active-only model. Never infer an
         // intent from an unknown active state without MauLeaf's snapshot.
@@ -1999,10 +2092,13 @@ final class ChargeManager: ObservableObject {
             isError = true
         } else if state.isInactiveUninitialized {
             modeText = "固件重启后尚未初始化限充阈值"
-            statusMessage = state.hasOriginalStateSnapshot
-                ? "已保留原始固件快照；待连接电源稳定后恢复原先的限充设置。"
-                : "固件限充值暂不可用，尚无可验证的恢复快照；不会自动写入。"
-            isError = false
+            if state.hasOriginalStateSnapshot || (state.hasReconnectBaseline && state.writeSupported) {
+                statusMessage = "已保留原始固件快照；待连接电源稳定后恢复原先的限充设置。"
+                isError = false
+            } else {
+                statusMessage = "请保持接电，尝试强制重置。若仍未就绪，请重启 Mac。未写入固件。"
+                isError = true
+            }
         } else if state.active && state.hasOriginalStateSnapshot {
             modeText = "限制充电已启用 · 上限 \(state.upper)%"
             statusMessage = status
@@ -2017,7 +2113,7 @@ final class ChargeManager: ObservableObject {
             isError = false
         }
 
-        if state.isActiveZeroed {
+        if state.isActiveZeroed || state.isInactiveUninitialized {
             // Do not overwrite a specific safety warning with the generic
             // "unsupported" message; a trusted snapshot is recoverable.
         } else if !state.writeSupported && !state.restoreSupported {
@@ -2111,74 +2207,80 @@ final class ChargeManager: ObservableObject {
         }
     }
 
-    /// One attempted upgrade per launch, only for verified older protocols.
-    /// macOS explicitly requests admin authorization; no firmware writes.
-    private func upgradeNativeHelperAfterStartupCheck(previous: FirmwareLimitHelperStateResponse) async {
-        guard !isBusy, !isPreparingToQuit, helperNeedsUpgrade else { return }
+    /// All Helper version mismatches use one service-only uninstall/reinstall
+    /// path. Persistent firmware snapshots and recovery jobs are not touched.
+    private func replaceNativeHelperAfterStartupCheck() async {
+        await replaceNativeHelper(
+            progress: "控制服务版本不匹配，正在卸载旧版并安装应用内置版本…",
+            success: "原生控制服务已重新安装并验证。",
+            failure: "原生控制服务自动重装未完成"
+        )
+    }
+
+    private func repairNativeHelperAfterUserAction() async {
+        await replaceNativeHelper(
+            progress: "正在卸载旧版控制服务并安装应用内置版本，需要管理员授权…",
+            success: "原生控制服务已重新安装并验证。",
+            failure: "无法重新安装原生控制服务"
+        )
+    }
+
+    private func replaceNativeHelper(
+        progress: AppText,
+        success: AppText,
+        failure: AppText
+    ) async {
+        guard !isBusy, !isPreparingToQuit,
+              helperNeedsUpgrade || (helperStateUnknown && !helperVersionVerified) else { return }
         activeOperation = .repairingHelper
         defer { activeOperation = nil }
         isBusy = true
         isError = false
-        statusMessage = "控制服务版本不兼容，正在请求授权安全升级…"
+        statusMessage = progress
         do {
             if let helperInstallerForTesting {
                 try await helperInstallerForTesting()
             } else {
                 try await installNativeHelper()
             }
-            let state = try await backend.readState()
-            guard FirmwareLimitHelperProtocolVersion.isCompatible(state.helperVersion, build: state.helperBuildVersion) else {
-                throw NativeControlError.helperUpgradeFailed(
-                    found: state.helperVersion, required: FirmwareLimitHelperProtocolVersion.current
-                )
+
+            let info = try await backend.readHelperInfo()
+            guard FirmwareLimitHelperProtocolVersion.isCompatible(info) else {
+                throw NativeControlError.helperVersionMismatch
             }
-            guard (!previous.active || state.active),
-                  (!previous.hasOriginalStateSnapshot || state.hasOriginalStateSnapshot),
-                  (!previous.restorePending || state.restorePending) else {
-                throw NativeControlError.unsafeStateAfterInstall
+            let state = try await backend.readState()
+            guard FirmwareLimitHelperProtocolVersion.isCompatible(
+                state.helperVersion, build: state.helperBuildVersion
+            ) else {
+                throw NativeControlError.helperUpgradeFailed
             }
             let once = try await backend.oneTimeChargeStatus()
-            updateFromNativeState(state, oneTime: once, status: "原生控制服务已更新并验证。")
+            updateFromNativeState(state, oneTime: once, status: success)
+            attemptedStartupHelperUpgrade = false
             isBusy = false
         } catch {
             isBusy = false
             await refreshNativeState()
-            statusMessage = "自动升级控制服务未完成：\(AppText(error: error))"
+            statusMessage = "\(failure)：\(AppText(error: error))"
             isError = true
         }
     }
 
-    /// Explicit recovery of an installed but outdated/unreachable Helper.
-    /// No charging-limit write occurs in this path.
-    private func repairNativeHelperAfterUserAction() async {
-        guard canRepairNativeHelper else { return }
-        activeOperation = .repairingHelper
-        defer { activeOperation = nil }
-        isBusy = true
-        isError = false
-        statusMessage = "正在修复原生控制服务，需要管理员授权…"
-        do {
-            if let helperInstallerForTesting {
-                try await helperInstallerForTesting()
-            } else {
-                try await installNativeHelper()
-            }
-            let state = try await backend.readState()
-            guard FirmwareLimitHelperProtocolVersion.isCompatible(state.helperVersion, build: state.helperBuildVersion) else {
-                throw NativeControlError.helperUpgradeFailed(
-                    found: state.helperVersion,
-                    required: FirmwareLimitHelperProtocolVersion.current
-                )
-            }
-            let once = try await backend.oneTimeChargeStatus()
-            updateFromNativeState(state, oneTime: once, status: "原生控制服务已修复。")
-            isBusy = false
-        } catch {
-            isBusy = false
-            await refreshNativeState()
-            statusMessage = "无法修复原生控制服务：\(AppText(error: error))"
-            isError = true
+    private func helperInstallSafetyBlockReason(
+        state: FirmwareLimitHelperStateResponse,
+        oneTime: FirmwareLimitHelperOneTimeStatusResponse
+    ) -> AppText? {
+        if oneTime.pending { return "检测到尚未完成的本次充满任务，已保留任务记录。" }
+        if state.restorePending { return "检测到尚未完成的原始固件恢复任务，请等待恢复完成。" }
+        if state.hasOriginalStateSnapshot {
+            return "检测到已保存的原始固件快照，必须先完成恢复或确认现有限充状态。"
         }
+        if state.active { return "检测到当前固件限充仍处于激活状态，未覆盖现有配置。" }
+        if !state.writeSupported {
+            return state.writeBlockReason.map { AppText(verbatim: $0) }
+                ?? "当前固件状态不允许写入新的充电限制。"
+        }
+        return nil
     }
 
     func enableLimit() {
@@ -2213,19 +2315,29 @@ final class ChargeManager: ObservableObject {
                 } else {
                     try await installNativeHelper()
                 }
-                // Re-read real firmware before any write, even after install.
+                // Confirm the exact bundled Helper before reading hardware.
+                let info = try await backend.readHelperInfo()
+                guard FirmwareLimitHelperProtocolVersion.isCompatible(info) else {
+                    throw NativeControlError.helperVersionMismatch
+                }
                 let state = try await backend.readState()
-                guard FirmwareLimitHelperProtocolVersion.isCompatible(state.helperVersion, build: state.helperBuildVersion) else {
-                    throw NativeControlError.helperUpgradeFailed(
-                        found: state.helperVersion,
-                        required: FirmwareLimitHelperProtocolVersion.current
-                    )
+                guard FirmwareLimitHelperProtocolVersion.isCompatible(
+                    state.helperVersion, build: state.helperBuildVersion
+                ) else {
+                    throw NativeControlError.helperUpgradeFailed
                 }
                 let once = try await backend.oneTimeChargeStatus()
                 updateFromNativeState(state, oneTime: once, status: "原生控制服务已就绪。")
-                guard state.writeSupported, !state.active, !state.hasOriginalStateSnapshot,
-                      !state.restorePending, !once.pending else {
-                    throw NativeControlError.unsafeStateAfterInstall
+                attemptedStartupHelperUpgrade = false
+                if state.isInactiveUninitialized && !state.writeSupported
+                    && !state.active && !state.hasOriginalStateSnapshot && !state.restorePending && !once.pending {
+                    // Installation succeeded. This is a hardware-readiness
+                    // state, not a failed Helper installation.
+                    isBusy = false
+                    return
+                }
+                if let reason = helperInstallSafetyBlockReason(state: state, oneTime: once) {
+                    throw NativeControlError.unsafeStateAfterInstall(reason)
                 }
             } catch {
                 isBusy = false
@@ -2263,6 +2375,66 @@ final class ChargeManager: ObservableObject {
         guard canDisableLegacyLimit else { return }
         setDesiredLimitEnabled(false)
         Task { await restoreOriginalFirmwareState() }
+    }
+
+    var canForceReset: Bool {
+        helperVersionVerified && !helperNeedsUpgrade && !isBusy && !isPreparingToQuit
+    }
+
+    func requestForceReset() {
+        guard canForceReset else { return }
+        showForceResetConfirmation = true
+    }
+
+    func confirmForceReset() {
+        showForceResetConfirmation = false
+        guard canForceReset else { return }
+        setDesiredLimitEnabled(false)
+        UserDefaults.standard.set(false, forKey: "desiredChargeLimitEnabled")
+        limitDebounce?.cancel()
+        limitDebounce = nil
+        dynamicReconcileTask?.cancel()
+        dynamicReconcileTask = nil
+        automaticUnplugRestoreTask?.cancel()
+        automaticUnplugRestoreTask = nil
+        automaticReconnectApplyTask?.cancel()
+        automaticReconnectApplyTask = nil
+        pendingAction = nil
+        lastAction = nil
+        dynamicSessionUpper = nil
+        dynamicNeedsNewCapture = true
+        isBusy = true
+        activeOperation = .restoringLimit
+        isError = false
+        statusMessage = "正在重置充电控制…"
+        Task {
+            defer { isBusy = false; activeOperation = nil }
+            do {
+                _ = try await backend.restoreOriginalState()
+                let state = try await backend.readState()
+                let once = try await backend.oneTimeChargeStatus()
+                updateFromNativeState(state, oneTime: once, status: "充电控制已重置。")
+                guard !state.active, !state.hasOriginalStateSnapshot,
+                      !state.hasReconnectBaseline, !state.restorePending, !once.pending else {
+                    statusMessage = "重置尚未完成；已保留恢复数据，请保持电源连接后重试。"
+                    isError = true
+                    return
+                }
+                if state.writeSupported {
+                    statusMessage = "充电控制已重置，所有充电任务已取消，可重新启用限充。"
+                    isError = false
+                } else {
+                    statusMessage = "任务已清除，固件仍未就绪。请保持接电，必要时重启 Mac。"
+                    isError = true
+                }
+            } catch {
+                NSLog("MauLeaf force reset failed: %@", error.localizedDescription)
+                isBusy = false
+                await refreshNativeState()
+                statusMessage = "重置尚未完成；已保留恢复数据，请保持电源连接后重试。"
+                isError = true
+            }
+        }
     }
 
     private func restoreOriginalFirmwareState() async {
@@ -2422,7 +2594,7 @@ final class ChargeManager: ObservableObject {
             )
             guard response.state.active && response.state.upper == plan.upper
                     && response.state.lower == plan.lower else {
-                throw NativeControlError.unsafeStateAfterInstall
+                throw NativeControlError.unsafeStateAfterInstall("固件写入后的寄存器读回结果与请求不一致。")
             }
             currentState = response.state
             backendReady = response.state.writeSupported
@@ -2526,6 +2698,7 @@ final class ChargeManager: ObservableObject {
         lastAction = nil
         showNativeWriteConfirmation = false
         showLegacyDisableConfirmation = false
+        showForceResetConfirmation = false
 
         let deadline = Date().addingTimeInterval(30)
         while isBusy {
@@ -2558,7 +2731,7 @@ final class ChargeManager: ObservableObject {
             }
             let oneTime = try await backend.oneTimeChargeStatus()
             let needsRestore = state.active || state.hasOriginalStateSnapshot
-                || state.restorePending || oneTime.pending
+                || state.hasReconnectBaseline || state.restorePending || oneTime.pending
 
             if needsRestore {
                 guard state.restoreSupported else {
@@ -2579,6 +2752,7 @@ final class ChargeManager: ObservableObject {
             let verifiedOneTime = try await backend.oneTimeChargeStatus()
             let restored = !verified.active
                 && !verified.hasOriginalStateSnapshot
+                && !verified.hasReconnectBaseline
                 && !verified.restorePending
                 && !verifiedOneTime.pending
             let queued = verified.restorePending && !verifiedOneTime.pending
@@ -2765,9 +2939,9 @@ final class ChargeManager: ObservableObject {
 private enum NativeControlError: LocalizedError {
     case missingBundledHelper
     case authorizationFailed(String)
-    case outdatedHelper(found: Int, required: Int)
-    case helperUpgradeFailed(found: Int, required: Int)
-    case unsafeStateAfterInstall
+    case helperUpgradeFailed
+    case helperVersionMismatch
+    case unsafeStateAfterInstall(AppText)
 
     var errorDescription: String? {
         switch self {
@@ -2775,12 +2949,15 @@ private enum NativeControlError: LocalizedError {
             return "应用包中缺少 MauLeaf 原生固件服务文件，请重新安装 MauLeaf。"
         case .authorizationFailed(let detail):
             return detail
-        case .unsafeStateAfterInstall:
-            return "安装后的服务存在活动限充或待恢复任务，拒绝覆盖固件状态。"
-        case .outdatedHelper(let found, let required):
-            return "MauLeaf 原生固件服务版本过旧（当前协议版本 \(found)，需要 \(required)），请重新启动应用并允许更新服务。"
-        case .helperUpgradeFailed(let found, let required):
-            return "MauLeaf 原生固件服务更新未生效（当前协议版本 \(found)，需要 \(required)）。请退出应用后重新启动，再尝试更新。"
+        case .helperVersionMismatch:
+            return AppText(key: "重装后的 Helper 版本仍与应用要求不一致，请检查应用包或重新下载 MauLeaf。")
+                .localized(in: AppLanguage.saved())
+        case .unsafeStateAfterInstall(let reason):
+            let message: AppText = "原生服务已安装，但当前固件状态不允许启用新的限充：\(reason)"
+            return message.localized(in: AppLanguage.saved())
+        case .helperUpgradeFailed:
+            return AppText(key: "重装后的 Helper 仍与应用要求的版本不一致，请检查应用包或重新下载 MauLeaf。")
+                .localized(in: AppLanguage.saved())
         }
     }
 }

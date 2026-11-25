@@ -1849,13 +1849,14 @@ final class ChargeManager: ObservableObject {
             helperInfoVerified = true
 
             if !FirmwareLimitHelperProtocolVersion.isCompatible(info) {
+                // Do not ask an incompatible Helper to interpret its own
+                // firmware state. The bundled replacement will read the
+                // preserved snapshot and pending jobs after installation.
                 helperVersionVerified = false
-                let observedState = try? await backend.readState()
-                guard !isPreparingToQuit else { return }
-                currentState = observedState
+                currentState = nil
                 helperNeedsInstallation = false
                 helperNeedsUpgrade = true
-                helperStateUnknown = observedState == nil
+                helperStateUnknown = true
                 backendReady = false
                 restoreReady = false
                 modeText = "原生控制服务版本不匹配"
@@ -1915,17 +1916,17 @@ final class ChargeManager: ObservableObject {
                     return
                 }
 
-                let observedState = try? await backend.readState()
-                guard !isPreparingToQuit else { return }
-                currentState = observedState
+                // An installed Helper that cannot answer the version
+                // handshake is not eligible for firmware operations. Do not
+                // call its legacy readState: it may reject zeroed boot values
+                // or omit the snapshot/recovery flags entirely.
+                currentState = nil
                 helperNeedsInstallation = false
-                helperNeedsUpgrade = observedState != nil
-                helperStateUnknown = observedState == nil
-                modeText = observedState == nil ? "固件控制状态未知" : "原生控制服务版本不匹配"
-                statusMessage = observedState == nil
-                    ? "无法确认当前控制服务版本或固件状态；保留所有恢复数据，正在尝试重新安装内置 Helper。"
-                    : "当前 Helper 不支持版本校验；将卸载旧版并安装应用内置版本。"
-                isError = observedState == nil
+                helperNeedsUpgrade = true
+                helperStateUnknown = true
+                modeText = "原生控制服务版本未知"
+                statusMessage = "无法验证当前 Helper 版本；保留所有恢复数据，正在卸载旧版并重新安装内置 Helper。"
+                isError = false
                 scheduleStartupHelperReplacement()
                 return
             }

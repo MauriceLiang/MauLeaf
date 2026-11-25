@@ -35,20 +35,62 @@ if [[ "$plist_label" != "$LABEL" || "$plist_program" != "$TARGET" ]]; then
 fi
 
 had_previous=false
-if [[ -e "$TARGET" || -e "$PLIST_TARGET" || -L "$TARGET" || -L "$PLIST_TARGET" ]]; then
-  if [[ -L "$TARGET" || -L "$PLIST_TARGET" || ! -f "$TARGET" || ! -f "$PLIST_TARGET" ]]; then
-    echo "检测到不完整或来源不明的同名服务，拒绝覆盖。" >&2
+had_target=false
+had_plist=false
+had_finalizer=false
+
+# Validate each installed component independently. A partially removed
+# Helper is recoverable as long as every remaining component has MauLeaf's
+# expected identity and root ownership.
+if [[ -L "$TARGET" ]]; then
+  echo "检测到符号链接 Helper，拒绝替换。" >&2
+  exit 3
+fi
+if [[ -e "$TARGET" ]]; then
+  if [[ ! -f "$TARGET" ]] || [[ "$(/usr/bin/stat -f '%u' "$TARGET")" != "0" ]] ||
+     ! /usr/bin/codesign --verify --strict "$TARGET"; then
+    echo "现有 Helper 文件类型、签名或 root 所有权无效，拒绝替换。" >&2
+    exit 3
+  fi
+  existing_identifier=$(/usr/bin/codesign -dv --verbose=2 "$TARGET" 2>&1 | /usr/bin/sed -n 's/^Identifier=//p')
+  if [[ "$existing_identifier" != "$LABEL" ]]; then
+    echo "现有 Helper 签名标识不属于 MauLeaf，拒绝替换。" >&2
+    exit 3
+  fi
+  had_target=true
+fi
+
+if [[ -L "$PLIST_TARGET" ]]; then
+  echo "检测到符号链接 LaunchDaemon，拒绝替换。" >&2
+  exit 3
+fi
+if [[ -e "$PLIST_TARGET" ]]; then
+  if [[ ! -f "$PLIST_TARGET" ]] || [[ "$(/usr/bin/stat -f '%u' "$PLIST_TARGET")" != "0" ]]; then
+    echo "现有 LaunchDaemon 文件类型或 root 所有权无效，拒绝替换。" >&2
     exit 3
   fi
   existing_label=$(/usr/libexec/PlistBuddy -c 'Print :Label' "$PLIST_TARGET" 2>/dev/null || true)
   existing_program=$(/usr/libexec/PlistBuddy -c 'Print :ProgramArguments:0' "$PLIST_TARGET" 2>/dev/null || true)
-  existing_identifier=$(/usr/bin/codesign -dv --verbose=2 "$TARGET" 2>&1 | /usr/bin/sed -n 's/^Identifier=//p')
-  if [[ "$existing_label" != "$LABEL" || "$existing_program" != "$TARGET" || "$existing_identifier" != "$LABEL" ]] ||
-     [[ "$(/usr/bin/stat -f '%u' "$TARGET")" != "0" || "$(/usr/bin/stat -f '%u' "$PLIST_TARGET")" != "0" ]] ||
-     ! /usr/bin/codesign --verify --strict "$TARGET"; then
-    echo "现有同名服务不是受信任的 MauLeaf root Helper，拒绝覆盖。" >&2
+  if [[ "$existing_label" != "$LABEL" || "$existing_program" != "$TARGET" ]]; then
+    echo "现有 LaunchDaemon 身份不属于 MauLeaf，拒绝替换。" >&2
     exit 3
   fi
+  had_plist=true
+fi
+
+if [[ -L "$FINALIZER" ]]; then
+  echo "检测到符号链接恢复脚本，拒绝替换。" >&2
+  exit 3
+fi
+if [[ -e "$FINALIZER" ]]; then
+  if [[ ! -f "$FINALIZER" ]] || [[ "$(/usr/bin/stat -f '%u' "$FINALIZER")" != "0" ]]; then
+    echo "现有恢复脚本不是受信任的 root 文件，拒绝替换。" >&2
+    exit 3
+  fi
+  had_finalizer=true
+fi
+
+if [[ "$had_target" == true || "$had_plist" == true || "$had_finalizer" == true ]]; then
   had_previous=true
 fi
 
@@ -76,14 +118,22 @@ rollback() {
       done
     fi
     if [[ "$had_previous" == true ]]; then
-      /usr/bin/install -o root -g wheel -m 755 "$staging/old-helper" "$TARGET" || true
-      /usr/bin/install -o root -g wheel -m 644 "$staging/old-plist" "$PLIST_TARGET" || true
+      if [[ -f "$staging/old-helper" ]]; then
+        /usr/bin/install -o root -g wheel -m 755 "$staging/old-helper" "$TARGET" || true
+      else
+        /bin/rm -f "$TARGET"
+      fi
+      if [[ -f "$staging/old-plist" ]]; then
+        /usr/bin/install -o root -g wheel -m 644 "$staging/old-plist" "$PLIST_TARGET" || true
+      else
+        /bin/rm -f "$PLIST_TARGET"
+      fi
       if [[ -f "$staging/old-finalizer" ]]; then
         /usr/bin/install -o root -g wheel -m 700 "$staging/old-finalizer" "$FINALIZER" || true
       else
         /bin/rm -f "$FINALIZER"
       fi
-      if [[ "$was_running" == true ]]; then
+      if [[ "$was_running" == true && -f "$TARGET" && -f "$PLIST_TARGET" ]]; then
         /bin/launchctl bootstrap system "$PLIST_TARGET" >/dev/null 2>&1 || true
       fi
     else
@@ -104,11 +154,9 @@ trap rollback EXIT
 /usr/bin/codesign --verify --strict "$staging/new-helper"
 /usr/bin/plutil -lint "$staging/new-plist"
 if [[ "$had_previous" == true ]]; then
-  /bin/cp -p "$TARGET" "$staging/old-helper"
-  /bin/cp -p "$PLIST_TARGET" "$staging/old-plist"
-  if [[ -f "$FINALIZER" && ! -L "$FINALIZER" ]]; then
-    /bin/cp -p "$FINALIZER" "$staging/old-finalizer"
-  fi
+  if [[ "$had_target" == true ]]; then /bin/cp -p "$TARGET" "$staging/old-helper"; fi
+  if [[ "$had_plist" == true ]]; then /bin/cp -p "$PLIST_TARGET" "$staging/old-plist"; fi
+  if [[ "$had_finalizer" == true ]]; then /bin/cp -p "$FINALIZER" "$staging/old-finalizer"; fi
   if /bin/launchctl print "system/$LABEL" >/dev/null 2>&1; then
     was_running=true
     /bin/launchctl bootout "system/$LABEL"

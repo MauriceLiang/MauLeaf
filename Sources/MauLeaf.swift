@@ -1337,7 +1337,7 @@ final class ChargeManager: ObservableObject {
                 self.restoreReady = state.restoreSupported
                 guard !state.active && !state.hasOriginalStateSnapshot
                         && !state.restorePending && !once.pending else {
-                    throw NativeControlError.unsafeStateAfterInstall
+                    throw NativeControlError.unsafeStateAfterInstall("恢复原始固件状态后校验未通过。")
                 }
                 self.dynamicSessionUpper = nil
                 self.dynamicNeedsNewCapture = true
@@ -1954,7 +1954,6 @@ final class ChargeManager: ObservableObject {
         currentState = state
         helperNeedsInstallation = false
         helperNeedsUpgrade = false
-        helperTooNew = false
         helperStateUnknown = false
         // Migration from the former active-only model. Never infer an
         // intent from an unknown active state without MauLeaf's snapshot.
@@ -2465,7 +2464,7 @@ final class ChargeManager: ObservableObject {
             )
             guard response.state.active && response.state.upper == plan.upper
                     && response.state.lower == plan.lower else {
-                throw NativeControlError.unsafeStateAfterInstall
+                throw NativeControlError.unsafeStateAfterInstall("固件写入后的寄存器读回结果与请求不一致。")
             }
             currentState = response.state
             backendReady = response.state.writeSupported

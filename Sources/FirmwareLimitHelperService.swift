@@ -377,7 +377,8 @@ final class FirmwareLimitHelperService: NSObject, FirmwareLimitHelperProtocol {
               !FileManager.default.fileExists(atPath: originalStateURL.path),
               !FileManager.default.fileExists(atPath: legacyRestoreURL.path),
               !FileManager.default.fileExists(atPath: restoreRequestURL.path),
-              !FileManager.default.fileExists(atPath: jobURL.path) else {
+              !FileManager.default.fileExists(atPath: jobURL.path),
+              !FileManager.default.fileExists(atPath: reconnectBaselineURL.path) else {
             throw FirmwareLimitCoreError.transportFailure(
                 "Pending or unverified firmware recovery data still exists."
             )
@@ -701,6 +702,10 @@ final class FirmwareLimitHelperService: NSObject, FirmwareLimitHelperProtocol {
 
     private func verifiedReconnectBaseline() -> FirmwareLimitOriginalStateSnapshot? {
         guard let boot = bootSessionProvider(), !boot.isEmpty,
+              !FileManager.default.fileExists(atPath: restoreRequestURL.path),
+              !FileManager.default.fileExists(atPath: jobURL.path),
+              !FileManager.default.fileExists(atPath: legacyRestoreURL.path),
+              !FileManager.default.fileExists(atPath: deferredUninstallURL.path),
               let attrs = try? FileManager.default.attributesOfItem(atPath: reconnectBaselineURL.path),
               attrs[.type] as? FileAttributeType == .typeRegular,
               (attrs[.ownerAccountID] as? NSNumber)?.uint32Value == geteuid(),
@@ -934,6 +939,8 @@ final class FirmwareLimitHelperService: NSObject, FirmwareLimitHelperProtocol {
               !FileManager.default.fileExists(atPath: restoreRequestURL.path),
               let firmware = try? controller.readState(),
               !firmware.isActive else { return }
+        // A deferred full removal ends any suspended session as well.
+        do { try clearReconnectBaseline() } catch { return }
 
         let process = Process()
         process.executableURL = deferredUninstallScriptURL

@@ -474,6 +474,7 @@ private enum ChargeManagerTests {
 
     @MainActor
     private static func testUnmanagedBootZeroNoWrite() async throws {
+        UserDefaults.standard.set(false, forKey: "desiredChargeLimitEnabled")
         UserDefaults.standard.set(false, forKey: "dynamicHoldEnabled")
         UserDefaults.standard.set(true, forKey: "nativeFirmwareWriteConfirmed")
         let backend = FixtureNativeFirmwareBackend()
@@ -490,15 +491,19 @@ private enum ChargeManagerTests {
         manager.start()
         try await wait { manager.currentState?.isInactiveUninitialized == true }
         try await Task.sleep(nanoseconds: 180_000_000)
-        try check(manager.popoverLimitStatus.source == "固件未就绪"
+        try check(manager.popoverLimitStatus.source == "未启用"
                   && !manager.hasOriginalStateSnapshot
-                  && backend.applyCount == 0 && !manager.canEnableLimit
+                  && backend.applyCount == 0 && manager.canEnableLimit
                   && manager.canToggleLimitFromCard,
-                  "without a valid pre-install snapshot, 0/0 remains read-only but offers recheck")
-        let reads = backend.readCount
+                  "inactive 0/0 is ready but never writes on launch without intent")
         manager.toggleLimitFromCard()
-        try await wait { backend.readCount > reads }
-        try check(backend.applyCount == 0, "rechecking uninitialized firmware never writes SMC")
+        try await wait { backend.applyCount == 1 && !manager.isBusy }
+        try check(backend.state.active && manager.hasOriginalStateSnapshot,
+                  "explicit enable creates a zero baseline and applies the requested limit")
+        manager.toggleLimitFromCard()
+        try await wait { backend.restoreCount == 1 && !manager.isBusy }
+        try check(backend.state.isInactiveUninitialized && !manager.hasOriginalStateSnapshot,
+                  "disable restores original inactive zero band")
         UserDefaults.standard.set(false, forKey: "nativeFirmwareWriteConfirmed")
     }
 
@@ -525,7 +530,7 @@ private enum ChargeManagerTests {
         manager.confirmForceReset()
         try await wait { backend.restoreCount == 1 && !manager.isBusy }
         try check(!backend.pending && !manager.fullOncePending && !backend.state.active
-                  && backend.applyCount == 0 && !manager.backendReady
+                  && backend.applyCount == 0 && manager.backendReady
                   && !UserDefaults.standard.bool(forKey: "desiredChargeLimitEnabled"),
                   "reset clears stale tasks without inventing a zero-state baseline or re-enabling the limit")
         UserDefaults.standard.removeObject(forKey: "desiredChargeLimitEnabled")
@@ -981,7 +986,7 @@ private enum ChargeManagerTests {
 
     @MainActor
     private static func testOutdatedBuildWithCompatibleProtocolUpgrades() async throws {
-        try check(FirmwareLimitHelperProtocolVersion.isCompatible(8, build: "1.5.1")
+        try check(FirmwareLimitHelperProtocolVersion.isCompatible(8, build: "1.6.0")
                   && !FirmwareLimitHelperProtocolVersion.isCompatible(8, build: "1.4.9")
                   && !FirmwareLimitHelperProtocolVersion.isCompatible(8, build: "1.5.2")
                   && !FirmwareLimitHelperProtocolVersion.isCompatible(8, build: nil)

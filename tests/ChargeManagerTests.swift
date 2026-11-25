@@ -512,18 +512,20 @@ private enum ChargeManagerTests {
         let manager = ChargeManager(
             backend: backend, autoInstallNativeHelper: false,
             autoUpgradeInstalledHelperOnLaunch: true,
-            helperInstallerForTesting: { upgrades += 1 },
+            helperInstallerForTesting: { upgrades += 1; _ = try await backend.restoreOriginalState() },
             helperArtifactsPresent: { true },
             batteryReader: { battery }, observePowerSourceChanges: false,
             dynamicSettleInterval: 0.01, rebootSettleInterval: 0.05
         )
         manager.start()
         try await wait { upgrades == 1 && manager.currentState != nil }
+        try await wait { manager.backendReady && !manager.isBusy }
+        manager.enableLimit()
         try await wait { backend.applyCount == 2 && backend.state.active && !manager.isBusy }
         manager.refresh()
         try await Task.sleep(nanoseconds: 80_000_000)
         try check(upgrades == 1 && manager.hasOriginalStateSnapshot,
-                  "old Helper 0/0 read error upgrades once and restores managed limit without deleting snapshot")
+                  "old Helper 0/0 read error reinstalls once and captures a fresh snapshot after explicit enable")
         let stopped = await manager.prepareForTermination()
         try check(stopped && !backend.state.active, "post-upgrade quit still restores original state")
         UserDefaults.standard.set(false, forKey: "nativeFirmwareWriteConfirmed")
@@ -841,8 +843,10 @@ private enum ChargeManagerTests {
                   && manager.popoverLimitStatus.source == "未启用",
                   "startup detects stale helper without performing a privileged upgrade")
         manager.isAdapterConnected = true
+        manager.toggleLimitFromCard()
+        try await wait { installs == 1 && manager.backendReady && !manager.isBusy }
         manager.enableLimit()
-        try await wait { installs == 1 && backend.applyCount == 1 && !manager.isBusy }
+        try await wait { backend.applyCount == 1 && !manager.isBusy }
         try check(!manager.isError && backend.state.active && manager.hasOriginalStateSnapshot,
                   "explicit enable upgrades once, checks new protocol and then writes safely")
     }
@@ -938,15 +942,16 @@ private enum ChargeManagerTests {
             backend: backend,
             autoInstallNativeHelper: false,
             autoUpgradeInstalledHelperOnLaunch: true,
-            helperInstallerForTesting: { installs += 1 },
+            helperInstallerForTesting: {
+                installs += 1
+                backend.reportedHelperVersion = nil
+            },
             helperArtifactsPresent: { true }
         )
         manager.start()
-        try await wait { manager.helperTooNew }
-        try check(installs == 0 && !manager.canRepairNativeHelper
-                  && !manager.canToggleLimitFromCard && !manager.backendReady
-                  && backend.applyCount == 0,
-                  "an older app cannot auto-replace an unknown newer helper")
+        try await wait { installs == 1 && manager.backendReady && !manager.isBusy }
+        try check(!manager.helperNeedsUpgrade && backend.applyCount == 0,
+                  "incompatible newer helper is safely replaced without activation")
     }
 
     @MainActor
@@ -962,6 +967,7 @@ private enum ChargeManagerTests {
             autoInstallNativeHelper: false,
             helperInstallerForTesting: {
                 installs += 1
+                _ = try await backend.restoreOriginalState()
                 backend.reportedHelperVersion = nil
             },
             helperArtifactsPresent: { true }
@@ -974,9 +980,9 @@ private enum ChargeManagerTests {
                   "the card explicitly names the repair action rather than pretending the limit is inactive")
         manager.toggleLimitFromCard()
         try await wait { installs == 1 && !manager.isBusy && !manager.helperNeedsUpgrade }
-        try check(backend.applyCount == 0 && backend.state.active
-                  && manager.isLegacyActive && manager.canDisableLegacyLimit,
-                  "manual Helper repair changes no SMC values and restores safe legacy-disable access")
+        try check(backend.applyCount == 0 && !backend.state.active
+                  && !manager.hasOriginalStateSnapshot && backend.restoreCount == 1,
+                  "manual Helper replacement restores old state before installing and never activates")
     }
 
     @MainActor

@@ -8,6 +8,7 @@ protocol NativeFirmwareBackend {
     func cancelOneTimeCharge() async throws -> FirmwareLimitHelperOperationResponse
     func suspendLimitForReconnect() async throws -> FirmwareLimitHelperOperationResponse
     func restoreOriginalState() async throws -> FirmwareLimitHelperOperationResponse
+    func enqueueQuitRecovery(removeComponents: Bool) async throws -> FirmwareLimitQuitRecoveryResponse
     func oneTimeChargeStatus() async throws -> FirmwareLimitHelperOneTimeStatusResponse
 }
 
@@ -62,6 +63,12 @@ final class FirmwareLimitHelperClient: NativeFirmwareBackend {
 
     func restoreOriginalState() async throws -> FirmwareLimitHelperOperationResponse {
         try await request { proxy, reply in proxy.restoreOriginalState(withReply: reply) }
+    }
+
+    func enqueueQuitRecovery(removeComponents: Bool) async throws -> FirmwareLimitQuitRecoveryResponse {
+        try await request { proxy, reply in
+            proxy.enqueueQuitRecovery(removeComponents: removeComponents, withReply: reply)
+        }
     }
 
     func oneTimeChargeStatus() async throws -> FirmwareLimitHelperOneTimeStatusResponse {

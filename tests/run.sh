@@ -307,7 +307,7 @@ fi
 grep -Fq 'codesign --verify --strict "$TARGET"' "$ROOT/Scripts/uninstall-native-firmware-helper.sh"
 grep -Fq 'helperBuildVersion' "$ROOT/Sources/FirmwareLimitHelperProtocol.swift"
 grep -Fq 'FirmwareLimitHelperProtocolVersion.isCompatible' "$ROOT/Sources/MauLeaf.swift"
-grep -Fq 'upgradeNativeHelperAfterStartupCheck' "$ROOT/Sources/MauLeaf.swift"
+grep -Fq 'replaceNativeHelperAfterStartupCheck' "$ROOT/Sources/MauLeaf.swift"
 grep -Fq 'trap rollback EXIT' "$ROOT/Scripts/install-native-firmware-helper.sh"
 grep -Fq 'old-helper' "$ROOT/Scripts/install-native-firmware-helper.sh"
 grep -Fq 'snapshot' "$ROOT/Scripts/install-native-firmware-helper.sh"

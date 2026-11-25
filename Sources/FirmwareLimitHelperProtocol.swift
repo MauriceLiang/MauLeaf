@@ -33,7 +33,7 @@ struct FirmwareLimitHelperInfoResponse: Codable, Equatable {
 /// service-only uninstall and reinstall path.
 enum FirmwareLimitHelperProtocolVersion {
     static let current = 7
-    static let requiredBuild = "1.4.0"
+    static let requiredBuild = FirmwareLimitHelperBuildVersion.current
 
     static func isCompatible(_ installed: Int, build: String? = nil) -> Bool {
         installed == current && build == requiredBuild
@@ -146,8 +146,9 @@ struct FirmwareLimitHelperStateResponse: Codable, Equatable {
         active = try container.decode(Bool.self, forKey: .active)
         upper = try container.decode(Int.self, forKey: .upper)
         lower = try container.decode(Int.self, forKey: .lower)
-        // Older read-only helpers returned only the four state fields. Treat
-        // them as legacy so the subsequent XPC version probe can trigger upgrade.
+        // Missing safety metadata is unknown, never a false/clean value.
+        // An incomplete legacy response therefore fails closed; the app
+        // performs the independent version handshake before requesting state.
         writeSupported = try container.decode(Bool.self, forKey: .writeSupported)
         writeBlockReason = try container.decodeIfPresent(String.self, forKey: .writeBlockReason)
         hasOriginalStateSnapshot = try container.decode(Bool.self, forKey: .hasOriginalStateSnapshot)

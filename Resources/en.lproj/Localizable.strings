@@ -295,3 +295,5 @@
 "当前固件状态不允许写入新的充电限制。" = "The current firmware state does not allow a new charging limit to be written.";
 "当前 Helper 版本与应用要求不一致，正在安装应用内置版本。" = "The installed Helper does not match this app. The bundled version will be installed.";
 "原生服务已安装，但当前固件状态不允许启用新的限充：%@" = "The native service is installed, but the current firmware state does not allow a new charge limit: %@";
+"原生控制服务版本未知" = "Native control helper version unknown";
+"无法验证当前 Helper 版本；保留所有恢复数据，正在卸载旧版并重新安装内置 Helper。" = "The installed Helper version could not be verified. Recovery data is preserved while the old service is removed and the bundled Helper is installed.";

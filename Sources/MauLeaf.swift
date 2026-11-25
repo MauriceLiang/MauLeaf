@@ -561,6 +561,14 @@ struct ContentView: View {
         } message: {
             Text(manager.text("当前固件限充没有 MauLeaf 原始快照。无法确认这些值是否由 Preview 4 或其他工具设置。继续操作只会清除 bfF0 激活标志，并保留 bfD0、bfE0 当前值；无法恢复历史阈值。"))
         }
+        .alert(manager.text("强制重置充电控制？"), isPresented: $manager.showForceResetConfirmation) {
+            Button(manager.text("强制重置"), role: .destructive) {
+                manager.confirmForceReset()
+            }
+            Button(manager.text("取消"), role: .cancel) {}
+        } message: {
+            Text(manager.text("取消本次充满及自动限充，恢复已保存的原始固件配置。不会删除无法确认的恢复数据，也不会重置 macOS 或电池。"))
+        }
         .task { manager.start() }
     }
 
@@ -906,6 +914,14 @@ struct ContentView: View {
                 .font(.caption2)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
+            HStack {
+                settingsLabel("充电控制重置")
+                Spacer(minLength: 8)
+                Button(manager.text("强制重置")) { manager.requestForceReset() }
+                    .controlSize(.small)
+                    .disabled(!manager.canForceReset)
+            }
+            .frame(minHeight: 30)
         }
         .padding(.vertical, 2)
     }
@@ -973,6 +989,9 @@ struct OperationFeedbackView: View {
                             }
                             if manager.canRetryChargeRequest {
                                 Button(manager.text("重试")) { manager.retryChargeRequest() }
+                            }
+                            if manager.canForceReset {
+                                Button(manager.text("强制重置")) { manager.requestForceReset() }
                             }
                         }
                         .font(.caption)
@@ -1116,6 +1135,7 @@ final class ChargeManager: ObservableObject {
     @Published var isError = false
     @Published var showNativeWriteConfirmation = false
     @Published var showLegacyDisableConfirmation = false
+    @Published var showForceResetConfirmation = false
     @Published private(set) var helperNeedsInstallation = false
     @Published private(set) var helperNeedsUpgrade = false
     @Published private(set) var helperStateUnknown = false
@@ -2334,6 +2354,66 @@ final class ChargeManager: ObservableObject {
         Task { await restoreOriginalFirmwareState() }
     }
 
+    var canForceReset: Bool {
+        helperVersionVerified && !helperNeedsUpgrade && !isBusy && !isPreparingToQuit
+    }
+
+    func requestForceReset() {
+        guard canForceReset else { return }
+        showForceResetConfirmation = true
+    }
+
+    func confirmForceReset() {
+        showForceResetConfirmation = false
+        guard canForceReset else { return }
+        setDesiredLimitEnabled(false)
+        UserDefaults.standard.set(false, forKey: "desiredChargeLimitEnabled")
+        limitDebounce?.cancel()
+        limitDebounce = nil
+        dynamicReconcileTask?.cancel()
+        dynamicReconcileTask = nil
+        automaticUnplugRestoreTask?.cancel()
+        automaticUnplugRestoreTask = nil
+        automaticReconnectApplyTask?.cancel()
+        automaticReconnectApplyTask = nil
+        pendingAction = nil
+        lastAction = nil
+        dynamicSessionUpper = nil
+        dynamicNeedsNewCapture = true
+        isBusy = true
+        activeOperation = .restoringLimit
+        isError = false
+        statusMessage = "正在重置充电控制…"
+        Task {
+            defer { isBusy = false; activeOperation = nil }
+            do {
+                _ = try await backend.restoreOriginalState()
+                let state = try await backend.readState()
+                let once = try await backend.oneTimeChargeStatus()
+                updateFromNativeState(state, oneTime: once, status: "充电控制已重置。")
+                guard !state.active, !state.hasOriginalStateSnapshot,
+                      !state.hasReconnectBaseline, !state.restorePending, !once.pending else {
+                    statusMessage = "重置尚未完成；已保留恢复数据，请保持电源连接后重试。"
+                    isError = true
+                    return
+                }
+                if state.writeSupported {
+                    statusMessage = "充电控制已重置，所有充电任务已取消，可重新启用限充。"
+                    isError = false
+                } else {
+                    statusMessage = "充电任务已清除，但固件阈值仍未就绪。请保持接电并重新检测，必要时重启 Mac。"
+                    isError = true
+                }
+            } catch {
+                NSLog("MauLeaf force reset failed: %@", error.localizedDescription)
+                isBusy = false
+                await refreshNativeState()
+                statusMessage = "重置尚未完成；已保留恢复数据，请保持电源连接后重试。"
+                isError = true
+            }
+        }
+    }
+
     private func restoreOriginalFirmwareState() async {
         guard !isBusy, !isPreparingToQuit else { return }
         let hadOriginalSnapshot = hasOriginalStateSnapshot
@@ -2595,6 +2675,7 @@ final class ChargeManager: ObservableObject {
         lastAction = nil
         showNativeWriteConfirmation = false
         showLegacyDisableConfirmation = false
+        showForceResetConfirmation = false
 
         let deadline = Date().addingTimeInterval(30)
         while isBusy {

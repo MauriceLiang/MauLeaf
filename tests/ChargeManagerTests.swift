@@ -205,6 +205,7 @@ private enum ChargeManagerTests {
         try await testNewerHelperIsReplacedByBundledVersion()
         try await testOutdatedActiveHelperCanBeRepairedWithoutFirmwareWrite()
         try await testInstallFailureDoesNotWriteFirmware()
+        try await testFastQuitHandoff()
         try await testAutomaticQuitRestore()
         try await testQuitDuringOneTimeFullCharge()
         try await testUnpluggedManualDisableRestoresImmediately()
@@ -1032,7 +1033,7 @@ private enum ChargeManagerTests {
 
     @MainActor
     private static func testOutdatedBuildWithCompatibleProtocolUpgrades() async throws {
-        try check(FirmwareLimitHelperProtocolVersion.isCompatible(8, build: "1.6.0")
+        try check(FirmwareLimitHelperProtocolVersion.isCompatible(9, build: "1.7.0")
                   && !FirmwareLimitHelperProtocolVersion.isCompatible(8, build: "1.4.9")
                   && !FirmwareLimitHelperProtocolVersion.isCompatible(8, build: "1.5.2")
                   && !FirmwareLimitHelperProtocolVersion.isCompatible(8, build: nil)
@@ -1156,6 +1157,26 @@ private enum ChargeManagerTests {
         try check(backend.state.active && manager.hasOriginalStateSnapshot,
                   "test fixture enabled a limit while retaining the pre-MauLeaf snapshot")
         return manager
+    }
+
+    @MainActor
+    private static func testFastQuitHandoff() async throws {
+        let backend = FixtureNativeFirmwareBackend()
+        let manager = try await activatedManager(backend: backend)
+        manager.removeComponentsOnQuit = true
+        backend.failQuitHandoff = true
+        let rejected = await manager.handoffQuitRecovery()
+        try check(!rejected && manager.isError && !manager.isPreparingToQuit &&
+                  backend.state.active && backend.restoreCount == 0,
+                  "failed durable handoff never claims recovery or silently quits")
+        backend.failQuitHandoff = false
+        let accepted = await manager.handoffQuitRecovery()
+        try check(accepted && manager.isPreparingToQuit && !manager.didVerifyFirmwareOnQuit &&
+                  backend.quitHandoffCount == 2 && backend.quitHandoffRemove &&
+                  backend.restoreCount == 0 && backend.state.active &&
+                  !UserDefaults.standard.bool(forKey: "desiredChargeLimitEnabled"),
+                  "successful quit only acknowledges background ownership, never waits for restoration")
+        UserDefaults.standard.set(false, forKey: "removeComponentsOnQuit")
     }
 
     @MainActor

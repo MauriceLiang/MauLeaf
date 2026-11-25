@@ -567,7 +567,7 @@ struct ContentView: View {
             }
             Button(manager.text("取消"), role: .cancel) {}
         } message: {
-            Text(manager.text("取消本次充满及自动限充，恢复已保存的原始固件配置。不会删除无法确认的恢复数据，也不会重置 macOS 或电池。"))
+            Text(manager.text("取消充电任务并恢复原始配置。恢复失败时保留恢复数据。"))
         }
         .task { manager.start() }
     }
@@ -947,6 +947,7 @@ struct OperationFeedbackView: View {
     @State private var dismissedError: AppText?
     @State private var showDetails = false
     @State private var errorDetails: AppText = ""
+    @State private var errorTitle: AppText = "操作未完成"
 
     private var errorVisible: Bool {
         !manager.isBusy && manager.isError && dismissedError != manager.statusMessage
@@ -956,20 +957,30 @@ struct OperationFeedbackView: View {
         manager.isBusy && manager.activeOperation == nil
     }
 
+    private var firmwareNotReady: Bool {
+        manager.currentState?.isInactiveUninitialized == true
+            && !manager.backendReady
+    }
+
+    private var compactErrorTitle: AppText {
+        if manager.statusMessage.source.hasPrefix("重置尚未完成") { return "重置未完成" }
+        return firmwareNotReady ? "固件未就绪" : manager.statusMessage
+    }
+
     var body: some View {
         Group {
             if errorVisible || genericBusy {
-                VStack(alignment: .leading, spacing: 7) {
-                    HStack(alignment: .top, spacing: 8) {
+                VStack(alignment: .leading, spacing: 5) {
+                    HStack(alignment: .center, spacing: 7) {
                         if genericBusy {
                             ProgressView().controlSize(.small)
                         } else {
                             Image(systemName: "exclamationmark.triangle.fill")
                                 .foregroundStyle(Color.orange)
                         }
-                        Text(manager.text(manager.statusMessage))
+                        Text(manager.text(errorVisible ? compactErrorTitle : manager.statusMessage))
                             .font(.caption)
-                            .lineLimit(errorVisible ? 3 : 2)
+                            .lineLimit(2)
                             .fixedSize(horizontal: false, vertical: true)
                             .layoutPriority(1)
                             .frame(maxWidth: .infinity, alignment: .leading)
@@ -982,12 +993,13 @@ struct OperationFeedbackView: View {
                         }
                     }
                     if errorVisible {
-                        HStack(spacing: 12) {
-                            Button(manager.text("查看详情")) {
+                        HStack(spacing: 10) {
+                            Button(manager.text("详情")) {
                                 errorDetails = manager.statusMessage
+                                errorTitle = firmwareNotReady ? "固件未就绪" : "操作未完成"
                                 showDetails = true
                             }
-                            if manager.canRetryChargeRequest {
+                            if manager.canRetryChargeRequest && (!firmwareNotReady || !manager.canForceReset) {
                                 Button(manager.text("重试")) { manager.retryChargeRequest() }
                             }
                             if manager.canForceReset {
@@ -996,13 +1008,14 @@ struct OperationFeedbackView: View {
                         }
                         .font(.caption)
                         .buttonStyle(.link)
+                        .padding(.leading, 20)
                     }
                 }
-                .padding(11)
+                .padding(8)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .background(Color.primary.opacity(0.045), in: RoundedRectangle(cornerRadius: 10))
                 .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(Color.primary.opacity(0.08)))
-                .padding(.bottom, 12)
+                .padding(.bottom, 8)
                 .transition(.opacity.combined(with: .move(edge: .top)))
             }
         }
@@ -1014,7 +1027,7 @@ struct OperationFeedbackView: View {
         .onReceive(manager.$statusMessage.removeDuplicates().receive(on: RunLoop.main)) { message in
             if dismissedError != message { dismissedError = nil }
         }
-        .alert(manager.text("操作未完成"), isPresented: $showDetails) {
+        .alert(manager.text(errorTitle), isPresented: $showDetails) {
             Button(manager.text("关闭"), role: .cancel) { }
         } message: { Text(manager.text(errorDetails)) }
     }
@@ -2073,7 +2086,7 @@ final class ChargeManager: ObservableObject {
                 statusMessage = "已保留原始固件快照；待连接电源稳定后恢复原先的限充设置。"
                 isError = false
             } else {
-                statusMessage = "固件限充阈值尚未初始化。保持电源连接，点击固件未就绪重新检测；若持续异常，请正常重启 Mac 后重试。未写入固件。"
+                statusMessage = "请保持接电，尝试强制重置。若仍未就绪，请重启 Mac。未写入固件。"
                 isError = true
             }
         } else if state.active && state.hasOriginalStateSnapshot {
@@ -2401,7 +2414,7 @@ final class ChargeManager: ObservableObject {
                     statusMessage = "充电控制已重置，所有充电任务已取消，可重新启用限充。"
                     isError = false
                 } else {
-                    statusMessage = "充电任务已清除，但固件阈值仍未就绪。请保持接电并重新检测，必要时重启 Mac。"
+                    statusMessage = "任务已清除，固件仍未就绪。请保持接电，必要时重启 Mac。"
                     isError = true
                 }
             } catch {

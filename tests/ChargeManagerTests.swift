@@ -894,6 +894,7 @@ private enum ChargeManagerTests {
         manager.start()
         try await wait { manager.helperStateUnknown && !manager.isBusy }
         try check(installs == 0 && !manager.helperNeedsUpgrade
+                  && !manager.canRepairNativeHelper
                   && backend.applyCount == 0 && backend.restoreCount == 0,
                   "a correctly versioned Helper with an unreadable firmware state is not uninstalled or replaced")
     }

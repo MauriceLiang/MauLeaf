@@ -257,12 +257,12 @@
 "正在恢复原始参数" = "Restoring original firmware";
 "等待断电恢复" = "Waiting to restore after unplug";
 "高于目标时保持电量；关闭后在已测试机型上可能出现拔电识别延迟" = "Hold charge above target; unplug detection may lag when disabled on the tested Mac";
-"超限时保持电量；关闭后拔电识别可能延迟（已测试机型）。" = "Hold charge above target; disabling may delay unplug detection on the tested Mac.";
+"超限时保持电量；关闭后拔电识别可能延迟（已测试机型）。" = "Hold above target. Off may delay unplug detection.";
 "目标 %@%% · 临时上限 %@%%" = "Target %@%% · Temporary ceiling %@%%";
 "动态保电已应用：目标 %@%%，临时上限 %@%%。" = "Dynamic Hold applied: target %@%%, temporary ceiling %@%%.";
 "退出时移除组件" = "Remove components on quit";
 "开启后每次退出会移除控制组件；关闭则保留。" = "On: remove the helper and scripts when quitting. Off: keep them installed.";
-"建议卸载前开启，退出并确认清理完成后再删除 App。" = "Before uninstalling, enable this, quit, then delete the app after cleanup succeeds.";
+"建议卸载前开启，退出并确认清理完成后再删除 App。" = "Enable before uninstalling. Quit before deleting.";
 "关闭后保留供电状态，仅隐藏供电流向图" = "When disabled, keep the power status visible and hide only the flow diagram.";
 "显示供电详情" = "Power details";
 "固件异常 · 待恢复" = "Firmware error · Recovery pending";
@@ -305,11 +305,11 @@
 
 "固件限充阈值尚未初始化。保持电源连接，点击固件未就绪重新检测；若持续异常，请正常重启 Mac 后重试。未写入固件。" = "Firmware charge thresholds are not initialized. Keep the charger connected and click Firmware not ready to recheck. If the problem persists, restart your Mac normally and try again. No firmware was written.";
 
-"强制重置充电控制？" = "Force reset charge control?";
+"强制重置充电控制？" = "Reset charge control?";
 
 "强制重置" = "Force reset";
 
-"充电控制重置" = "Charge control reset";
+"充电控制重置" = "Charge control";
 
 "取消本次充满及自动限充，恢复已保存的原始固件配置。不会删除无法确认的恢复数据，也不会重置 macOS 或电池。" = "Cancel one-time charging and automatic limiting, then restore the saved original firmware configuration. Unverified recovery data will not be deleted. macOS and the battery are not reset.";
 

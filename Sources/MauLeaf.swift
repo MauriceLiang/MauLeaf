@@ -1839,7 +1839,9 @@ final class ChargeManager: ObservableObject {
     /// On AC plug/unplug, update battery UI immediately (without waiting
     /// for the 20-second timer). A couple of bounded follow-up reads absorb
     /// transient lag while macOS updates AppleSmartBattery registry fields.
-    /// No privileged Helper calls are made for these telemetry events.
+    /// On AC reconnect with pending recovery, also read the Helper's
+    /// authoritative state so a completed restore can resume the opted-in
+    /// limit without waiting for the periodic 20-second fallback.
     private func handlePowerSourceChange() {
         guard started, !isPreparingToQuit else { return }
         readSystemBattery()
@@ -1848,9 +1850,15 @@ final class ChargeManager: ObservableObject {
             try? await Task.sleep(nanoseconds: 350_000_000)
             guard !Task.isCancelled, let self, !self.isPreparingToQuit else { return }
             self.readSystemBattery()
+            if self.isAdapterConnected, self.restorePending, !self.isBusy {
+                await self.refreshNativeState()
+            }
             try? await Task.sleep(nanoseconds: 850_000_000)
             guard !Task.isCancelled, !self.isPreparingToQuit else { return }
             self.readSystemBattery()
+            if self.isAdapterConnected, self.restorePending, !self.isBusy {
+                await self.refreshNativeState()
+            }
         }
     }
 

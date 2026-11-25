@@ -207,8 +207,14 @@ final class FirmwareLimitHelperService: NSObject, FirmwareLimitHelperProtocol {
                     )
                 } catch {
                     do {
+                        try deferZeroRestoreOnBattery(snapshot)
                         let restorePermit = try writeRestorePermit(for: snapshot)
-                        _ = try controller.restore(snapshot.state, permit: restorePermit)
+                        _ = try controller.restore(snapshot.state, permit: restorePermit, preflight: { [self] in
+                            if snapshot.state.isInactiveUninitialized && !isOnACPower() {
+                                throw FirmwareLimitCoreError.externalPowerRequired
+                            }
+                            _ = try writeRestorePermit(for: snapshot)
+                        })
                         try removePersistedOriginalStateSnapshot()
                     } catch {
                         var pending = snapshot
@@ -473,6 +479,12 @@ final class FirmwareLimitHelperService: NSObject, FirmwareLimitHelperProtocol {
                   let baseline = verifiedReconnectBaseline(),
                   !FileManager.default.fileExists(atPath: deferredUninstallURL.path) {
             snapshot = baseline
+        } else if previous.isInactiveUninitialized {
+            // AC initialization and exact inactive zero restoration have
+            // been verified on the allowlisted device. Capture actual zeros.
+            snapshot = try FirmwareLimitOriginalStateSnapshot(
+                deviceIdentity: identityProvider(), state: previous
+            )
         } else {
             throw FirmwareLimitCoreError.invalidStoredBand(upper: previous.upper, lower: previous.lower)
         }
@@ -521,7 +533,7 @@ final class FirmwareLimitHelperService: NSObject, FirmwareLimitHelperProtocol {
             startMonitoring()
             try clearFullChargeJobForRestore()
 
-            let current = try readStateForDisplay()
+            let current = try? readStateForDisplay()
             // Even active zeroed thresholds may be restored from a verified
             // original snapshot on battery power. Offline permit validation
             // still requires exact hardware identity, both power sources
@@ -530,8 +542,9 @@ final class FirmwareLimitHelperService: NSObject, FirmwareLimitHelperProtocol {
             if current == requested.state {
                 // All keys already match: verification requires no write
                 // permit or external power, even below the 30% write floor.
-                restored = current
+                restored = requested.state
             } else {
+                try deferZeroRestoreOnBattery(requested)
                 let permit = try writeRestorePermit(for: requested)
                 restored = try controller.restore(
                     requested.state,
@@ -539,6 +552,9 @@ final class FirmwareLimitHelperService: NSObject, FirmwareLimitHelperProtocol {
                     preflight: { [self] in
                         // Re-evaluate model, snapshot and power before
                         // every SMC write attempt, including retries.
+                        if requested.state.isInactiveUninitialized && !isOnACPower() {
+                            throw FirmwareLimitCoreError.externalPowerRequired
+                        }
                         _ = try writeRestorePermit(for: requested)
                     }
                 )
@@ -675,6 +691,19 @@ final class FirmwareLimitHelperService: NSObject, FirmwareLimitHelperProtocol {
                 userConfirmed: true
             )
         )
+    }
+
+    // Zero threshold writes were proven only on AC. On battery, safely
+    // clear the activation flag under the existing strict offline permit,
+    // retaining the durable snapshot until exact AC restoration succeeds.
+    private func deferZeroRestoreOnBattery(_ snapshot: FirmwareLimitOriginalStateSnapshot) throws {
+        guard snapshot.state.isInactiveUninitialized, !isOnACPower() else { return }
+        let permit = try writeRestorePermit(for: snapshot)
+        try controller.deactivateForZeroRestore(permit: permit, preflight: { [self] in
+            guard !isOnACPower() else { throw FirmwareLimitCoreError.externalPowerRequired }
+            _ = try writeRestorePermit(for: snapshot)
+        })
+        throw FirmwareLimitCoreError.externalPowerRequired
     }
 
     private func writeRestorePermit(
@@ -815,16 +844,20 @@ final class FirmwareLimitHelperService: NSObject, FirmwareLimitHelperProtocol {
 
         if let snapshot, snapshot.restoreRequested {
             do {
-                let current = try readStateForDisplay()
+                let current = try? readStateForDisplay()
                 // A snapshot-bound offline recovery is permitted even
                 // after an active 0/0 boot read, but never without the
                 // already-validated offline restore preflight.
                 if current != snapshot.state {
+                    try deferZeroRestoreOnBattery(snapshot)
                     let permit = try writeRestorePermit(for: snapshot)
                     _ = try controller.restore(
                         snapshot.state,
                         permit: permit,
                         preflight: { [self] in
+                            if snapshot.state.isInactiveUninitialized && !isOnACPower() {
+                                throw FirmwareLimitCoreError.externalPowerRequired
+                            }
                             _ = try writeRestorePermit(for: snapshot)
                         }
                     )

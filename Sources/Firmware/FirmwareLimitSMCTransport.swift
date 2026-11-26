@@ -117,6 +117,44 @@ final class AppleSMCFirmwareLimitTransport: FirmwareLimitTransport {
         }
     }
 
+    // Separate, narrowly scoped LED channel. Never add ACLC to the three-key
+    // charge-limit enum, snapshots, plans or general firmware write permit.
+    func readMagSafeLED() throws -> UInt8 {
+        try locked {
+            var info = FirmwareSMCParam()
+            info.key = Self.fourCC("ACLC")
+            info.selector = 9
+            let metadata = try call(&info)
+            guard metadata.info.size == 1, Self.fourCCString(metadata.info.type) == "ui8" else {
+                throw FirmwareSMCTransportError.invalidPayloadSize(Int(metadata.info.size))
+            }
+            var input = FirmwareSMCParam()
+            input.key = Self.fourCC("ACLC")
+            input.info.size = 1
+            input.selector = 5
+            let output = try call(&input)
+            return withUnsafeBytes(of: output.bytes) { $0[0] }
+        }
+    }
+
+    func writeMagSafeLED(_ value: UInt8) throws {
+        // The only allowed requests are green and handing control to macOS.
+        guard value == 0x03 || value == 0x00 else {
+            throw FirmwareSMCTransportError.accessDenied
+        }
+        try locked {
+            var input = FirmwareSMCParam()
+            input.key = Self.fourCC("ACLC")
+            input.info.size = 1
+            input.selector = 6
+            withUnsafeMutableBytes(of: &input.bytes) { $0[0] = value }
+            let output = try call(&input)
+            guard output.status == 0 else {
+                throw FirmwareSMCTransportError.callFailed(kIOReturnError, output.status)
+            }
+        }
+    }
+
     private func locked<T>(_ body: () throws -> T) throws -> T {
         lock.lock()
         defer { lock.unlock() }

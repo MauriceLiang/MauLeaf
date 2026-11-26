@@ -15,9 +15,6 @@ final class ChargeManager: ObservableObject {
     @Published var limit: Int {
         didSet { UserDefaults.standard.set(limit, forKey: "chargeLimit") }
     }
-    @Published var appearance = AppAppearance.saved() {
-        didSet { appearance.save() }
-    }
     @Published var language = AppLanguage.saved() {
         didSet { UserDefaults.standard.set(language.rawValue, forKey: AppLanguage.preferenceKey) }
     }

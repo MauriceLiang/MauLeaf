@@ -22,7 +22,7 @@
 **MauLeaf** is a free, open-source **macOS battery charge limiter and battery care app for Apple Silicon MacBook**. Built with SwiftUI + AppKit and a native AppleSMC controller, it focuses on **charging limits** and **one-time full charge**. It lives in the menu bar as a green leaf, with no separate window or batt dependency. **Firmware writes currently support only one verified M1 Pro hardware profile**, as detailed below.
 
 > [!NOTE]
-> **MauLeaf v1.2.0**: App 1.2.0 / Helper 1.7.0 / XPC v9. Organized source modules and build inputs, refined menu rows and native settings, added a Light Mode switch (dark by default), and improved light-mode contrast. Firmware control and fast quit remain unchanged. [Stable release notes](docs/releases/v1.2.0.md).
+> **MauLeaf v1.3.0**: App 1.3.0 / Helper 1.8.0 / XPC v9. Adds guarded MagSafe 3 LED control and a single dark appearance, with no appearance setting. Existing charge-limit, disconnect recovery and fast-quit behavior is retained. [Stable release notes](docs/releases/v1.3.0.md).
 
 > [!CAUTION]
 > **A stable release does not imply universal hardware support.** New firmware charging-limit writes are restricted to **MacBookPro18,1 (M1 Pro) + macOS 15 + mBoot-20457.41.3 + arm64**. macOS 26/27, Intel, and unverified devices cannot activate new limits. Battery viewing may still work on other devices. Actual charge-stop and resume percentages have not yet completed full physical validation; successful register read-back is not proof of real charging behavior.
@@ -76,7 +76,7 @@ The current package is **ad-hoc code-signed, without Apple Developer ID signing 
 | Limit setting | 50–95% slider and 70 / 75 / 80 / 85 / 90 / 95% presets; settings are local only when disabled |
 | One-time full charge | Start or cancel from the top card, available only while MauLeaf is managing an active limit |
 | Dynamic Hold | Optional charge-holding policy when above the target; turning it off may delay unplug recognition on the tested Mac |
-| Settings | Light Mode (dark by default), power details, Chinese/English interface, Dynamic Hold, Remove components on quit, and charging-control reset |
+| Settings | Power details, Chinese/English interface, Dynamic Hold, Remove components on quit, and charging-control reset |
 | Quit | Hand off durable recovery using the saved cleanup preference, then exit |
 
 Before first activation, the privileged Helper snapshots the original bfF0, bfD0 and bfE0 values with device identity in a root-owned recovery file. Later limit changes or one-time full charge never overwrite the snapshot. Disabling a limit restores all original values with read-back verification; unknown states or failed restores are never reported as safe.

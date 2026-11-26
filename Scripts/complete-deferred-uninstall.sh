@@ -27,6 +27,7 @@ IDENTIFIER=$(/usr/bin/codesign -dv --verbose=2 "$HELPER" 2>&1 | /usr/bin/sed -n 
 # A second, fresh hardware read is mandatory; NEVER remove recovery
 # capability if firmware is still active or any snapshot/job is present.
 "$HELPER" --verify-clean-and-inactive
+[[ ! -e "$SUPPORT/magsafe-led.pending" ]] || exit 6
 
 # The cleanup script runs as an independent child of the helper. Remove
 # fully verified files first, then unload launchd LAST: bootout may terminate

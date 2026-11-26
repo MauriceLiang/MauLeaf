@@ -53,7 +53,7 @@ enum FirmwareLimitHelperProtocolVersion {
 /// Increment this build whenever the privileged Helper implementation or
 /// its externally observable behavior changes.
 enum FirmwareLimitHelperBuildVersion {
-    static let current = "1.7.0"
+    static let current = "1.8.0"
 }
 
 struct FirmwareLimitHelperStateResponse: Codable, Equatable {

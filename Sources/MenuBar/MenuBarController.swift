@@ -50,7 +50,6 @@ final class MauLeafMenuController: NSObject {
     private let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
     private let panel: NSPanel
     private var refreshSubscription: AnyCancellable?
-    private var appearanceSubscription: AnyCancellable?
     private var renderedLeafStyle: MenuBarLeafStyle?
     private var globalMouseMonitor: Any?
     private var localMouseMonitor: Any?
@@ -69,6 +68,7 @@ final class MauLeafMenuController: NSObject {
         )
         super.init()
 
+        panel.appearance = NSAppearance(named: .darkAqua)
         panel.title = "MauLeaf"
         panel.isOpaque = false
         panel.backgroundColor = .clear
@@ -86,6 +86,7 @@ final class MauLeafMenuController: NSObject {
         // Layout itself determines the height; Settings/limit expansion and
         // inline errors still trigger the measured NSPanel frame resize.
         let root = ContentView(manager: manager)
+            .environment(\.colorScheme, .dark)
             .fixedSize(horizontal: false, vertical: true)
             .background {
                 GeometryReader { proxy in
@@ -106,6 +107,7 @@ final class MauLeafMenuController: NSObject {
         .ignoresSafeArea(.container, edges: .top)
         .frame(width: panelWidth)
         panel.contentView = NSHostingView(rootView: root)
+        panel.contentView?.appearance = panel.appearance
         panel.contentView?.wantsLayer = true
         panel.contentView?.layer?.backgroundColor = NSColor.clear.cgColor
 
@@ -121,22 +123,8 @@ final class MauLeafMenuController: NSObject {
             // @Published fires before the stored value changes.
             DispatchQueue.main.async { [weak self] in self?.updateStatusItem() }
         }
-        appearanceSubscription = manager.$appearance.removeDuplicates().sink { [weak self] appearance in
-            self?.applyAppearance(appearance)
-        }
         updateStatusItem()
         manager.start()
-    }
-
-    private func applyAppearance(_ appearance: AppAppearance) {
-        let native: NSAppearance?
-        switch appearance {
-        case .light: native = NSAppearance(named: .aqua)
-        case .dark: native = NSAppearance(named: .darkAqua)
-        }
-        panel.appearance = native
-        panel.contentView?.appearance = native
-        panel.contentView?.needsDisplay = true
     }
 
     private func updateStatusItem() {

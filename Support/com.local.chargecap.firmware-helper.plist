@@ -30,6 +30,8 @@
             <true/>
             <key>/Library/Application Support/MauLeaf/quit-recovery.pending</key>
             <true/>
+            <key>/Library/Application Support/MauLeaf/magsafe-led.pending</key>
+            <true/>
         </dict>
     </dict>
     <key>ProcessType</key>

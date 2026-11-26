@@ -1033,7 +1033,7 @@ private enum ChargeManagerTests {
 
     @MainActor
     private static func testOutdatedBuildWithCompatibleProtocolUpgrades() async throws {
-        try check(FirmwareLimitHelperProtocolVersion.isCompatible(9, build: "1.7.0")
+        try check(FirmwareLimitHelperProtocolVersion.isCompatible(9, build: "1.8.0")
                   && !FirmwareLimitHelperProtocolVersion.isCompatible(8, build: "1.4.9")
                   && !FirmwareLimitHelperProtocolVersion.isCompatible(8, build: "1.5.2")
                   && !FirmwareLimitHelperProtocolVersion.isCompatible(8, build: nil)

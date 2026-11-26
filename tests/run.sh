@@ -31,7 +31,7 @@ swiftc "$ROOT/Sources/Firmware/FirmwareLimitCore.swift" "$ROOT/Sources/Firmware/
     "$ROOT/tests/FirmwareLimitReconciliationTests.swift" -o "$TMP/firmwarereconciliationtests"
 "$TMP/firmwarereconciliationtests"
 
-swiftc -parse-as-library "$ROOT/Sources/Shared/AppLocalization.swift" "$ROOT/Sources/Shared/AppAppearance.swift" \
+swiftc -parse-as-library "$ROOT/Sources/Shared/AppLocalization.swift" \
     "$ROOT/tests/LocalizationTests.swift" -o "$TMP/localizationtests"
 "$TMP/localizationtests"
 
@@ -180,14 +180,19 @@ fi
 grep -Fq 'Toggle(isOn: $manager.showPowerFlow)' <<< "$POPOVER_SOURCE"
 grep -Fq 'Toggle(isOn: $manager.removeComponentsOnQuit)' <<< "$POPOVER_SOURCE"
 grep -Fq 'Picker("", selection: $manager.language)' <<< "$POPOVER_SOURCE"
-grep -Fq 'get: { manager.appearance == .light }' <<< "$POPOVER_SOURCE"
-grep -Fq 'set: { manager.appearance = $0 ? .light : .dark }' <<< "$POPOVER_SOURCE"
-grep -Fq 'settingsLabel("浅色模式")' <<< "$POPOVER_SOURCE"
-grep -Fq 'AppTheme.chargeGreen(in: colorScheme)' <<< "$POPOVER_SOURCE"
 grep -Fq 'set: { manager.setDynamicHoldEnabled($0) }' <<< "$POPOVER_SOURCE"
 grep -Fq '.disabled(manager.isDynamicHoldSwitchLocked)' <<< "$POPOVER_SOURCE"
 grep -Fq 'settingsLabel("显示供电详情")' <<< "$POPOVER_SOURCE"
-[[ "$(grep -Fc '.toggleStyle(.switch)' <<< "$POPOVER_SOURCE")" -eq 4 ]]
+[[ "$(grep -Fc '.toggleStyle(.switch)' <<< "$POPOVER_SOURCE")" -eq 3 ]]
+# Dark-only is a product invariant, not a disabled preference.
+grep -Fq 'NSApp.appearance = NSAppearance(named: .darkAqua)' "$ROOT/Sources/App/MauLeafApp.swift"
+grep -Fq 'panel.appearance = NSAppearance(named: .darkAqua)' "$ROOT/Sources/MenuBar/MenuBarController.swift"
+grep -Fq '.environment(\.colorScheme, .dark)' "$ROOT/Sources/MenuBar/MenuBarController.swift"
+if grep -REn 'AppAppearance|AppTheme|manager\.appearance|\.light\b|\.aqua\b|浅色模式' "$ROOT/Sources" "$ROOT/Resources"; then
+    echo "Retired appearance options or palette remain in runtime sources" >&2
+    exit 1
+fi
+[[ ! -e "$ROOT/Sources/Shared/AppAppearance.swift" && ! -e "$ROOT/Sources/Shared/AppTheme.swift" ]]
 [[ "$(grep -Fc '.pickerStyle(.segmented)' <<< "$POPOVER_SOURCE")" -eq 0 ]]
 [[ "$(grep -Fc '.pickerStyle(.menu)' <<< "$POPOVER_SOURCE")" -eq 1 ]]
 if grep -Eq 'powerFlowRefreshSeconds|供电刷新间隔' <<< "$POPOVER_SOURCE"; then

@@ -26,6 +26,7 @@ struct FeedbackLayoutTests {
 
         UserDefaults.standard.set(80, forKey: "chargeLimit")
         UserDefaults.standard.removeObject(forKey: "showPowerFlow")
+        UserDefaults.standard.removeObject(forKey: AppAppearance.preferenceKey)
         UserDefaults.standard.set(true, forKey: "nativeFirmwareWriteConfirmed")
         let backend = FixtureNativeFirmwareBackend()
         let manager = ChargeManager(backend: backend, autoInstallNativeHelper: false)
@@ -102,11 +103,11 @@ struct FeedbackLayoutTests {
             guard limitOpenHeight > normal.0 + 35,
                   settingsOpenHeight > normal.0 + 35,
                   limitOpenHeight < normal.0 + 220,
-                  settingsOpenHeight < normal.0 + 280 else {
+                  settingsOpenHeight < normal.0 + 320 else {
                 fputs("FAIL: disclosure must grow the existing card: normal=\(normal.0), limit=\(limitOpenHeight), settings=\(settingsOpenHeight)\n", stderr)
                 exit(1)
             }
-            guard (345...475).contains(normal.0) else {
+            guard (300...440).contains(normal.0) else {
                 fputs("FAIL: Preview 7 flow panel height unexpected: \(normal.0)\n", stderr)
                 exit(1)
             }
@@ -120,13 +121,13 @@ struct FeedbackLayoutTests {
                 return cardHost.fittingSize.height
             }
             let settingsHost = NSHostingView(rootView: ContentView(manager: manager)
-                .settingsControlsForTesting.frame(width: 298)
+                .settingsControlsForTesting.frame(width: 324)
                 .environment(\.colorScheme, .dark))
             settingsHost.layoutSubtreeIfNeeded()
             let diagramCardHeight = measuredCardHeight()
             let compactSettingsHeight = settingsHost.fittingSize.height
             guard (155...250).contains(diagramCardHeight),
-                  (125...220).contains(compactSettingsHeight) else {
+                  (145...285).contains(compactSettingsHeight) else {
                 fputs("FAIL: diagram or settings overflow in \(language.rawValue): card=\(diagramCardHeight), settings=\(compactSettingsHeight)\n", stderr)
                 exit(1)
             }
@@ -165,13 +166,30 @@ struct FeedbackLayoutTests {
                 .init(percent: 90, isCharging: false, isFullyCharged: false,
                       isACConnected: nil)
             ]
-            for snapshot in powerScenarios {
+            for (scenarioIndex, snapshot) in powerScenarios.enumerated() {
                 let scenario = MauLeafPowerFlow(snapshot: snapshot)
                 for scheme in [ColorScheme.dark, .light] {
                     let view = NSHostingView(rootView:
                         MauLeafPowerFlowView(flow: scenario, language: language)
                             .frame(width: 328).environment(\.colorScheme, scheme))
                     view.layoutSubtreeIfNeeded()
+                    // Save the actual SwiftUI graph with contrasting backgrounds.
+                    for (backgroundName, background) in [("white", Color.white), ("black", Color.black), ("gray", Color.gray)] {
+                        let renderer = ImageRenderer(content:
+                            MauLeafPowerFlowView(flow: scenario, language: language)
+                                .frame(width: 328)
+                                .background(background)
+                                .environment(\.colorScheme, scheme))
+                        renderer.scale = 2
+                        guard let image = renderer.nsImage,
+                              let tiff = image.tiffRepresentation,
+                              let bitmap = NSBitmapImageRep(data: tiff),
+                              let png = bitmap.representation(using: .png, properties: [:]) else {
+                            fatalError("Power flow snapshot failed")
+                        }
+                        let name = "flow-\(language.rawValue)-\(scheme)-\(scenario.mode)-\(backgroundName)-\(scenarioIndex).png"
+                        try png.write(to: renderOutput.appendingPathComponent(name))
+                    }
                     let bounds = view.fittingSize
                     guard abs(bounds.width - 328) < 1.5,
                           (105...210).contains(bounds.height) else {

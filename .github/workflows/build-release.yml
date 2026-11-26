@@ -2,7 +2,7 @@ name: Build & Release
 
 on:
   push:
-    branches: [main]
+    branches: [main, 'refactor/v1.2.0']
     tags: ['v*']
   pull_request:
   workflow_dispatch:
@@ -33,6 +33,12 @@ jobs:
           ref: ${{ inputs.release_tag || github.ref }}
       - name: Run tests
         run: bash tests/run.sh
+      - name: Upload rendered UI verification images
+        uses: actions/upload-artifact@v4
+        with:
+          name: ui-verification
+          path: build/ui-verification/*.png
+          if-no-files-found: error
 
 
   # Exercise the exact Apple Silicon packaging path before merging.
@@ -79,7 +85,7 @@ jobs:
 
   prepare:
     if: >-
-      (github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')))
+      (github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/refactor/v1.2.0' || startsWith(github.ref, 'refs/tags/v')))
       || (github.event_name == 'workflow_dispatch' && (inputs.release_tag != '' || inputs.preview_tag != ''))
     needs: test
     runs-on: ubuntu-latest
@@ -146,6 +152,16 @@ jobs:
                 CREATE_TAG=true
               fi
             fi
+          elif [[ "$EVENT_NAME" == "push" && "$GITHUB_REF_VALUE" == "refs/heads/refactor/v1.2.0" ]]; then
+            # Explicitly scoped maintenance preview; never publish a stable tag from this branch.
+            [[ "$(tr -d '[:space:]' < VERSION)" == "1.2.0" ]] || exit 1
+            [[ -s docs/releases/v1.2.0-preview.1.md ]] || exit 1
+            RELEASE_TAG="v1.2.0-preview.1"
+            if git ls-remote --exit-code --tags origin "refs/tags/$RELEASE_TAG" >/dev/null 2>&1; then
+              echo "Preview tag already exists; refusing to overwrite."
+              exit 0
+            fi
+            CREATE_TAG=true
           elif [[ "$EVENT_NAME" == "workflow_dispatch" && -n "$PREVIEW_TAG" ]]; then
             [[ "$GITHUB_REF_VALUE" == "refs/heads/main" ]] || {
               echo "Create preview tags from main only." >&2
@@ -231,8 +247,8 @@ jobs:
           ref: ${{ needs.prepare.outputs.tag }}
       - uses: actions/download-artifact@v4
         with:
+          name: MauLeaf-arm64
           path: artifacts
-          merge-multiple: true
       - name: Verify release notes and assets
         env:
           RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
@@ -259,8 +275,8 @@ jobs:
           grep -qi 'Apple Silicon' artifacts/RELEASE_NOTES.md
           # Generate version metadata directly from the tagged release sources.
           APP_VERSION="$(tr -d '[:space:]' < VERSION)"
-          HELPER_VERSION="$(sed -nE 's/^[[:space:]]*static let current = "([0-9]+\.[0-9]+\.[0-9]+)"$/\1/p' Sources/FirmwareLimitHelperProtocol.swift)"
-          HELPER_PROTOCOL="$(sed -nE 's/^[[:space:]]*static let current = ([0-9]+)$/\1/p' Sources/FirmwareLimitHelperProtocol.swift)"
+          HELPER_VERSION="$(sed -nE 's/^[[:space:]]*static let current = "([0-9]+\.[0-9]+\.[0-9]+)"$/\1/p' Sources/Helper/FirmwareLimitHelperProtocol.swift)"
+          HELPER_PROTOCOL="$(sed -nE 's/^[[:space:]]*static let current = ([0-9]+)$/\1/p' Sources/Helper/FirmwareLimitHelperProtocol.swift)"
           [[ "$APP_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ && "$HELPER_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ && "$HELPER_PROTOCOL" =~ ^[0-9]+$ ]] || exit 1
           [[ "$RELEASE_LABEL" == "$APP_VERSION" || "$RELEASE_LABEL" == "$APP_VERSION"-preview.* ]] || exit 1
           {
@@ -293,6 +309,15 @@ jobs:
           gh release create "$RELEASE_TAG" artifacts/*.dmg artifacts/SHA256SUMS.txt \
             --verify-tag --title "MauLeaf $RELEASE_TAG" \
             --notes-file artifacts/RELEASE_NOTES.md "${PRE_FLAG[@]}"
+      - name: Verify downloaded release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
+        run: |
+          set -euo pipefail
+          mkdir verified-release
+          gh release download "$RELEASE_TAG" --pattern '*.dmg' --pattern SHA256SUMS.txt --dir verified-release
+          (cd verified-release && sha256sum -c SHA256SUMS.txt)
 
   # Do not prune anything until the stable Release and both assets exist.
   cleanup:

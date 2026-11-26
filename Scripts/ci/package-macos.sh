@@ -1,6 +1,8 @@
 #!/bin/bash
 set -euo pipefail
 cd "$(dirname "$0")/../.."
+MAULEAF_ROOT="$PWD"
+source Scripts/ci/sources.sh
 : "${RELEASE_VERSION:?missing version}"
 : "${TARGET_ARCH:?missing arch}"
 : "${BUILD_NUMBER:?missing build number}"
@@ -49,19 +51,14 @@ write_plist
 
 FLAGS=(-parse-as-library -O -target arm64-apple-macos13.0)
 xcrun swiftc "${FLAGS[@]}" -framework SwiftUI -framework AppKit -framework Combine -framework Foundation -framework IOKit \
-  Sources/MauLeaf.swift Sources/AppLocalization.swift Sources/BatteryStatusReader.swift Sources/FastBatteryReader.swift Sources/LivePowerReader.swift Sources/PowerFlowModel.swift Sources/PowerFlowView.swift Sources/PowerSourceObserver.swift Sources/AboveLimitPowerPolicy.swift Sources/DynamicHoldPolicy.swift Sources/FirmwareLimitCore.swift \
-  Sources/FirmwareLimitReconciliation.swift Sources/SystemFirmwareReader.swift Sources/FirmwareLimitRuntime.swift \
-  Sources/FirmwareLimitHelperProtocol.swift Sources/FirmwareLimitHelperClient.swift \
+  "${MAULEAF_APP_SOURCES[@]}" \
   -o "$APP/Contents/MacOS/MauLeaf"
 
 NATIVE="$APP/Contents/Resources/MauLeafNativeControl"
 mkdir -p "$NATIVE"
 xcrun swiftc -O -parse-as-library -target arm64-apple-macos13.0 \
   -framework IOKit -framework Security \
-  Sources/FirmwareLimitCore.swift Sources/FirmwareLimitReconciliation.swift \
-  Sources/BatteryStatusReader.swift Sources/SystemFirmwareReader.swift Sources/FirmwareLimitRuntime.swift Sources/FirmwareLimitSMCTransport.swift \
-  Sources/FirmwareLimitHelperProtocol.swift Sources/FirmwareLimitHelperService.swift \
-  Sources/FirmwareLimitHelperMain.swift \
+  "${MAULEAF_HELPER_SERVICE_SOURCES[@]}" "$MAULEAF_HELPER_MAIN_SOURCE" \
   -o "$NATIVE/MauLeafFirmwareHelper"
 chmod 755 "$NATIVE/MauLeafFirmwareHelper"
 codesign --force --sign - --identifier com.local.chargecap.firmware-helper "$NATIVE/MauLeafFirmwareHelper"

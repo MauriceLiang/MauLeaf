@@ -4,22 +4,22 @@ on:
   push:
     paths:
       - "Tools/MauLeafUnpluggedRestoreProbe/**"
-      - "Sources/FirmwareLimitCore.swift"
-      - "Sources/FirmwareLimitReconciliation.swift"
-      - "Sources/FirmwareLimitSMCTransport.swift"
-      - "Sources/SystemFirmwareReader.swift"
-      - "Sources/FirmwareLimitRuntime.swift"
-      - "Sources/BatteryStatusReader.swift"
+      - "Sources/Firmware/FirmwareLimitCore.swift"
+      - "Sources/Firmware/FirmwareLimitReconciliation.swift"
+      - "Sources/Firmware/FirmwareLimitSMCTransport.swift"
+      - "Sources/Firmware/SystemFirmwareReader.swift"
+      - "Sources/Firmware/FirmwareLimitRuntime.swift"
+      - "Sources/Power/BatteryStatusReader.swift"
       - ".github/workflows/build-unplugged-restore-probe.yml"
   pull_request:
     paths:
       - "Tools/MauLeafUnpluggedRestoreProbe/**"
-      - "Sources/FirmwareLimitCore.swift"
-      - "Sources/FirmwareLimitReconciliation.swift"
-      - "Sources/FirmwareLimitSMCTransport.swift"
-      - "Sources/SystemFirmwareReader.swift"
-      - "Sources/FirmwareLimitRuntime.swift"
-      - "Sources/BatteryStatusReader.swift"
+      - "Sources/Firmware/FirmwareLimitCore.swift"
+      - "Sources/Firmware/FirmwareLimitReconciliation.swift"
+      - "Sources/Firmware/FirmwareLimitSMCTransport.swift"
+      - "Sources/Firmware/SystemFirmwareReader.swift"
+      - "Sources/Firmware/FirmwareLimitRuntime.swift"
+      - "Sources/Power/BatteryStatusReader.swift"
       - ".github/workflows/build-unplugged-restore-probe.yml"
   workflow_dispatch:
 
@@ -48,7 +48,7 @@ jobs:
           set -euo pipefail
           mkdir -p dist
           swiftc -parse-as-library \
-            Sources/FirmwareLimitCore.swift \
+            Sources/Firmware/FirmwareLimitCore.swift \
             Tools/MauLeafUnpluggedRestoreProbe/UnpluggedRestorePolicy.swift \
             Tools/MauLeafUnpluggedRestoreProbe/Tests/UnpluggedRestorePolicyTests.swift \
             -o /tmp/MauLeafUnpluggedRestorePolicyTests
@@ -60,12 +60,12 @@ jobs:
           swiftc -O -parse-as-library \
             -target arm64-apple-macos15.0 \
             -framework IOKit \
-            Sources/FirmwareLimitCore.swift \
-            Sources/FirmwareLimitReconciliation.swift \
-            Sources/FirmwareLimitSMCTransport.swift \
-            Sources/SystemFirmwareReader.swift \
-            Sources/FirmwareLimitRuntime.swift \
-            Sources/BatteryStatusReader.swift \
+            Sources/Firmware/FirmwareLimitCore.swift \
+            Sources/Firmware/FirmwareLimitReconciliation.swift \
+            Sources/Firmware/FirmwareLimitSMCTransport.swift \
+            Sources/Firmware/SystemFirmwareReader.swift \
+            Sources/Firmware/FirmwareLimitRuntime.swift \
+            Sources/Power/BatteryStatusReader.swift \
             Tools/MauLeafUnpluggedRestoreProbe/UnpluggedRestorePolicy.swift \
             Tools/MauLeafUnpluggedRestoreProbe/MauLeafUnpluggedRestoreProbe.swift \
             -o dist/MauLeafUnpluggedRestoreProbe
@@ -103,12 +103,12 @@ jobs:
           cp Tools/MauLeafUnpluggedRestoreProbe/README.md dist/
           cp Tools/MauLeafUnpluggedRestoreProbe/UnpluggedRestorePolicy.swift dist/
           cp Tools/MauLeafUnpluggedRestoreProbe/MauLeafUnpluggedRestoreProbe.swift dist/
-          cp Sources/FirmwareLimitCore.swift dist/
-          cp Sources/FirmwareLimitSMCTransport.swift dist/
-          cp Sources/FirmwareLimitRuntime.swift dist/
-          cp Sources/SystemFirmwareReader.swift dist/
-          cp Sources/BatteryStatusReader.swift dist/
-          cp Sources/FirmwareLimitReconciliation.swift dist/
+          cp Sources/Firmware/FirmwareLimitCore.swift dist/
+          cp Sources/Firmware/FirmwareLimitSMCTransport.swift dist/
+          cp Sources/Firmware/FirmwareLimitRuntime.swift dist/
+          cp Sources/Firmware/SystemFirmwareReader.swift dist/
+          cp Sources/Power/BatteryStatusReader.swift dist/
+          cp Sources/Firmware/FirmwareLimitReconciliation.swift dist/
           (cd dist && shasum -a 256 MauLeafUnpluggedRestoreProbe > SHA256SUMS.txt)
 
       - name: Publish temporary diagnostic build artifact

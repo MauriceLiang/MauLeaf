@@ -7,6 +7,8 @@ import SwiftUI
 /// The single source of truth for the status text and tint shared by the
 /// expanded power diagram and the collapsed read-only power-status row.
 struct MauLeafPowerStatusBadge: View {
+    @Environment(\.colorScheme) private var colorScheme
+    private var style: PowerFlowStyle { PowerFlowStyle(scheme: colorScheme) }
     let mode: MauLeafPowerFlow.Mode
     let language: AppLanguage
 
@@ -32,7 +34,7 @@ struct MauLeafPowerStatusBadge: View {
     var body: some View {
         HStack(spacing: 5) {
             Circle()
-                .fill(Self.tint(for: mode))
+                .fill(style.status(mode))
                 .frame(width: 6, height: 6)
                 .accessibilityHidden(true)
             Text(Self.title(for: mode, language: language))
@@ -42,7 +44,8 @@ struct MauLeafPowerStatusBadge: View {
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 5)
-        .background(Color.primary.opacity(0.055), in: Capsule())
+        .foregroundStyle(style.primaryText)
+        .background(style.badgeFill, in: Capsule())
         .accessibilityElement(children: .combine)
     }
 }
@@ -69,6 +72,7 @@ struct MauLeafPowerStatusRow: View {
 
 struct MauLeafPowerFlowView: View {
     @Environment(\.colorScheme) private var colorScheme
+    private var style: PowerFlowStyle { PowerFlowStyle(scheme: colorScheme) }
 
     let flow: MauLeafPowerFlow
     let language: AppLanguage
@@ -93,12 +97,12 @@ struct MauLeafPowerFlowView: View {
             }
         }
 
-        var tint: Color {
+        var role: PowerFlowStyle.Role {
             switch self {
-            case .adapter: return .primary
-            case .batterySource: return .orange
-            case .batteryCharge: return .green
-            case .system: return .indigo
+            case .adapter: return .adapter
+            case .batterySource: return .batterySource
+            case .batteryCharge: return .batteryCharge
+            case .system: return .system
             }
         }
     }
@@ -167,6 +171,7 @@ struct MauLeafPowerFlowView: View {
             HStack(spacing: 8) {
                 Text(tr("供电详情", "Power Flow"))
                     .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(style.primaryText)
                 Spacer(minLength: 6)
                 MauLeafPowerStatusBadge(mode: flow.mode, language: language)
             }
@@ -174,7 +179,7 @@ struct MauLeafPowerFlowView: View {
             if flow.mode == .unavailable {
                 Text(tr("暂时无法读取供电数据", "Power data unavailable"))
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(style.secondaryText)
                     .frame(maxWidth: .infinity)
                     .frame(height: 60)
             } else {
@@ -193,8 +198,8 @@ struct MauLeafPowerFlowView: View {
                             ForEach(bands) { band in
                                 bandPath(band)
                                     .fill(LinearGradient(
-                                        colors: [band.color.opacity(0.22),
-                                                 band.color.opacity(0.62)],
+                                        colors: [band.color.opacity(style.bandStartOpacity),
+                                                 band.color.opacity(style.bandEndOpacity)],
                                         startPoint: .leading,
                                         endPoint: .trailing
                                     ))
@@ -277,7 +282,7 @@ struct MauLeafPowerFlowView: View {
             return [Band(id: 0, start: CGPoint(x: startX, y: left[0].midY),
                          end: CGPoint(x: endX, y: right[0].midY),
                          startThickness: 22, endThickness: 22,
-                         color: sources[0].kind == .batterySource ? .orange : .indigo)]
+                         color: style.band(sources[0].kind == .batterySource ? .batterySource : .system))]
         }
 
         // Adapter -> system + battery charging.
@@ -296,7 +301,7 @@ struct MauLeafPowerFlowView: View {
                             end: CGPoint(x: endX, y: right[index].midY),
                             startThickness: thickness,
                             endThickness: min(thickness, right[index].height - 8),
-                            color: destinations[index].kind.tint)
+                            color: style.band(destinations[index].kind.role))
             }
         }
 
@@ -317,7 +322,7 @@ struct MauLeafPowerFlowView: View {
                             end: end,
                             startThickness: min(thickness, left[index].height - 8),
                             endThickness: thickness,
-                            color: sources[index].kind == .adapter ? .indigo : .orange)
+                            color: style.band(sources[index].kind == .adapter ? .system : .batterySource))
             }
         }
         return []
@@ -348,21 +353,15 @@ struct MauLeafPowerFlowView: View {
 
     private func node(_ metric: Metric, isSource: Bool, height: CGFloat) -> some View {
         let compact = height < 39
-        let adapter = metric.kind == .adapter
-        let silver = Color(red: 0.66, green: 0.74, blue: 0.88)
-        let fill = adapter
-            ? silver.opacity(colorScheme == .dark ? 0.16 : 0.15)
-            : metric.kind.tint.opacity(colorScheme == .dark ? 0.13 : 0.09)
-        let rim = adapter
-            ? silver.opacity(colorScheme == .dark ? 0.32 : 0.27)
-            : metric.kind.tint.opacity(colorScheme == .dark ? 0.30 : 0.25)
+        let fill = style.fill(metric.kind.role)
+        let rim = style.rim(metric.kind.role)
 
         return Group {
             if isSource && !compact {
                 VStack(spacing: 3) {
                     Image(systemName: metric.kind.symbol)
                         .font(.system(size: 15, weight: .medium))
-                        .foregroundStyle(metric.kind.tint)
+                        .foregroundStyle(style.icon(metric.kind.role))
                     Text(MauLeafPowerFlow.display(metric.watts))
                         .font(.system(size: 12, weight: .semibold, design: .rounded))
                         .monospacedDigit()
@@ -370,7 +369,7 @@ struct MauLeafPowerFlowView: View {
                         .minimumScaleFactor(0.72)
                     Text(metric.label)
                         .font(.system(size: 9))
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(style.secondaryText)
                         .lineLimit(1)
                         .minimumScaleFactor(0.8)
                 }
@@ -378,7 +377,7 @@ struct MauLeafPowerFlowView: View {
                 HStack(spacing: 3) {
                     Image(systemName: metric.kind.symbol)
                         .font(.system(size: 10))
-                        .foregroundStyle(metric.kind.tint)
+                        .foregroundStyle(style.icon(metric.kind.role))
                     Text(MauLeafPowerFlow.display(metric.watts))
                         .font(.system(size: 10, weight: .medium, design: .rounded))
                         .monospacedDigit()
@@ -390,7 +389,7 @@ struct MauLeafPowerFlowView: View {
                     HStack(spacing: 5) {
                         Image(systemName: metric.kind.symbol)
                             .font(.system(size: 12))
-                            .foregroundStyle(metric.kind.tint)
+                            .foregroundStyle(style.icon(metric.kind.role))
                         Text(MauLeafPowerFlow.display(metric.watts))
                             .font(.system(size: 12, weight: .semibold, design: .rounded))
                             .monospacedDigit()
@@ -399,12 +398,13 @@ struct MauLeafPowerFlowView: View {
                     }
                     Text(metric.label)
                         .font(.system(size: 10))
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(style.secondaryText)
                         .lineLimit(1)
                         .minimumScaleFactor(0.8)
                 }
             }
         }
+        .foregroundStyle(style.primaryText)
         .padding(.horizontal, compact ? 5 : 6)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(RoundedRectangle(cornerRadius: cornerRadius).fill(fill))

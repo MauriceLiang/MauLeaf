@@ -16,6 +16,13 @@ struct LocalizationTests {
         let suite = "MauLeafLocalizationTests-\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suite)!
         defer { defaults.removePersistentDomain(forName: suite) }
+        check(AppAppearance.saved(in: defaults) == .system, "appearance defaults to system")
+        for appearance in AppAppearance.allCases {
+            appearance.save(in: defaults)
+            check(AppAppearance.saved(in: defaults) == appearance, "appearance preference round-trips")
+        }
+        defaults.set("invalid", forKey: AppAppearance.preferenceKey)
+        check(AppAppearance.saved(in: defaults) == .system, "unknown appearance follows system")
         check(AppLanguage.saved(in: defaults) == .simplifiedChinese, "existing users keep Chinese by default")
         defaults.set("invalid", forKey: AppLanguage.preferenceKey)
         check(AppLanguage.saved(in: defaults) == .simplifiedChinese, "invalid preference falls back to Chinese")
@@ -49,10 +56,14 @@ struct LocalizationTests {
         // Audit every static, Chinese-keyed visible settings label and
         // manager.text(...) call so missing new English keys fail CI instead
         // of silently falling back to Chinese in the English popover.
-        let appSourceURL = URL(fileURLWithPath: #filePath)
+        let sourceRoot = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent().deletingLastPathComponent()
-            .appendingPathComponent("Sources/MauLeaf.swift")
-        let appSource = try String(contentsOf: appSourceURL, encoding: .utf8)
+            .appendingPathComponent("Sources")
+        let appSource = try ["App", "MenuBar", "Views", "Charging"].flatMap { directory -> [URL] in
+            let root = sourceRoot.appendingPathComponent(directory)
+            return (FileManager.default.enumerator(at: root, includingPropertiesForKeys: nil)?
+                .allObjects as? [URL] ?? []).filter { $0.pathExtension == "swift" }
+        }.map { try String(contentsOf: $0, encoding: .utf8) }.joined(separator: "\n")
         let staticUIKeyPattern = try NSRegularExpression(
             pattern: #"(?:settingsLabel|manager\.text)\("([^"\\]+)"\)"#
         )

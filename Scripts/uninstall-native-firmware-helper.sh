@@ -20,6 +20,7 @@ LEGACY_RESTORE="$SUPPORT_DIR/legacy-restore.json"
 DEFERRED_UNINSTALL="$SUPPORT_DIR/deferred-uninstall.pending"
 DEFERRED_SCRIPT="$SUPPORT_DIR/complete-deferred-uninstall.sh"
 BACKGROUND_RECOVERY="$SUPPORT_DIR/background-recovery.pending"
+LED_RECOVERY="$SUPPORT_DIR/magsafe-led.pending"
 
 if [[ "$EUID" -ne 0 ]]; then
   echo "请使用 sudo 运行此脚本。" >&2
@@ -111,6 +112,12 @@ fi
 # AppleSMC, verify bfF0 is inactive and all durable restore tasks are gone.
 if ! "$TARGET" --verify-clean-and-inactive; then
   echo "恢复后二次校验失败；保留所有组件供恢复使用。" >&2
+  /bin/launchctl bootstrap system "$PLIST_TARGET" >/dev/null 2>&1 || true
+  exit 6
+fi
+
+if [[ -e "$LED_RECOVERY" ]]; then
+  echo "MagSafe 灯光控制权尚未交还；保留恢复服务。" >&2
   /bin/launchctl bootstrap system "$PLIST_TARGET" >/dev/null 2>&1 || true
   exit 6
 fi

@@ -36,6 +36,9 @@ MAULEAF_HELPER_SERVICE_SOURCES=(
     "$MAULEAF_ROOT/Sources/Firmware/SystemFirmwareReader.swift"
     "$MAULEAF_ROOT/Sources/Firmware/FirmwareLimitRuntime.swift"
     "$MAULEAF_ROOT/Sources/Firmware/FirmwareLimitSMCTransport.swift"
+    "$MAULEAF_ROOT/Sources/Firmware/MagSafeLEDController.swift"
+    "$MAULEAF_ROOT/Sources/Helper/MagSafeLEDPolicy.swift"
+    "$MAULEAF_ROOT/Sources/Helper/MagSafeLEDObservationReader.swift"
     "$MAULEAF_ROOT/Sources/Helper/FirmwareLimitHelperProtocol.swift"
     "$MAULEAF_ROOT/Sources/Helper/FirmwareLimitHelperService.swift"
 )

@@ -36,6 +36,7 @@ private final class HelperFakeTransport: FirmwareLimitTransport {
 @main
 private enum FirmwareLimitHelperServiceTests {
     static func main() throws {
+        try MagSafeLEDTests.run()
         precondition(
             SystemFirmwareReader.decode("mBoot-20457.41.3") == "mBoot-20457.41.3",
             "firmware version strings are preserved"

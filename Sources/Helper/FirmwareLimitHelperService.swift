@@ -17,6 +17,8 @@ private struct FirmwareReconnectBaseline: Codable {
 /// transport; every write is guarded and verified inside this root process.
 final class FirmwareLimitHelperService: NSObject, FirmwareLimitHelperProtocol {
     private let controller: FirmwareLimitController
+    private let magSafeLED: MagSafeLEDController?
+    private let magSafeObservation: () -> MagSafeLEDObservation
     private let identityProvider: () -> FirmwareLimitDeviceIdentity
     private let isOnACPower: () -> Bool
     private let isAdministrator: () -> Bool
@@ -66,9 +68,14 @@ final class FirmwareLimitHelperService: NSObject, FirmwareLimitHelperProtocol {
         deferredUninstallScriptURL: URL = URL(fileURLWithPath: "/Library/Application Support/MauLeaf/complete-deferred-uninstall.sh"),
         bootSessionProvider: @escaping () -> String? = FirmwareLimitRuntime.bootSessionID,
         now: @escaping () -> Date = Date.init,
-        monitorEnabled: Bool = true
+        monitorEnabled: Bool = true,
+        ledTransport: MagSafeLEDTransport? = nil,
+        ledObservation: @escaping () -> MagSafeLEDObservation = MagSafeLEDObservationReader.read
     ) {
         controller = FirmwareLimitController(transport: transport)
+        let led = ledTransport ?? (transport as? AppleSMCFirmwareLimitTransport)
+        self.magSafeLED = led.map { MagSafeLEDController(transport: $0, marker: originalStateURL.deletingLastPathComponent().appendingPathComponent("magsafe-led.pending")) }
+        self.magSafeObservation = ledObservation
         self.identityProvider = identityProvider
         self.isOnACPower = isOnACPower
         self.isAdministrator = isAdministrator
@@ -143,6 +150,7 @@ final class FirmwareLimitHelperService: NSObject, FirmwareLimitHelperProtocol {
             || legacyRestoreRequest != nil
             || FileManager.default.fileExists(atPath: deferredUninstallURL.path)
             || FileManager.default.fileExists(atPath: quitRecoveryURL.path)
+            || magSafeLED?.hasMarker == true
     }
 
     /// Version discovery is independent of SMC reads and recovery-file validity.
@@ -159,14 +167,63 @@ final class FirmwareLimitHelperService: NSObject, FirmwareLimitHelperProtocol {
     func readState(withReply reply: @escaping (NSData?, NSString?) -> Void) {
         do {
             guard originalSnapshotLoadError == nil else {
+                try withHardwareWatchdog { releaseMagSafeLEDLocked() }
                 throw FirmwareLimitCoreError.invalidOriginalSnapshot
             }
-            let state = try withHardwareWatchdog { try readStateForDisplay() }
+            let state = try withHardwareWatchdog {
+                do {
+                    let state = try readStateForDisplay()
+                    synchronizeMagSafeLEDLocked(state)
+                    return state
+                } catch {
+                    releaseMagSafeLEDLocked()
+                    throw error
+                }
+            }
             let response = stateResponse(state)
             reply(try JSONEncoder().encode(response) as NSData, nil)
         } catch {
             reply(nil, error.localizedDescription as NSString)
         }
+    }
+
+    private var magSafeWriteAuthorized: Bool {
+        isAdministrator() && FirmwareLimitWritePermit.targetBlockReason(identity: identityProvider()) == nil
+    }
+
+    private func synchronizeMagSafeLEDLocked(_ state: FirmwareLimitState) {
+        guard let led = magSafeLED else { return }
+        stateLock.lock()
+        let snapshot = originalStateSnapshot
+        let noJob = pendingJob == nil && legacyRestoreRequest == nil
+        stateLock.unlock()
+        let owns = state.isActive && state.isValid && noJob
+            && snapshot?.isValid == true && snapshot?.restoreRequested == false
+            && snapshot?.deviceIdentity == identityProvider()
+            && originalSnapshotLoadError == nil && legacyRestoreLoadError == nil
+            && !FileManager.default.fileExists(atPath: quitRecoveryURL.path)
+            && !FileManager.default.fileExists(atPath: deferredUninstallURL.path)
+        guard owns || led.hasMarker else { return }
+        if owns {
+            led.synchronize(state: state, observation: magSafeObservation(),
+                            ownsChargeLimit: true, authorized: magSafeWriteAuthorized)
+        } else {
+            led.restoreAutomatic(authorized: magSafeWriteAuthorized)
+        }
+        if led.needsRelease { startMonitoring() }
+    }
+
+    private func releaseMagSafeLEDLocked() {
+        guard let led = magSafeLED, led.hasMarker else { return }
+        led.restoreAutomatic(authorized: magSafeWriteAuthorized)
+        if led.needsRelease { startMonitoring() }
+    }
+
+    // The existing idle exit handles abandoned XPC sessions without creating
+    // a new process or keeping a timer alive during ordinary limit holding.
+    func releaseMagSafeBeforeIdleExit() {
+        guard magSafeLED?.hasMarker == true else { return }
+        try? withHardwareWatchdog { releaseMagSafeLEDLocked() }
     }
 
     /// Only one invalid hardware shape (bfF0=active, upper/lower=0/0)
@@ -208,12 +265,14 @@ final class FirmwareLimitHelperService: NSObject, FirmwareLimitHelperProtocol {
                     let state = try controller.configure(request, permit: permit, preflight: { [self] in
                         _ = try writePermit(confirmed: confirmed)
                     })
+                    synchronizeMagSafeLEDLocked(state)
                     return FirmwareLimitHelperOperationResponse(
                         state: stateResponse(state),
                         oneTimePending: false,
                         message: "The original firmware state was saved before enabling MauLeaf. The requested registers were written and read back; actual charging behavior still requires hardware verification."
                     )
                 } catch {
+                    releaseMagSafeLEDLocked()
                     do {
                         try deferZeroRestoreOnBattery(snapshot)
                         let restorePermit = try writeRestorePermit(for: snapshot)
@@ -269,6 +328,7 @@ final class FirmwareLimitHelperService: NSObject, FirmwareLimitHelperProtocol {
                 do {
                     let state = try controller.deactivate(permit: permit)
                     setPendingJob(job)
+                    releaseMagSafeLEDLocked()
                     startMonitoring()
                     return FirmwareLimitHelperOperationResponse(
                         state: stateResponse(state),
@@ -415,6 +475,9 @@ final class FirmwareLimitHelperService: NSObject, FirmwareLimitHelperProtocol {
     private func processQuitRecoveryLocked() throws {
         let remove = try readQuitRecoveryPolicy()
         let restored = try restoreOriginalStateLocked()
+        guard magSafeLED?.hasMarker != true else {
+            throw FirmwareLimitCoreError.transportFailure("MagSafe automatic-control handoff remains pending; preserving recovery service.")
+        }
         guard !restored.state.active, !restored.state.hasOriginalStateSnapshot,
               !restored.state.hasReconnectBaseline, !restored.oneTimePending,
               !FileManager.default.fileExists(atPath: originalStateURL.path),
@@ -456,6 +519,7 @@ final class FirmwareLimitHelperService: NSObject, FirmwareLimitHelperProtocol {
         guard originalSnapshotLoadError == nil,
               legacyRestoreLoadError == nil,
               !hasSnapshot, !hasLegacy, !hasJob,
+              magSafeLED?.hasMarker != true,
               !FileManager.default.fileExists(atPath: originalStateURL.path),
               !FileManager.default.fileExists(atPath: legacyRestoreURL.path),
               !FileManager.default.fileExists(atPath: restoreRequestURL.path),
@@ -577,6 +641,7 @@ final class FirmwareLimitHelperService: NSObject, FirmwareLimitHelperProtocol {
     }
 
     private func restoreOriginalStateLocked(retainReconnectBaseline: Bool = false) throws -> FirmwareLimitHelperOperationResponse {
+        defer { releaseMagSafeLEDLocked() }
         guard originalSnapshotLoadError == nil else {
             throw FirmwareLimitCoreError.invalidOriginalSnapshot
         }
@@ -920,6 +985,9 @@ final class FirmwareLimitHelperService: NSObject, FirmwareLimitHelperProtocol {
     }
 
     private func monitorOneTimeChargeLocked() {
+        // Retry only an outstanding LED handoff using the existing recovery
+        // timer. Ordinary green holding relies on existing App status reads.
+        if magSafeLED?.needsRelease == true { releaseMagSafeLEDLocked() }
         if FileManager.default.fileExists(atPath: quitRecoveryURL.path) {
             do { try processQuitRecoveryLocked() }
             catch { NSLog("MauLeaf quit recovery will retry: %@", error.localizedDescription) }
@@ -1100,7 +1168,7 @@ final class FirmwareLimitHelperService: NSObject, FirmwareLimitHelperProtocol {
             && pendingJob == nil
             && !deferredUninstallLaunched
         stateLock.unlock()
-        guard idle,
+        guard idle, magSafeLED?.hasMarker != true,
               !FileManager.default.fileExists(atPath: originalStateURL.path),
               !FileManager.default.fileExists(atPath: legacyRestoreURL.path),
               !FileManager.default.fileExists(atPath: jobURL.path),
@@ -1168,7 +1236,8 @@ final class FirmwareLimitHelperService: NSObject, FirmwareLimitHelperProtocol {
         guard (pendingJob != nil || originalStateSnapshot?.restoreRequested == true
                || legacyRestoreRequest != nil
                || FileManager.default.fileExists(atPath: deferredUninstallURL.path)
-               || FileManager.default.fileExists(atPath: quitRecoveryURL.path)),
+               || FileManager.default.fileExists(atPath: quitRecoveryURL.path)
+               || magSafeLED?.needsRelease == true),
               monitorTimer == nil else {
             stateLock.unlock()
             return
@@ -1188,6 +1257,7 @@ final class FirmwareLimitHelperService: NSObject, FirmwareLimitHelperProtocol {
               legacyRestoreRequest == nil,
               !FileManager.default.fileExists(atPath: deferredUninstallURL.path),
               !FileManager.default.fileExists(atPath: quitRecoveryURL.path),
+              magSafeLED?.needsRelease != true,
               let timer = monitorTimer else {
             stateLock.unlock()
             return
@@ -1301,6 +1371,7 @@ final class FirmwareLimitHelperListener: NSObject, NSXPCListenerDelegate {
             let idle = self.activeConnections == 0 && self.idleGeneration == generation
             self.stateLock.unlock()
             if idle {
+                self.service.releaseMagSafeBeforeIdleExit()
                 if self.service.hasPendingBackgroundRecovery {
                     self.scheduleIdleExit()
                 } else {

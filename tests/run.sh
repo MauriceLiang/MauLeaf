@@ -38,7 +38,7 @@ swiftc -parse-as-library "$ROOT/Sources/Shared/AppLocalization.swift" "$ROOT/Sou
 if [[ "$(uname -s)" == Darwin ]]; then
     swiftc -parse-as-library -framework IOKit -framework Security \
         "${MAULEAF_HELPER_SERVICE_SOURCES[@]}" \
-        "$ROOT/tests/FirmwareLimitHelperServiceTests.swift" \
+        "$ROOT/tests/FirmwareLimitHelperServiceTests.swift" "$ROOT/tests/MagSafeLEDTests.swift" \
         -o "$TMP/firmwarehelpertests"
     "$TMP/firmwarehelpertests"
 
@@ -72,6 +72,7 @@ bash "$ROOT/tests/HelperReplacementScriptTests.sh" "$ROOT"
 
 swiftc -frontend -parse "${MAULEAF_APP_SOURCES[@]}" \
     "$ROOT/Sources/Firmware/FirmwareLimitSMCTransport.swift" \
+    "$ROOT/Sources/Firmware/MagSafeLEDController.swift" "$ROOT/Sources/Helper/MagSafeLEDPolicy.swift" "$ROOT/Sources/Helper/MagSafeLEDObservationReader.swift" \
     "$ROOT/Sources/Helper/FirmwareLimitHelperService.swift" "$MAULEAF_HELPER_MAIN_SOURCE"
 
 if grep -RniE 'BattCommand|BattStatus|invokeBatt|locateBatt|batt-version|BATT-LICENSE|/usr/local/bin/batt|batt-v0\\.8' \

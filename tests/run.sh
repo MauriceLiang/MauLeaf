@@ -179,12 +179,15 @@ fi
 grep -Fq 'Toggle(isOn: $manager.showPowerFlow)' <<< "$POPOVER_SOURCE"
 grep -Fq 'Toggle(isOn: $manager.removeComponentsOnQuit)' <<< "$POPOVER_SOURCE"
 grep -Fq 'Picker("", selection: $manager.language)' <<< "$POPOVER_SOURCE"
-grep -Fq 'Picker("", selection: $manager.appearance)' <<< "$POPOVER_SOURCE"
+grep -Fq 'get: { manager.appearance == .light }' <<< "$POPOVER_SOURCE"
+grep -Fq 'set: { manager.appearance = $0 ? .light : .dark }' <<< "$POPOVER_SOURCE"
+grep -Fq 'settingsLabel("浅色模式")' <<< "$POPOVER_SOURCE"
+grep -Fq 'AppTheme.chargeGreen(in: colorScheme)' <<< "$POPOVER_SOURCE"
 grep -Fq 'set: { manager.setDynamicHoldEnabled($0) }' <<< "$POPOVER_SOURCE"
 grep -Fq '.disabled(manager.isDynamicHoldSwitchLocked)' <<< "$POPOVER_SOURCE"
 grep -Fq 'settingsLabel("显示供电详情")' <<< "$POPOVER_SOURCE"
-[[ "$(grep -Fc '.toggleStyle(.switch)' <<< "$POPOVER_SOURCE")" -eq 3 ]]
-[[ "$(grep -Fc '.pickerStyle(.segmented)' <<< "$POPOVER_SOURCE")" -eq 1 ]]
+[[ "$(grep -Fc '.toggleStyle(.switch)' <<< "$POPOVER_SOURCE")" -eq 4 ]]
+[[ "$(grep -Fc '.pickerStyle(.segmented)' <<< "$POPOVER_SOURCE")" -eq 0 ]]
 [[ "$(grep -Fc '.pickerStyle(.menu)' <<< "$POPOVER_SOURCE")" -eq 1 ]]
 if grep -Eq 'powerFlowRefreshSeconds|供电刷新间隔' <<< "$POPOVER_SOURCE"; then
     echo "Manual power refresh controls must not return" >&2

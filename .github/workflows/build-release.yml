@@ -155,8 +155,8 @@ jobs:
           elif [[ "$EVENT_NAME" == "push" && "$GITHUB_REF_VALUE" == "refs/heads/refactor/v1.2.0" ]]; then
             # Explicitly scoped maintenance preview; never publish a stable tag from this branch.
             [[ "$(tr -d '[:space:]' < VERSION)" == "1.2.0" ]] || exit 1
-            [[ -s docs/releases/v1.2.0-preview.1.md ]] || exit 1
-            RELEASE_TAG="v1.2.0-preview.1"
+            [[ -s docs/releases/v1.2.0-preview.2.md ]] || exit 1
+            RELEASE_TAG="v1.2.0-preview.2"
             if git ls-remote --exit-code --tags origin "refs/tags/$RELEASE_TAG" >/dev/null 2>&1; then
               echo "Preview tag already exists; refusing to overwrite."
               exit 0

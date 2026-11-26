@@ -16,13 +16,16 @@ struct LocalizationTests {
         let suite = "MauLeafLocalizationTests-\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suite)!
         defer { defaults.removePersistentDomain(forName: suite) }
-        check(AppAppearance.saved(in: defaults) == .system, "appearance defaults to system")
+        check(AppAppearance.saved(in: defaults) == .dark, "appearance defaults to dark")
+        check(Set(AppAppearance.allCases) == Set([.dark, .light]), "only explicit light and dark choices")
         for appearance in AppAppearance.allCases {
             appearance.save(in: defaults)
             check(AppAppearance.saved(in: defaults) == appearance, "appearance preference round-trips")
         }
         defaults.set("invalid", forKey: AppAppearance.preferenceKey)
-        check(AppAppearance.saved(in: defaults) == .system, "unknown appearance follows system")
+        check(AppAppearance.saved(in: defaults) == .dark, "unknown appearance defaults to dark")
+        defaults.set("system", forKey: AppAppearance.preferenceKey)
+        check(AppAppearance.saved(in: defaults) == .dark, "legacy System preference migrates to dark")
         check(AppLanguage.saved(in: defaults) == .simplifiedChinese, "existing users keep Chinese by default")
         defaults.set("invalid", forKey: AppLanguage.preferenceKey)
         check(AppLanguage.saved(in: defaults) == .simplifiedChinese, "invalid preference falls back to Chinese")

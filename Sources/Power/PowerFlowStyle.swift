@@ -56,7 +56,7 @@ struct PowerFlowStyle {
     func status(_ mode: MauLeafPowerFlow.Mode) -> Color {
         switch mode {
         case .battery, .assisted: return icon(.batterySource)
-        case .adapter, .charging: return color(dark ? 0x30D158 : 0x187B36)
+        case .adapter, .charging: return color(dark ? 0x30D158 : 0x166534)
         case .unavailable: return secondaryText
         }
     }

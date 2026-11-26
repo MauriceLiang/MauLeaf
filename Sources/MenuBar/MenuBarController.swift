@@ -131,7 +131,6 @@ final class MauLeafMenuController: NSObject {
     private func applyAppearance(_ appearance: AppAppearance) {
         let native: NSAppearance?
         switch appearance {
-        case .system: native = nil
         case .light: native = NSAppearance(named: .aqua)
         case .dark: native = NSAppearance(named: .darkAqua)
         }

@@ -2,22 +2,23 @@ import SwiftUI
 
 struct SettingsView: View {
     @ObservedObject var manager: ChargeManager
+    @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 8) {
-                settingsLabel("外观")
+                settingsLabel("浅色模式")
                 Spacer(minLength: 8)
-                Picker("", selection: $manager.appearance) {
-                    ForEach(AppAppearance.allCases, id: \.self) { appearance in
-                        Text(appearance.title(in: manager.language)).tag(appearance)
-                    }
-                }
-                .pickerStyle(.segmented)
+                Toggle(isOn: Binding(
+                    get: { manager.appearance == .light },
+                    set: { manager.appearance = $0 ? .light : .dark }
+                )) { EmptyView() }
+                .toggleStyle(.switch)
                 .labelsHidden()
                 .controlSize(.small)
-                .frame(width: 176)
-                .accessibilityLabel(manager.text("外观"))
+                .tint(AppTheme.chargeGreen(in: colorScheme))
+                .accessibilityLabel(manager.text("浅色模式"))
+                .help(manager.text("开启使用浅色外观，关闭使用深色外观。"))
             }
             .frame(minHeight: 24)
 
@@ -28,7 +29,7 @@ struct SettingsView: View {
                     .toggleStyle(.switch)
                     .labelsHidden()
                     .controlSize(.small)
-                    .tint(.green)
+                    .tint(AppTheme.chargeGreen(in: colorScheme))
                     .accessibilityLabel(manager.text("显示供电详情"))
                     .help(manager.text("关闭后保留供电状态，仅隐藏供电流向图"))
             }
@@ -45,7 +46,7 @@ struct SettingsView: View {
                     .toggleStyle(.switch)
                     .labelsHidden()
                     .controlSize(.small)
-                    .tint(.green)
+                    .tint(AppTheme.chargeGreen(in: colorScheme))
                     .disabled(manager.isDynamicHoldSwitchLocked)
                     .accessibilityLabel(manager.text("动态保电"))
                     .help(manager.text(manager.isDynamicHoldSwitchLocked
@@ -80,7 +81,7 @@ struct SettingsView: View {
                         .toggleStyle(.switch)
                         .labelsHidden()
                         .controlSize(.small)
-                        .tint(.green)
+                        .tint(AppTheme.chargeGreen(in: colorScheme))
                         .accessibilityLabel(manager.text("退出时移除组件"))
                         .help(manager.text("开启后每次退出会移除控制组件；关闭则保留。"))
                 }

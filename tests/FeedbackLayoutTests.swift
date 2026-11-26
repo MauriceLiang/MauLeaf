@@ -52,6 +52,12 @@ struct FeedbackLayoutTests {
 
         let renderOutput = URL(fileURLWithPath: CommandLine.arguments[1], isDirectory: true)
         try verifyBatteryRingRendering(outputDirectory: renderOutput)
+        guard manager.appearance == .dark else { fatalError("Default appearance must be dark") }
+        manager.appearance = .light
+        guard AppAppearance.saved() == .light else { fatalError("Light appearance must persist") }
+        manager.appearance = .dark
+        guard AppAppearance.saved() == .dark else { fatalError("Dark appearance must persist") }
+        try verifyLightChargeAccent()
 
         for language in AppLanguage.allCases {
             manager.language = language
@@ -130,6 +136,17 @@ struct FeedbackLayoutTests {
                   (145...285).contains(compactSettingsHeight) else {
                 fputs("FAIL: diagram or settings overflow in \(language.rawValue): card=\(diagramCardHeight), settings=\(compactSettingsHeight)\n", stderr)
                 exit(1)
+            }
+            // Exercise native controls at the real width in both appearances.
+            for scheme in [ColorScheme.dark, .light] {
+                let nativeSettings = NSHostingView(rootView:
+                    ContentView(manager: manager).settingsControlsForTesting
+                        .frame(width: 324).environment(\.colorScheme, scheme))
+                nativeSettings.layoutSubtreeIfNeeded()
+                let size = nativeSettings.fittingSize
+                guard abs(size.width - 324) < 1.5, (145...285).contains(size.height) else {
+                    fatalError("Settings overflow in \(language.rawValue), \(scheme): \(size)")
+                }
             }
             guard manager.showPowerFlow else {
                 fatalError("Preview 7 must display power flow by default.")
@@ -286,6 +303,26 @@ struct FeedbackLayoutTests {
         _ = await manager.prepareForTermination()
         UserDefaults.standard.removeObject(forKey: "nativeFirmwareWriteConfirmed")
         UserDefaults.standard.removeObject(forKey: "showBatteryLevel")
+    }
+
+    @MainActor
+    static func verifyLightChargeAccent() throws {
+        guard let accent = NSColor(AppTheme.chargeGreen(in: .light)).usingColorSpace(.sRGB) else {
+            fatalError("Cannot resolve light charge color")
+        }
+        let rgb = [Double(accent.redComponent), Double(accent.greenComponent), Double(accent.blueComponent)]
+        func luminance(_ values: [Double]) -> Double {
+            let linear = values.map { $0 <= 0.04045 ? $0 / 12.92 : pow(($0 + 0.055) / 1.055, 2.4) }
+            return linear[0] * 0.2126 + linear[1] * 0.7152 + linear[2] * 0.0722
+        }
+        // Check actual foreground against the same 15% green capsule
+        // composite on representative near-white panel backgrounds.
+        for background in [0.90, 0.93, 0.96, 1.0] {
+            let capsule = rgb.map { $0 * 0.15 + background * 0.85 }
+            let contrast = (luminance(capsule) + 0.05) / (luminance(rgb) + 0.05)
+            guard contrast >= 4.5 else { fatalError("Light charge status contrast: \(contrast)") }
+        }
+        print("Light charge accent: PASS (at least 4.5:1 on near-white capsule backgrounds)")
     }
 
     @MainActor

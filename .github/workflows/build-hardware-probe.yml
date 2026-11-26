@@ -4,7 +4,7 @@ on:
   push:
     paths:
       - "Tools/MauLeafHardwareProbe/**"
-      - "Sources/SystemFirmwareReader.swift"
+      - "Sources/Firmware/SystemFirmwareReader.swift"
       - ".github/workflows/build-hardware-probe.yml"
   workflow_dispatch:
 
@@ -35,7 +35,7 @@ jobs:
             -target arm64-apple-macos15.0 \
             -framework IOKit \
             -framework CoreFoundation \
-            Sources/SystemFirmwareReader.swift \
+            Sources/Firmware/SystemFirmwareReader.swift \
             Tools/MauLeafHardwareProbe/MauLeafHardwareProbe.swift \
             -o dist/MauLeafHardwareProbe
           file dist/MauLeafHardwareProbe
@@ -47,7 +47,7 @@ jobs:
           cp Tools/MauLeafHardwareProbe/README.md dist/
           cp Tools/MauLeafHardwareProbe/NOTICE.md dist/
           cp Tools/MauLeafHardwareProbe/MauLeafHardwareProbe.swift dist/
-          cp Sources/SystemFirmwareReader.swift dist/
+          cp Sources/Firmware/SystemFirmwareReader.swift dist/
           shasum -a 256 dist/MauLeafHardwareProbe > dist/SHA256SUMS.txt
 
       - name: Upload build artifact

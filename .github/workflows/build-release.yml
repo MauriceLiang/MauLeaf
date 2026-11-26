@@ -33,6 +33,12 @@ jobs:
           ref: ${{ inputs.release_tag || github.ref }}
       - name: Run tests
         run: bash tests/run.sh
+      - name: Upload rendered UI verification images
+        uses: actions/upload-artifact@v4
+        with:
+          name: ui-verification
+          path: build/ui-verification/*.png
+          if-no-files-found: error
 
 
   # Exercise the exact Apple Silicon packaging path before merging.
@@ -231,8 +237,8 @@ jobs:
           ref: ${{ needs.prepare.outputs.tag }}
       - uses: actions/download-artifact@v4
         with:
+          name: MauLeaf-arm64
           path: artifacts
-          merge-multiple: true
       - name: Verify release notes and assets
         env:
           RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
@@ -259,8 +265,8 @@ jobs:
           grep -qi 'Apple Silicon' artifacts/RELEASE_NOTES.md
           # Generate version metadata directly from the tagged release sources.
           APP_VERSION="$(tr -d '[:space:]' < VERSION)"
-          HELPER_VERSION="$(sed -nE 's/^[[:space:]]*static let current = "([0-9]+\.[0-9]+\.[0-9]+)"$/\1/p' Sources/FirmwareLimitHelperProtocol.swift)"
-          HELPER_PROTOCOL="$(sed -nE 's/^[[:space:]]*static let current = ([0-9]+)$/\1/p' Sources/FirmwareLimitHelperProtocol.swift)"
+          HELPER_VERSION="$(sed -nE 's/^[[:space:]]*static let current = "([0-9]+\.[0-9]+\.[0-9]+)"$/\1/p' Sources/Helper/FirmwareLimitHelperProtocol.swift)"
+          HELPER_PROTOCOL="$(sed -nE 's/^[[:space:]]*static let current = ([0-9]+)$/\1/p' Sources/Helper/FirmwareLimitHelperProtocol.swift)"
           [[ "$APP_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ && "$HELPER_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ && "$HELPER_PROTOCOL" =~ ^[0-9]+$ ]] || exit 1
           [[ "$RELEASE_LABEL" == "$APP_VERSION" || "$RELEASE_LABEL" == "$APP_VERSION"-preview.* ]] || exit 1
           {
@@ -293,6 +299,15 @@ jobs:
           gh release create "$RELEASE_TAG" artifacts/*.dmg artifacts/SHA256SUMS.txt \
             --verify-tag --title "MauLeaf $RELEASE_TAG" \
             --notes-file artifacts/RELEASE_NOTES.md "${PRE_FLAG[@]}"
+      - name: Verify downloaded release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
+        run: |
+          set -euo pipefail
+          mkdir verified-release
+          gh release download "$RELEASE_TAG" --pattern '*.dmg' --pattern SHA256SUMS.txt --dir verified-release
+          (cd verified-release && sha256sum -c SHA256SUMS.txt)
 
   # Do not prune anything until the stable Release and both assets exist.
   cleanup:

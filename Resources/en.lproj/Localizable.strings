@@ -343,3 +343,8 @@
 "退出时将恢复任务交给后台服务，应用无需等待恢复完成。" = "Recovery is handed to the background helper on quit.";
 
 "退出时无法确认后台恢复任务：%@" = "Could not confirm background quit recovery: %@";
+
+"外观" = "Appearance";
+
+"浅色模式" = "Light Mode";
+"开启使用浅色外观，关闭使用深色外观。" = "Turn on for light appearance; turn off for dark appearance.";

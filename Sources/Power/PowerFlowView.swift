@@ -7,8 +7,7 @@ import SwiftUI
 /// The single source of truth for the status text and tint shared by the
 /// expanded power diagram and the collapsed read-only power-status row.
 struct MauLeafPowerStatusBadge: View {
-    @Environment(\.colorScheme) private var colorScheme
-    private var style: PowerFlowStyle { PowerFlowStyle(scheme: colorScheme) }
+    private let style = PowerFlowStyle()
     let mode: MauLeafPowerFlow.Mode
     let language: AppLanguage
 
@@ -71,8 +70,7 @@ struct MauLeafPowerStatusRow: View {
 }
 
 struct MauLeafPowerFlowView: View {
-    @Environment(\.colorScheme) private var colorScheme
-    private var style: PowerFlowStyle { PowerFlowStyle(scheme: colorScheme) }
+    private let style = PowerFlowStyle()
 
     let flow: MauLeafPowerFlow
     let language: AppLanguage

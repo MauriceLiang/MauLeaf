@@ -7,7 +7,6 @@ import QuartzCore
 /// Native menu-bar-only popover. No detached main window or navigation.
 struct ContentView: View {
     @ObservedObject var manager: ChargeManager
-    @Environment(\.colorScheme) private var colorScheme
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var limitExpanded = false
     @State private var settingsExpanded = false
@@ -210,7 +209,7 @@ struct ContentView: View {
         HStack(alignment: .center, spacing: 10) {
             Image(systemName: icon)
                 .font(.system(size: 16, weight: .regular))
-                .foregroundStyle(highlighted ? AppTheme.chargeGreen(in: colorScheme) : Color.secondary)
+                .foregroundStyle(highlighted ? Color.green : Color.secondary)
                 .frame(width: 20)
                 .accessibilityHidden(true)
 
@@ -237,7 +236,7 @@ struct ContentView: View {
                 // and in VoiceOver while the visible value stays compact.
                 Text(manager.text(status))
                     .font(.subheadline.weight(.medium))
-                    .foregroundStyle(highlighted ? AppTheme.chargeGreen(in: colorScheme) : Color.secondary)
+                    .foregroundStyle(highlighted ? Color.green : Color.secondary)
                     .lineLimit(1)
                     .fixedSize(horizontal: true, vertical: false)
                     // Align the trailing edge of this read-only text with the
@@ -259,7 +258,7 @@ struct ContentView: View {
             }
             Text(manager.text(status))
                 .font(.subheadline.weight(.medium))
-                .foregroundStyle(highlighted && !loading ? AppTheme.chargeGreen(in: colorScheme) : Color.primary)
+                .foregroundStyle(highlighted && !loading ? Color.green : Color.primary)
                 .multilineTextAlignment(.trailing)
                 .lineLimit(1)
                 .fixedSize(horizontal: true, vertical: false)
@@ -268,7 +267,7 @@ struct ContentView: View {
         .padding(.horizontal, 12)
         .background(
             highlighted && !loading
-                ? AppTheme.chargeGreen(in: colorScheme).opacity(0.15)
+                ? Color.green.opacity(0.15)
                 : Color.primary.opacity(interactive ? 0.09 : 0.055),
             in: Capsule()
         )

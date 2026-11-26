@@ -10,8 +10,6 @@ MAULEAF_APP_SOURCES=(
     "$MAULEAF_ROOT/Sources/Charging/ChargeOperation.swift"
     "$MAULEAF_ROOT/Sources/Charging/ChargeManager.swift"
     "$MAULEAF_ROOT/Sources/Views/SettingsView.swift"
-    "$MAULEAF_ROOT/Sources/Shared/AppAppearance.swift"
-    "$MAULEAF_ROOT/Sources/Shared/AppTheme.swift"
     "$MAULEAF_ROOT/Sources/Shared/AppLocalization.swift"
     "$MAULEAF_ROOT/Sources/Power/BatteryStatusReader.swift"
     "$MAULEAF_ROOT/Sources/Power/FastBatteryReader.swift"

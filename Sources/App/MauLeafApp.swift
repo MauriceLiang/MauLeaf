@@ -31,6 +31,9 @@ final class MauLeafAppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
+        NSApp.appearance = NSAppearance(named: .darkAqua)
+        // Retire the 1.2 preference without changing any charging settings.
+        UserDefaults.standard.removeObject(forKey: "appAppearance")
         controller = MauLeafMenuController()
     }
 
